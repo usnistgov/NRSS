@@ -1,3 +1,6 @@
 [submodule "cyrsoxs"]
 	path = cyrsoxs
 	url = https://github.com/usnistgov/cyrsoxs.git
+[submodule "PyHyperScattering"]
+	path = PyHyperScattering
+	url = https://github.com/usnistgov/PyHyperScattering.git
