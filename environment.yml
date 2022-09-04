@@ -1,4 +1,4 @@
-name: cyrsoxs
+name: rss
 
 channels:
   - conda-forge
@@ -10,6 +10,4 @@ dependencies:
   - pandas
   - matplotlib
   - scikit-image
-  - hdf5
   - h5py
-  - libconfig
