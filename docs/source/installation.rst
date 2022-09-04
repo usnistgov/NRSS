@@ -216,6 +216,24 @@ Now you can import CyRSoXS in a python script or jupyter notebook:
 
 You should see the following output:
 
+CyRSoXS
+============================================================================
+Size of Real               : 4
+Maximum Number Of Material : 32
+ __________________________________________________________________________________________________
+|                                 Thanks for using Cy-RSoXS                                        |
+|--------------------------------------------------------------------------------------------------|
+|  Copyright          : Iowa State University                                                      |
+|  License            : MIT                                                                        |
+|  Acknowledgement    : ONR MURI                                                                   |
+|  Developed at Iowa State University in collaboration with NIST                                   |
+|  Please cite the following publication :                                                         |
+|  Comments/Questions :                                                                            |
+|          1. Dr. Baskar GanapathySubramanian (baskarg@iastate.edu)                                |
+|          2. Dr. Adrash Krishnamurthy        (adarsh@iastate.edu)                                 |
+ -------------------------------------------------------------------------------------------------- 
+Version   :  1 . 1 . 4 . 0
+Git patch :  d88e168
 
 
 *Optional CMake Flags*
