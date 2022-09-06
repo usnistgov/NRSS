@@ -37,8 +37,13 @@
   </form>
 </div>
         </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
-              <ul>
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
 <li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cyrsoxs.html">CyRSoXS Simulation Components</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pyhyper.html">PyHyperScattering</a></li>
+<li class="toctree-l1"><a class="reference internal" href="utils.html">Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
 </ul>
 
         </div>
@@ -69,11 +74,7 @@
 <h1>Welcome to RSS’s documentation!<a class="headerlink" href="#welcome-to-rss-s-documentation" title="Permalink to this heading"></a></h1>
 <p>The RSoXS Simulation Suite (RSS) is a collection of Python and C++/CUDA tools for creating, simulating, and analyzing Resonant Soft X-ray Scattering (RSoXS). It leverages the <a class="reference external" href="https://github.com/usnistgov/cyrsoxs">CyRSoXS</a> C++/CUDA library for GPU-accelerated simulations, and the <a class="reference external" href="https://github.com/usnistgov/PyHyperScattering">PyHyperScattering</a> library for reducing and analyzing the simulated scattering patterns. For more information on what RSoXS is and how you can possibly apply it in your own research, check out the NIST RSoXS project page at <a class="reference external" href="https://www.nist.gov/programs-projects/resonant-soft-x-ray-scattering-rsoxs">https://www.nist.gov/programs-projects/resonant-soft-x-ray-scattering-rsoxs</a>.</p>
 <div class="toctree-wrapper compound">
-</div>
-</section>
-<section id="contents">
-<h1>Contents<a class="headerlink" href="#contents" title="Permalink to this heading"></a></h1>
-<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="installation.html#hardware-requirements">Hardware Requirements</a></li>
@@ -84,6 +85,22 @@
 </li>
 </ul>
 </li>
+<li class="toctree-l1"><a class="reference internal" href="cyrsoxs.html">CyRSoXS Simulation Components</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="cyrsoxs.html#morphology-file-structure">Morphology File Structure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cyrsoxs.html#vector-morphology-hdf5-structure">Vector Morphology HDF5 Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cyrsoxs.html#euler-morphology-hdf5-structure">Euler Morphology HDF5 Structure</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cyrsoxs.html#material-optical-constant-file-structure">Material Optical Constant File Structure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cyrsoxs.html#config-txt-file-structure">Config.txt File Structure</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="pyhyper.html">PyHyperScattering</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="pyhyper.html#cyrsoxs-loader">CyRSoXS Loader</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="utils.html">Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
 </ul>
 </div>
 </section>
@@ -106,7 +123,7 @@
   <hr/>
 
   <div role="contentinfo">
-    <p>&#169; Copyright Copyright: Official Contribution of the US Government. Not subject to copyright in the United States.</p>
+    <p>&#169; Copyright : Official Contribution of the US Government. Not subject to copyright in the United States.</p>
   </div>
 
   Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a

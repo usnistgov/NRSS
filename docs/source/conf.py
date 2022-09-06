@@ -18,7 +18,7 @@
 # -- Project information -----------------------------------------------------
 
 project = 'RSS'
-copyright = 'Copyright: Official Contribution of the US Government. Not subject to copyright in the United States'
+copyright = ': Official Contribution of the US Government. Not subject to copyright in the United States'
 author = 'Peter Dudenas'
 
 # The full version, including alpha/beta/rc tags

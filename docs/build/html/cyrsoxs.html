@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CyRSoXS Simulation Components &mdash; RSS 0.1 documentation</title>
+      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script src="_static/doctools.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="PyHyperScattering" href="pyhyper.html" />
+    <link rel="prev" title="Installation" href="installation.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="index.html" class="icon icon-home"> RSS
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">CyRSoXS Simulation Components</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#morphology-file-structure">Morphology File Structure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#vector-morphology-hdf5-structure">Vector Morphology HDF5 Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#euler-morphology-hdf5-structure">Euler Morphology HDF5 Structure</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#material-optical-constant-file-structure">Material Optical Constant File Structure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#config-txt-file-structure">Config.txt File Structure</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="pyhyper.html">PyHyperScattering</a></li>
+<li class="toctree-l1"><a class="reference internal" href="utils.html">Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">RSS</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+      <li>CyRSoXS Simulation Components</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/cyrsoxs.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="cyrsoxs-simulation-components">
+<h1>CyRSoXS Simulation Components<a class="headerlink" href="#cyrsoxs-simulation-components" title="Permalink to this heading"></a></h1>
+<p><a class="reference external" href="https://github.com/usnistgov/cyrsoxs">Cy-RSoXS</a> is a voxel-based forward-scattering simulator calculated in the Born Approximation. This page describes the required files and file structure for use with CyRSoXS.</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt><strong>Morphology file</strong></dt><dd><ul>
+<li><p>.hdf5 format</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><strong>Material optical constant files</strong></dt><dd><ul>
+<li><p>Material1.txt, Material2.txt, Material3.txt, etc.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><strong>Configuration file</strong></dt><dd><ul>
+<li><p>config.txt</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+<section id="morphology-file-structure">
+<h2>Morphology File Structure<a class="headerlink" href="#morphology-file-structure" title="Permalink to this heading"></a></h2>
+<p>Cy-RSoXS accepts two different types of morphologies: Vector and Euler. A vector morphology will use a vector to assign the direction and amount of alignment in each voxel for each material. A Euler morphology will use a set of Euler angles to assign the direction of alignment. A separate S parameter is used to denote the amount of alignment in each voxel for each material.</p>
+<p>The two structures below assume a morphology of size [1, 256, 256] where the dimensions are [Z, Y, X], and two materials in the morphology.</p>
+<section id="vector-morphology-hdf5-structure">
+<h3>Vector Morphology HDF5 Structure<a class="headerlink" href="#vector-morphology-hdf5-structure" title="Permalink to this heading"></a></h3>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">Vector_Morphology/</span>
+<span class="go">    Mat_1_alignment/</span>
+<span class="go">        data = alignment vector array of shape [1, 256, 256, 3] and order [Z, Y, X, (XYZ)]</span>
+<span class="go">            dims = [&#39;Z&#39;, &#39;Y&#39;, &#39;X&#39;]</span>
+<span class="go">    Mat_1_unaligned/</span>
+<span class="go">        data = volume fraction array of shape [1, 256, 256] and order [Z, Y, X]</span>
+<span class="go">            dims = [&#39;Z&#39;, &#39;Y&#39;, &#39;X&#39;]</span>
+<span class="go">    Mat_2_alignment/</span>
+<span class="go">        data = alignment vector array of shape [1, 256, 256, 3] and order [Z, Y, X, (XYZ)]</span>
+<span class="go">            dims = [&#39;Z&#39;, &#39;Y&#39;, &#39;X&#39;]</span>
+<span class="go">    Mat_2_unaligned/</span>
+<span class="go">        data = volume fraction array of shape [1, 256, 256] and order [Z, Y, X]</span>
+<span class="go">            dims = [&#39;Z&#39;, &#39;Y&#39;, &#39;X&#39;]</span>
+
+<span class="go">Morphology_Parameters/</span>
+<span class="go">*required*</span>
+<span class="go">    PhysSize/</span>
+<span class="go">        data = size of each voxel edge in nanometers</span>
+<span class="go">    NumMaterial/</span>
+<span class="go">        data = number of materials in morphology (integer)</span>
+<span class="go">*optional*</span>
+<span class="go">    creation_date/</span>
+<span class="go">        data = date and time</span>
+<span class="go">    film_normal/</span>
+<span class="go">        data = [Z, Y, X] vector denoting the film normal direction</span>
+<span class="go">    morphology_creator/</span>
+<span class="go">        data = author of the morphology</span>
+<span class="go">    name/</span>
+<span class="go">        data = name of morphology</span>
+</pre></div>
+</div>
+</section>
+<section id="euler-morphology-hdf5-structure">
+<h3>Euler Morphology HDF5 Structure<a class="headerlink" href="#euler-morphology-hdf5-structure" title="Permalink to this heading"></a></h3>
+<p>The Euler Morphology uses a ZYZ convention. Currently, Cy-RSoXS only supports uniaxial materials and the first Euler rotation (Phi) is unused. Theta is the rotation around the Y axis. Psi is the last rotation around the Z axis.</p>
+<img alt="_images/Euler_ZYZ-v4.gif" src="_images/Euler_ZYZ-v4.gif" />
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">Euler_Angles/</span>
+<span class="go">    Mat_1_Vfrac/</span>
+<span class="go">        data = Rotation angle array of shape [1, 256, 256] and order [Z, Y, X]</span>
+<span class="go">            dims = [&#39;Z&#39;, &#39;Y&#39;, &#39;X&#39;]</span>
+<span class="go">    Mat_1_S/</span>
+<span class="go">        data = alignment magnitude array of shape [1, 256, 256] and order [Z, Y, X]</span>
+<span class="go">            dims = [&#39;Z&#39;, &#39;Y&#39;, &#39;X&#39;]</span>
+<span class="go">    Mat_1_Theta/</span>
+<span class="go">        data = Rotation angle array of shape [1, 256, 256] and order [Z, Y, X]</span>
+<span class="go">            dims = [&#39;Z&#39;, &#39;Y&#39;, &#39;X&#39;]</span>
+<span class="go">    Mat_1_Psi/</span>
+<span class="go">        data = Rotation angle array of shape [1, 256, 256] and order [Z, Y, X]</span>
+<span class="go">            dims = [&#39;Z&#39;, &#39;Y&#39;, &#39;X&#39;]</span>
+
+<span class="go">    Mat_2_Vfrac/</span>
+<span class="go">        data = Rotation angle array of shape [1, 256, 256] and order [Z, Y, X]</span>
+<span class="go">            dims = [&#39;Z&#39;, &#39;Y&#39;, &#39;X&#39;]</span>
+<span class="go">    Mat_2_S/</span>
+<span class="go">        data = alignment magnitude array of shape [1, 256, 256] and order [Z, Y, X]</span>
+<span class="go">            dims = [&#39;Z&#39;, &#39;Y&#39;, &#39;X&#39;]</span>
+<span class="go">    Mat_2_Theta/</span>
+<span class="go">        data = Rotation angle array of shape [1, 256, 256] and order [Z, Y, X]</span>
+<span class="go">            dims = [&#39;Z&#39;, &#39;Y&#39;, &#39;X&#39;]</span>
+<span class="go">    Mat_2_Psi/</span>
+<span class="go">        data = Rotation angle array of shape [1, 256, 256] and order [Z, Y, X]</span>
+<span class="go">            dims = [&#39;Z&#39;, &#39;Y&#39;, &#39;X&#39;]</span>
+
+<span class="go">Morphology Parameters/</span>
+<span class="go">*required*</span>
+<span class="go">    PhysSize/</span>
+<span class="go">        data = size of each voxel edge in nanometers</span>
+<span class="go">    NumMaterial/</span>
+<span class="go">        data = number of materials in morphology (integer)</span>
+<span class="go">*optional*</span>
+<span class="go">    creation_date/</span>
+<span class="go">        data = date and time</span>
+<span class="go">    film_normal/</span>
+<span class="go">        data = [Z, Y, X] vector denoting the film normal direction</span>
+<span class="go">    morphology_creator/</span>
+<span class="go">        data = author of the morphology</span>
+<span class="go">    name/</span>
+<span class="go">        data = name of morphology</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="material-optical-constant-file-structure">
+<h2>Material Optical Constant File Structure<a class="headerlink" href="#material-optical-constant-file-structure" title="Permalink to this heading"></a></h2>
+<p>For each material in the simulation, we need a corresponding MaterialX.txt file. This file contains the optical constants at each energy for the extraordinary (Para) and ordinary (Perp) axes of the uniaxial dielectric function.</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">EnergyData0:</span>
+<span class="go">{</span>
+<span class="go">Energy = 275.0;</span>
+<span class="go">BetaPara = 6.388392448251455e-05;</span>
+<span class="go">BetaPerp = 6.303899730113871e-05;</span>
+<span class="go">DeltaPara = 0.0010635346640931634;</span>
+<span class="go">DeltaPerp = 0.0011221433414215483;</span>
+<span class="go">}</span>
+
+<span class="go">EnergyData1:</span>
+<span class="go">{</span>
+<span class="go">Energy = 275.1;</span>
+<span class="go">BetaPara = 6.309144102259152e-05;</span>
+<span class="go">BetaPerp = 6.304376809350212e-05;</span>
+<span class="go">DeltaPara = 0.0010567115883113286;</span>
+<span class="go">DeltaPerp = 0.0011157664852560843;</span>
+<span class="go">}</span>
+
+<span class="go">.</span>
+<span class="go">.</span>
+<span class="go">.</span>
+
+<span class="go">EnergyData249:</span>
+<span class="go">{</span>
+<span class="go">Energy = 299.9;</span>
+<span class="go">BetaPara = 0.0024365306249853557;</span>
+<span class="go">BetaPerp = 0.0025455166691934236;</span>
+<span class="go">DeltaPara = 0.0017547293997892883;</span>
+<span class="go">DeltaPerp = 0.001774225207859871;</span>
+<span class="go">}</span>
+</pre></div>
+</div>
+</section>
+<section id="config-txt-file-structure">
+<h2>Config.txt File Structure<a class="headerlink" href="#config-txt-file-structure" title="Permalink to this heading"></a></h2>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">Energies = [Energy0, Energer morphology, 1 for Vector morphology</span>
+</pre></div>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="installation.html" class="btn btn-neutral float-left" title="Installation" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="pyhyper.html" class="btn btn-neutral float-right" title="PyHyperScattering" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright : Official Contribution of the US Government. Not subject to copyright in the United States.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
