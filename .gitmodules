@@ -1,6 +1,8 @@
 [submodule "cyrsoxs"]
 	path = cyrsoxs
 	url = https://github.com/usnistgov/cyrsoxs.git
+	ignore = dirty
 [submodule "PyHyperScattering"]
 	path = PyHyperScattering
 	url = https://github.com/usnistgov/PyHyperScattering.git
+	ignore = dirty
