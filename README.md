@@ -1,4 +1,4 @@
-# RSoXS Simulation Suite
+# NIST RSoXS Simulation Suite
 Python and C++/CUDA codebase for simulating Resonant Soft X-ray Scattering
 
 Legal
