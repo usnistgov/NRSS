@@ -13,11 +13,11 @@ _____________________
 **NOTE:** This installation guide uses git for cloning github repositories and Anaconda/conda as the Python distribution/package and virtual environment manager, and assumes you have working installations of both.
 
 
-To install the RSS package, clone it from the github repository:
+To install the NRSS package, clone it from the github repository:
 
 .. code-block:: bash
 
-    git clone https://github.com/usnistgov/RSS.git
+    git clone https://github.com/usnistgov/NRSS.git
 
 Navigate to the cloned repository and initialize the submodules:
 
@@ -30,7 +30,7 @@ Use the environment.yml file to create a new virtual environment, and activate i
 .. code-block:: bash
 
     conda env create -f environment.yml
-    conda activate rss
+    conda activate nrss
 
 Now we can install PyHyperScattering and build CyRSoXS.
 
@@ -51,7 +51,7 @@ CyRSoXS
 
 The build instructions here mirror what is provided on the usnistgov/cyrsoxs github repo, with slight modifications for the repo as a submodule.
 
-**NOTE:** Before installing the dependencies below, make sure to navigate out of the RSS directory.
+**NOTE:** Before installing the dependencies below, make sure to navigate out of the NRSS directory.
 
 **Dependencies**
 

@@ -1,4 +1,4 @@
-name: rss
+name: nrss
 
 channels:
   - conda-forge

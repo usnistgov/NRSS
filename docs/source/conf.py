@@ -17,7 +17,7 @@
 
 # -- Project information -----------------------------------------------------
 
-project = 'RSS'
+project = 'NRSS'
 copyright = ': Official Contribution of the US Government. Not subject to copyright in the United States'
 author = 'Peter Dudenas'
 
