@@ -216,13 +216,15 @@ You should see the following output:
     ============================================================================
     Size of Real               : 4
     Maximum Number Of Material : 32
-    __________________________________________________________________________________________________
+     __________________________________________________________________________________________________
     |                                 Thanks for using Cy-RSoXS                                        |
     |--------------------------------------------------------------------------------------------------|
     |  Copyright          : Iowa State University                                                      |
     |  License            : NIST                                                                       |
     |  Acknowledgement    : ONR MURI                                                                   |
+    |                                                                                                  |
     |  Developed at Iowa State University in collaboration with NIST                                   |
+    |                                                                                                  |
     |  Please cite the following publication :                                                         |
     |  Comments/Questions :                                                                            |
     |          1. Dr. Baskar GanapathySubramanian (baskarg@iastate.edu)                                |
