@@ -12,14 +12,16 @@ _____________________
 
 **NOTE:** This installation guide uses git for cloning github repositories and Anaconda/conda as the Python distribution/package and virtual environment manager, and assumes you have working installations of both.
 
+NRSS & PyHyperScattering
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To install the NRSS package, clone it from the github repository:
+Clone NRSS from the github repository:
 
 .. code-block:: bash
 
     git clone https://github.com/usnistgov/NRSS.git
 
-Navigate to the cloned repository and initialize the submodules:
+Navigate to the cloned repository and initialize the CyRSoXS submodule and its submodules:
 
 .. code-block:: bash
 
@@ -32,19 +34,11 @@ Use the environment.yml file to create a new virtual environment, and activate i
     conda env create -f environment.yml
     conda activate nrss
 
-Now we can install PyHyperScattering and build CyRSoXS.
-
-PyHyperScattering
-^^^^^^^^^^^^^^^^^
-
-Nagivate to the PyHyperScattering directory and pip install:
+Now we can pip install NRSS, which will also install PyHyperScattering as a dependency:
 
 .. code-block:: bash
 
-    cd PyHyperScattering
     pip install .
-
-This will install the required dependencies and add PyHyperScattering to your path.
 
 CyRSoXS
 ^^^^^^^
