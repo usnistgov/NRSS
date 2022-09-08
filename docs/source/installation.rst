@@ -10,7 +10,7 @@ _____________________
 Installation on Linux
 _____________________
 
-**NOTE:** This installation guide uses git for cloning github repositories and Anaconda/conda as the Python distribution/package and virtual environment manager, and assumes you have working installations of both.
+**NOTE:** This installation guide uses the Anaconda Python distribution. Any Python installation ``version >=3.6`` should work, you will just need to point CMake to your specific installation. git, conda, and pip are also used, and it is assumed you have working installations of all three.
 
 NRSS & PyHyperScattering
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -220,16 +220,17 @@ You should see the following output:
     |                                 Thanks for using Cy-RSoXS                                        |
     |--------------------------------------------------------------------------------------------------|
     |  Copyright          : Iowa State University                                                      |
-    |  License            : MIT                                                                        |
+    |  License            : NIST                                                                       |
     |  Acknowledgement    : ONR MURI                                                                   |
     |  Developed at Iowa State University in collaboration with NIST                                   |
     |  Please cite the following publication :                                                         |
     |  Comments/Questions :                                                                            |
     |          1. Dr. Baskar GanapathySubramanian (baskarg@iastate.edu)                                |
     |          2. Dr. Adrash Krishnamurthy        (adarsh@iastate.edu)                                 |
+    |          3. Dr. Dean DeLongchamp            (dean.delongchamp@nist.gov)                          |
     -------------------------------------------------------------------------------------------------- 
-    Version   :  1 . 1 . 4 . 0
-    Git patch :  d88e168
+    Version   :  <version_number>
+    Git patch :  <git_patch_number>
 
 
 *Optional CMake Flags*
