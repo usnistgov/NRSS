@@ -8,6 +8,7 @@ setup(
     author='Peter Dudenas',
     author_email='peter.dudenas@nist.gov',
     license='NIST',
+    packages=['NRSS'],
     install_requires=['PyHyperScattering',
                         'numpy',
                         'scipy',
