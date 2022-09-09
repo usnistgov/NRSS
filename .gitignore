@@ -1,3 +1,7 @@
 build/**
 *.egg-info
 docs/build/**
+*.pyc
+tutorials/__pycache__
+tutorials/coreshell_disk/.ipynb_checkpoints/*
+tutorials/coreshell_disk/HDF5
