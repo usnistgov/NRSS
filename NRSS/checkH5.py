@@ -10,6 +10,23 @@ import warnings
 
 
 def check_NumMat(f, morphology_type):
+    """
+    Test documentation
+
+    Parameters
+    ----------
+    
+    f : file object
+    morphology_type : int
+        0 - Euler, 1 - Vector
+
+    Returns
+    -------
+
+    num_mat : int
+        Number of materials in file
+        
+    """
     morphology_num = f['Morphology_Parameters/NumMaterial'][()]
     
     if morphology_type == 0:
