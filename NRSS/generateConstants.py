@@ -1,52 +1,51 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Mon Dec 16 14:27:24 2019
+# """
+# Created on Mon Dec 16 14:27:24 2019
 
-@author: maksbh
-"""
+# @author: maksbh
+# """
 
 
 import numpy as np
 
-"""
-Function to find the nearest index 
 
-Parameters
-----------
-
-array : Numpy array
-value : value of energy
-
-Returns
--------
-idx : Integer
-      index location corresponding to the closest location
-"""
 
 def find_nearest(array, value):
+    """
+    Function to find the nearest index 
+
+    Parameters
+    ----------
+
+    array : Numpy array
+    value : value of energy
+
+    Returns
+    -------
+    idx : Integer
+        index location corresponding to the closest location
+    """
     idx = (np.abs(array - value)).argmin()
     return idx
 
 
-"""
-Function to get the interpolated value
-
-Parameters
-----------
-
-array : Numpy array
-value : value of energy
-nearest_id : id corresponding to the nearest value
-
-Returns
--------
-valArray : Numpy array
-           array of the interpolated values
-"""
-
-
 def get_interpolated_value(array, value, nearest_id, energy_id):
+    """
+    Function to get the interpolated value
+
+    Parameters
+    ----------
+
+    array : Numpy array
+    value : value of energy
+    nearest_id : id corresponding to the nearest value
+
+    Returns
+    -------
+    valArray : Numpy array
+            array of the interpolated values
+    """
     valArray = np.zeros(array.shape[1])
     if (array[nearest_id][energy_id] > value):
         xp = [array[nearest_id - 1][energy_id], array[nearest_id][energy_id]]
@@ -68,6 +67,21 @@ def get_interpolated_value(array, value, nearest_id, energy_id):
 
 
 def removeDuplicates(Data, energy_id):
+    """
+    Function to remove duplicate energies
+    
+    Parameters
+    ----------
+    
+    Data : Numpy array
+    energy_id : int
+
+    Returns
+    -------
+    
+    listOut : Numpy array
+
+    """
     listIn = Data.tolist()
     listOut = []
     listOut.append(listIn[0])
@@ -87,6 +101,16 @@ def removeDuplicates(Data, energy_id):
 
 
 def dump_dataVacuum(index, energy, f):
+    """
+    Function to write vacuum optical contants (n = 1 + i0)
+
+    Parameters
+    ----------
+
+    index : int
+    energy : float
+
+    """
     Header = "EnergyData" + str(index) + ":\n{\n"
     f.write(Header)
     Energy = "Energy = " + str(energy) + ";\n"
@@ -103,6 +127,19 @@ def dump_dataVacuum(index, energy, f):
 
 
 def dump_data(valArray, index, labelEnergy, f):
+    """
+    Function to write material optical constants to file
+
+    Parameters
+    ----------
+
+    valArray : Numpy array
+    index : int
+    labelEnergy : dict
+    f : file object
+
+
+    """
     Header = "EnergyData" + str(index) + ":\n{\n";
     f.write(Header)
     Energy = "Energy = " + str(valArray[labelEnergy["Energy"]]) + ";\n"
@@ -119,6 +156,17 @@ def dump_data(valArray, index, labelEnergy, f):
 
 
 def writeList(name: str, value: list, file):
+    """
+    Function to write list to file
+
+    Parameters
+    ----------
+
+    name : str
+    value : list
+    file : file object
+
+    """
     valStr: str = name + "["
     for i in range(len(value) - 1):
         valStr = valStr + str(value[i]) + ","
@@ -127,6 +175,19 @@ def writeList(name: str, value: list, file):
 
 
 def write_materials(energies, dict, labelEnergy, numMaterial):
+    """
+    Function to write optical constants for all energies supplied
+
+    Parameters
+    ----------
+
+    energies : Numpy array
+    dict : dict
+    labelEnergy : dict
+    numMaterial : int
+
+
+    """
     NumEnergy = len(energies)
 
     for numMat in range(1, numMaterial+1):
@@ -146,51 +207,4 @@ def write_materials(energies, dict, labelEnergy, numMaterial):
             for i in range(0, NumEnergy):
                 currentEnergy = energies[i]
                 dump_dataVacuum(i, currentEnergy, f)
-        f.close()    
-
-    
-if __name__ == "__main__":
-    startEnergy = 280.0; #Start energy
-    endEnergy = 290.0;   #End  energy
-    incrementEnergy = 0.1; #Increment  energy
-    startAngle = 0.0; #start angle
-    endAngle = 180.0; #end angle
-    incrementAngle = 2.0; #increment in each angle
-    numThreads = 4; #number of threads for execution
-    numX = 256; # number of voxels in X direction
-    numY = 256;# number of voxels in Y direction
-    numZ = 32;# number of voxels in Z direction
-    PhysSize = 2.0;
-    
-    #Files corresponding to Each material. For vacuum pass null
-    dict={'Material0':'PSrollinglog.txt',
-          'Material1':'Au.txt',
-          'Material2':'PEOlig2018.txt',
-          'Material3':'vacuum'}
-    
-    
-    # Label of energy to look for
-    labelEnergy={"BetaPara":0,
-                 "BetaPerp":1,
-                 "DeltaPara":2,
-                 "DeltaPerp":3,
-                 "Energy":6}
-
-#### Do not change below this
-    f = open("config.txt", "w") 
-    f.write("StartEnergy = " + str(startEnergy) + ";\n");
-    f.write("EndEnergy = " + str(endEnergy) + ";\n");
-    f.write("IncrementEnergy = " + str(incrementEnergy) + ";\n");
-    f.write("StartAngle = " + str(startAngle) + ";\n");
-    f.write("EndAngle = " + str(endAngle) + ";\n");
-    f.write("IncrementAngle = " + str(incrementAngle) + ";\n");
-    f.write("NumThreads = " + str(numThreads) + ";\n");
-    f.write("NumX = " + str(numX) + ";\n");
-    f.write("NumY = " + str(numY) + ";\n");
-    f.write("NumZ = " + str(numZ) + ";\n");
-    f.write("PhysSize = " + str(PhysSize) + ";\n");
-    f.close();
-    
-    
-    
-    main(startEnergy,endEnergy,incrementEnergy,dict,labelEnergy,len(dict));
+        f.close()

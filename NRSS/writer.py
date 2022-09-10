@@ -10,14 +10,14 @@ def write_hdf5(material_list, PhysSize, fname, MorphologyType = 0, ordering='ZYX
 
     Parameters
     ----------
-        material_list : int
+        material_list : lists
             List of material lists. 
             Euler Ex. [[Mat_1_Vfrac, Mat_1_S, Mat_1_Theta, Mat_1_Psi],[Mat_2_Vfrac, Mat_2_S, Mat_2_Theta, Mat_2_Psi]]
             Vector Ex. [[Mat_1_alignment, Mat_1_unaligned],[Mat_2_alignment, Mat_2_unaligned]]
         PhysSize : float
             Voxel size
-        fname : str
-            name of hdf5 file to write. Can contain path
+        fname : str or path
+            name of hdf5 file to write
         MorphologyType : int
             0 - Euler
             1 - Vector
@@ -31,6 +31,7 @@ def write_hdf5(material_list, PhysSize, fname, MorphologyType = 0, ordering='ZYX
         fname
             Name of hdf5 file written
     '''
+
     print(f'--> Marking {fname}')
     with h5py.File(fname,'w') as f:
         num_mat = len(material_list)

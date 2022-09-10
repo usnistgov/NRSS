@@ -1,6 +1,6 @@
-============
-Installation
-============
+===============
+Getting Started
+===============
 
 Hardware Requirements
 _____________________
