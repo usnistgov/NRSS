@@ -11,7 +11,7 @@ import warnings
 
 def check_NumMat(f, morphology_type):
     """
-    Test documentation
+    Checks and validates the number of materials in the HDF5 file
 
     Parameters
     ----------
@@ -44,9 +44,27 @@ def check_NumMat(f, morphology_type):
     
     
 
-def checkH5_vector(filename):
-    # read in vector morphology
-    
+def readH5_vector(filename):
+    """
+    Reads in Vector Morphology from HDF5 file and converts to Euler Morphology. Checks that total material volume fractions sum to 1 for all voxels.
+
+    Parameters
+    ----------
+
+    filename : str or path
+
+    Returns
+    -------
+        Vfrac : Numpy array
+            Volume fraction of all materials. [Material, Z, Y, X]
+        S : Numpy array
+            Fraction of alignment for each material. [Material, Z, Y, X]
+        theta : Numpy array
+            Second Euler angle (ZYZ convention). [Material, Z, Y, X]
+        psi : Numpy array
+            Third Euler angle (ZYZ convention). [Material, Z, Y, X]
+
+    """
     with h5py.File(filename,'r') as f:
         num_mat = check_NumMat(f,morphology_type=1)
         
@@ -86,8 +104,27 @@ def checkH5_vector(filename):
     return Vfrac, S, theta, psi
 
 
-def checkH5_euler(filename):
-    # read in vector morphology
+def readH5_euler(filename):
+    """
+    Reads in Euler Morphology from HDF5 file. Checks that total material volume fractions sum to 1 for all voxels.
+
+    Parameters
+    ----------
+
+    filename : str or path
+
+    Returns
+    -------
+        Vfrac : Numpy array
+            Volume fraction of all materials. [Material, Z, Y, X]
+        S : Numpy array
+            Fraction of alignment for each material. [Material, Z, Y, X]
+        theta : Numpy array
+            Second Euler angle (ZYZ convention). [Material, Z, Y, X]
+        psi : Numpy array
+            Third Euler angle (ZYZ convention). [Material, Z, Y, X]
+            
+    """
     with h5py.File(filename,'r') as f:
         num_mat = check_NumMat(f,morphology_type=0)
         
@@ -116,8 +153,36 @@ def checkH5_euler(filename):
     return Vfrac, S, theta, psi
 
 def checkH5(filename='perp82.hd5',z_slice = 0, subsample = None, outputmat = None, runquiet = False, plotstyle='light'):
-    
-    #Can plot with light or dark background
+    """
+    Reads in morphology HDF5 file and checks that the format is consistent for CyRSoXS. Optionally plots and returns select quantities.
+
+    Parameters
+    ----------
+
+        filename : str or path
+            Name of HDF5 morphology file to check
+        z_slice : int
+            Which z-slice of the array to plot.
+        subsample : int
+            Number of voxels to display in X and Y
+        outputmat : int
+            Number of which material to return
+        runquiet : bool
+            Boolean flag for running without plotting or outputting to console
+        plotstyle : str
+            Use a light or dark background for plots. 'dark' - dark, 'light' - light
+        
+    Returns
+    -------
+        Vfrac : Numpy array
+            Volume fraction of selected material. [ Z, Y, X]
+        S : Numpy array
+            Fraction of alignment for selected material. [Z, Y, X]
+        theta : Numpy array
+            Second Euler angle (ZYZ convention). [Z, Y, X]
+        psi : Numpy array
+            Third Euler angle (ZYZ convention). [Z, Y, X]
+    """
     style_dict = {'dark':'dark_background',
                   'light':'default'}
     
@@ -134,10 +199,10 @@ def checkH5(filename='perp82.hd5',z_slice = 0, subsample = None, outputmat = Non
             morphology_type = None
     
     if morphology_type == 0:
-        Vfrac, S, theta, psi = checkH5_euler(filename)
+        Vfrac, S, theta, psi = readH5_euler(filename)
         num_mat, zdim, ydim, xdim = Vfrac.shape
     elif morphology_type == 1:
-        Vfrac, S, theta, psi = checkH5_vector(filename)
+        Vfrac, S, theta, psi = readH5_vector(filename)
         num_mat, zdim, ydim, xdim = Vfrac.shape
         
     
@@ -147,7 +212,7 @@ def checkH5(filename='perp82.hd5',z_slice = 0, subsample = None, outputmat = Non
         subsample = ydim # y dimension
         
     if not runquiet:
-        print(f'Dataset dimensions (Z, Y, X): {zdim} × {ydim} × {xdim}')
+        print(f'Dataset dimensions (Z, Y, X): {zdim} x {ydim} x {xdim}')
         print(f'Number of Materials: {num_mat}')
         print('')
 

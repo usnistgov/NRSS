@@ -187,8 +187,7 @@ def write_slurm(hdf5_filename, cyrsoxs_version='latest'):
     f.close()
 
 
-### Set of functions originally authored by Kumar Saurabh @maksbh ###
-
+# Set of functions originally authored by Kumar Saurabh @maksbh 
 def find_nearest(array, value):
     """
     Function to find the nearest index 
