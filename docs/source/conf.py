@@ -7,7 +7,6 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'NRSS'
-copyright = '2022, Peter Dudenas'
 author = 'Peter Dudenas'
 release = '0.1.0'
 
@@ -16,7 +15,7 @@ release = '0.1.0'
 
 import os
 import sys
-sys.path.insert(0, os.path.abspath('../../NRSS'))
+sys.path.insert(0, os.path.abspath('../../'))
 
 
 extensions = ['sphinx.ext.autodoc','sphinx.ext.napoleon']

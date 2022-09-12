@@ -195,7 +195,7 @@ def find_nearest(array, value):
     Parameters
     ----------
 
-    array : Numpy array
+    array : ndarray
     value : value of energy
 
     Returns
@@ -214,13 +214,13 @@ def get_interpolated_value(array, value, nearest_id, energy_id):
     Parameters
     ----------
 
-    array : Numpy array
+    array : ndarray
     value : value of energy
     nearest_id : id corresponding to the nearest value
 
     Returns
     -------
-    valArray : Numpy array
+    valArray : ndarray
             array of the interpolated values
     """
     valArray = np.zeros(array.shape[1])
@@ -250,13 +250,13 @@ def removeDuplicates(Data, energy_id):
     Parameters
     ----------
     
-    Data : Numpy array
+    Data : ndarray
     energy_id : int
 
     Returns
     -------
     
-    listOut : Numpy array
+    listOut : ndarray
 
     """
     listIn = Data.tolist()
@@ -310,7 +310,7 @@ def dump_data(valArray, index, labelEnergy, f):
     Parameters
     ----------
 
-    valArray : Numpy array
+    valArray : ndarray
     index : int
     labelEnergy : dict
     f : file object
@@ -351,15 +351,15 @@ def writeList(name: str, value: list, file):
     file.write(valStr + "];\n")
 
 
-def write_materials(energies, dict, labelEnergy, numMaterial):
+def write_materials(energies, materialdict, labelEnergy, numMaterial):
     """
     Function to write optical constants for all energies supplied
 
     Parameters
     ----------
 
-    energies : Numpy array
-    dict : dict
+    energies : ndarray
+    materialdict : dict
     labelEnergy : dict
     numMaterial : int
 
@@ -369,7 +369,7 @@ def write_materials(energies, dict, labelEnergy, numMaterial):
 
     for numMat in range(1, numMaterial+1):
         f = open("Material" + str(numMat) + ".txt", "w")
-        fname = dict["Material" + str(numMat)]
+        fname = materialdict["Material" + str(numMat)]
         if (fname != 'vacuum'):
             Data = np.loadtxt(fname, skiprows=1)
             Data = Data[Data[:, labelEnergy["Energy"]].argsort()]

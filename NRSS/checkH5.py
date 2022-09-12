@@ -55,13 +55,13 @@ def readH5_vector(filename):
 
     Returns
     -------
-        Vfrac : Numpy array
+        Vfrac : ndarray
             Volume fraction of all materials. [Material, Z, Y, X]
-        S : Numpy array
+        S : ndarray
             Fraction of alignment for each material. [Material, Z, Y, X]
-        theta : Numpy array
+        theta : ndarray
             Second Euler angle (ZYZ convention). [Material, Z, Y, X]
-        psi : Numpy array
+        psi : ndarray
             Third Euler angle (ZYZ convention). [Material, Z, Y, X]
 
     """
@@ -115,13 +115,13 @@ def readH5_euler(filename):
 
     Returns
     -------
-        Vfrac : Numpy array
+        Vfrac : ndarray
             Volume fraction of all materials. [Material, Z, Y, X]
-        S : Numpy array
+        S : ndarray
             Fraction of alignment for each material. [Material, Z, Y, X]
-        theta : Numpy array
+        theta : ndarray
             Second Euler angle (ZYZ convention). [Material, Z, Y, X]
-        psi : Numpy array
+        psi : ndarray
             Third Euler angle (ZYZ convention). [Material, Z, Y, X]
             
     """
@@ -174,13 +174,13 @@ def checkH5(filename='perp82.hd5',z_slice = 0, subsample = None, outputmat = Non
         
     Returns
     -------
-        Vfrac : Numpy array
+        Vfrac : ndarray
             Volume fraction of selected material. [ Z, Y, X]
-        S : Numpy array
+        S : ndarray
             Fraction of alignment for selected material. [Z, Y, X]
-        theta : Numpy array
+        theta : ndarray
             Second Euler angle (ZYZ convention). [Z, Y, X]
-        psi : Numpy array
+        psi : ndarray
             Third Euler angle (ZYZ convention). [Z, Y, X]
     """
     style_dict = {'dark':'dark_background',
