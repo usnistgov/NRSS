@@ -195,8 +195,8 @@ def checkH5(filename='perp82.hd5',z_slice = 0, subsample = None, outputmat = Non
         elif 'Vector_Morphology' in f.keys():
             morphology_type = 1
         else:
-            warnings.warn('Neither \"Euler_Angles\" or \"Vector_Morphology\" group detected in hdf5')
-            morphology_type = None
+            raise KeyError('Neither \"Euler_Angles\" or \"Vector_Morphology\" group detected in hdf5')
+            # morphology_type = None
     
     if morphology_type == 0:
         Vfrac, S, theta, psi = readH5_euler(filename)
@@ -204,8 +204,19 @@ def checkH5(filename='perp82.hd5',z_slice = 0, subsample = None, outputmat = Non
     elif morphology_type == 1:
         Vfrac, S, theta, psi = readH5_vector(filename)
         num_mat, zdim, ydim, xdim = Vfrac.shape
-        
-    
+
+    # check to make sure arrays are float    
+    improper_types = []
+    for array, array_name in zip([Vfrac, S, theta, psi], ['Vfrac', 'S', 'theta', 'psi']):
+        if 'float' not in array.dtype.name:
+            warnings.warn(f'{array_name} dtype is {array.dtype.name} and incompatible with CyRSoXS. Array dtype must be some variant of float')
+            improper_types.append([array_name, array.dtype.name])
+
+    # raise exception after going through all material arrays so user can fix all of them at once
+    if len(improper_types) != 0:
+        for val in improper_types:
+            print(val[0], val[1])  
+        raise TypeError('One or more of the material arrays dtype is not float. See above for details')
     
     
     if subsample is None:
