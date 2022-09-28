@@ -5,3 +5,5 @@ docs/build/**
 tutorials/__pycache__
 tutorials/coreshell_disk/.ipynb_checkpoints/*
 tutorials/coreshell_disk/HDF5
+tutorials/pybind/.ipynb_checkpoints/*
+tutorials/pybind/*.log
