@@ -5,6 +5,8 @@ NRSS API Reference
 
     NRSS.writer
     NRSS.checkH5
+    NRSS.morphology
+    NRSS.reader
 
 
     

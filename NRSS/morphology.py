@@ -2,14 +2,63 @@ import h5py
 import pathlib
 import CyRSoXS as cy
 import warnings
-from checkH5 import check_NumMat
-from reader import read_material, read_config
+from NRSS.checkH5 import check_NumMat
+from NRSS.reader import read_material, read_config
 import numpy as np
 import xarray as xr
 import sys
 import os
 
 class Morphology:
+    '''
+    Object used to hold all the components necessary for a complete CyRSoXS morphology
+
+    Attributes
+    ----------
+    input_mapping : dict
+        A dictionary to handle specific configuration input types
+
+    numMaterial : int
+        Number of materials present in the morphology
+    
+    materials : dict
+        A dictionary of Material objects
+    
+    PhysSize : float
+        The physical size of each cubic voxel's three dimensions
+
+    NumZYX : tuple or list
+        Number of voxels in the Z, Y, and X directions (NumZ, NumY, NumX)
+    
+    config : dict
+        A dictionary of configuration parameters for CyRSoXS
+    
+    create_CyObject : bool
+        Boolean value that decides if the CyRSoXS objects are created upon instantiation
+    
+    simulated : bool
+        Boolean value that tracks whether or not the simulation has been run
+
+    Methods
+    -------
+    load_morph_hdf5(hdf5_file, create_CyObject=True)
+        Class method that creates a Morphology object from a morphology HDF5 file
+
+    create_inputData()
+        Creates a CyRSoXS InputData object and populates it with parameters from self.config
+    
+    create_OpticalConstants()
+        Creates a CyRSoXS RefractiveIndex object and populates it with optical constants from the materials dict
+    
+    create_voxelData()
+        Creates a CyRSoXS VoxelData object and populates it with the voxel information from the materials dict
+    
+    run(stdout=True,stderr=True, return_xarray=True, print_vec_info=False)
+        Creates a CyRSoXS ScatteringPattern object if not already created, and submits all CyRSoXS objects to run the simulation
+    
+    scattering_to_xarray(return_xarray=True,print_vec_info=False)
+        Copies the CyRSoXS ScatteringPattern arrays to an xarray in the format used by PyHyperScattering for further analysis
+    '''
 
     # dict to deal with specific CyRSoXS input objects. dict structure inspired from David Ackerman's cyrsoxs-framework
     input_mapping = {'CaseType':['setCaseType',[cy.CaseType.Default,cy.CaseType.BeamDivergence,cy.CaseType.GrazingIncidence]]
@@ -253,6 +302,29 @@ class Morphology:
 
 
 class OpticalConstants:
+    '''
+    Object to hold dielectric optical constants in a format compatible with CyRSoXS
+
+    Attributes
+    ----------
+
+    energies : list or array
+        List of energies
+    opt_constants : dict
+        Dictionary of optical constants, where each energy is a key in the dict
+    name : str
+        String identifying the element or material for these optical constants
+    
+    Methods
+    -------
+    calc_constants(energies, reference_data, name='unkown')
+        Interpolates optical constant data to the list of energies provided
+    load_matfile(matfile, name='unknown')
+        Creates an OpticalConstants object from a previously written MaterialX.txt file
+    create_vacuum(energies)
+        Convenience function to populate zeros for all optical constants
+    
+    '''
 
     def __init__(self, energies, opt_constants=None, name = 'unknown'):
         self.energies = energies
@@ -291,6 +363,26 @@ class OpticalConstants:
         self.opt_constants = deltabeta
 
 class Material(OpticalConstants):
+    '''
+    Object to hold the voxel-level data for a CyRSoXS morphology. Inherits from the OpticalConstants class.
+
+    Attributes
+    ----------
+    materialID : int
+        Integer value denoting the material number. Used in CyRSoXS
+    Vfrac : ndarray
+        Volume fractions for a Material
+    theta : ndarray
+        The second Euler angle (ZYZ convention)
+    psi : ndarray
+        The third Euler angle (ZYZ convention)
+    NumZYX : tuple or list
+        Dimensions of the Material arrays (NumZ, NumY, NumX)
+    name : str
+        Name of the Material (e.g. 'Polystyrene')
+    
+    '''
+
 
     def __init__(self, materialID=1, Vfrac=None, S=None, theta=None, psi = None, 
                     NumZYX=None, energies = None, opt_constants = None, name=None):
