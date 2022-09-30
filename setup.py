@@ -9,7 +9,7 @@ setup(
     author_email='peter.dudenas@nist.gov',
     license='NIST',
     packages=['NRSS'],
-    install_requires=['PyHyperScattering',
+    install_requires=['PyHyperScattering>=0.1.7',
                         'numpy',
                         'scipy',
                         'scikit-image',
