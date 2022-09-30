@@ -194,12 +194,12 @@ This will generate a shared library ``CyRSoXS.so`` file. Create a ``lib`` direct
     mkdir lib
     mv CyRSoXS.so lib/
 
-Add to your PATH:
+Add to your PYTHONPATH:
 
 .. code-block:: bash
 
     cd lib
-    echo "export PATH=$PATH:`pwd`" >> ~/.bashrc
+    echo "export PYTHONPATH=$PYTHONPATH:`pwd`" >> ~/.bashrc
     source ~/.bashrc
 
 Now you can import CyRSoXS in a python script or jupyter notebook:
