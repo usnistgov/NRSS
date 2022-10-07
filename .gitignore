@@ -12,3 +12,5 @@ tests/validation/3Dsphere_test*
 tests/validation/CoreShelltest*
 tests/validation/grating_test*
 tests/validation/spheretest_*
+tests/validation/.ipynb_checkpoints/*
+tests/validation/lib/__pycache__

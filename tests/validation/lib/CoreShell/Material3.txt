@@ -1,0 +1,808 @@
+EnergyData0:
+{
+Energy = 280.0;
+BetaPara = 5.3675e-05;
+BetaPerp = 5.79e-05;
+DeltaPara = 9.718449999999999e-05;
+DeltaPerp = 0.000489332;
+}
+EnergyData1:
+{
+Energy = 280.1;
+BetaPara = 5.3325e-05;
+BetaPerp = 5.767500000000001e-05;
+DeltaPara = 8.742e-05;
+DeltaPerp = 0.000481987;
+}
+EnergyData2:
+{
+Energy = 280.2;
+BetaPara = 5.2625e-05;
+BetaPerp = 5.719999999999999e-05;
+DeltaPara = 6.751175000000001e-05;
+DeltaPerp = 0.000467042;
+}
+EnergyData3:
+{
+Energy = 280.3;
+BetaPara = 5.2025e-05;
+BetaPerp = 5.6775e-05;
+DeltaPara = 4.715325000000002e-05;
+DeltaPerp = 0.0004517915;
+}
+EnergyData4:
+{
+Energy = 280.4;
+BetaPara = 5.1325e-05;
+BetaPerp = 5.63e-05;
+DeltaPara = 2.618674999999999e-05;
+DeltaPerp = 0.00043613475;
+}
+EnergyData5:
+{
+Energy = 280.5;
+BetaPara = 5.065e-05;
+BetaPerp = 5.585e-05;
+DeltaPara = 4.4595e-06;
+DeltaPerp = 0.00041997725;
+}
+EnergyData6:
+{
+Energy = 280.6;
+BetaPara = 4.994999999999999e-05;
+BetaPerp = 5.5375e-05;
+DeltaPara = -1.792049999999999e-05;
+DeltaPerp = 0.000403388;
+}
+EnergyData7:
+{
+Energy = 280.7;
+BetaPara = 4.9275e-05;
+BetaPerp = 5.49e-05;
+DeltaPara = -4.093624999999999e-05;
+DeltaPerp = 0.00038637475;
+}
+EnergyData8:
+{
+Energy = 280.8;
+BetaPara = 4.865e-05;
+BetaPerp = 5.45e-05;
+DeltaPara = -6.473899999999999e-05;
+DeltaPerp = 0.0003688615;
+}
+EnergyData9:
+{
+Energy = 280.9;
+BetaPara = 4.7975e-05;
+BetaPerp = 5.4025e-05;
+DeltaPara = -8.963775e-05;
+DeltaPerp = 0.00035065625;
+}
+EnergyData10:
+{
+Energy = 281.0;
+BetaPara = 4.76e-05;
+BetaPerp = 5.3625e-05;
+DeltaPara = -0.0001158025;
+DeltaPerp = 0.00033183125;
+}
+EnergyData11:
+{
+Energy = 281.1;
+BetaPara = 4.7275e-05;
+BetaPerp = 5.322499999999999e-05;
+DeltaPara = -0.00014230475;
+DeltaPerp = 0.00031211775;
+}
+EnergyData12:
+{
+Energy = 281.2;
+BetaPara = 4.85e-05;
+BetaPerp = 5.375000000000001e-05;
+DeltaPara = -0.0001699755;
+DeltaPerp = 0.000291859;
+}
+EnergyData13:
+{
+Energy = 281.3;
+BetaPara = 4.8625e-05;
+BetaPerp = 5.4175e-05;
+DeltaPara = -0.00019817925;
+DeltaPerp = 0.00027131725;
+}
+EnergyData14:
+{
+Energy = 281.4;
+BetaPara = 4.9725e-05;
+BetaPerp = 5.4675e-05;
+DeltaPara = -0.0002273105;
+DeltaPerp = 0.00025014725;
+}
+EnergyData15:
+{
+Energy = 281.5;
+BetaPara = 5.005e-05;
+BetaPerp = 5.53e-05;
+DeltaPara = -0.0002575545;
+DeltaPerp = 0.00022830875;
+}
+EnergyData16:
+{
+Energy = 281.6;
+BetaPara = 5.17e-05;
+BetaPerp = 5.6325e-05;
+DeltaPara = -0.00028918125;
+DeltaPerp = 0.00020585675;
+}
+EnergyData17:
+{
+Energy = 281.7;
+BetaPara = 5.375000000000001e-05;
+BetaPerp = 5.742500000000001e-05;
+DeltaPara = -0.00032075925;
+DeltaPerp = 0.000183197;
+}
+EnergyData18:
+{
+Energy = 281.8;
+BetaPara = 5.4e-05;
+BetaPerp = 5.765000000000001e-05;
+DeltaPara = -0.00035424575;
+DeltaPerp = 0.00015918825;
+}
+EnergyData19:
+{
+Energy = 281.9;
+BetaPara = 5.6475e-05;
+BetaPerp = 5.93e-05;
+DeltaPara = -0.00038906225;
+DeltaPerp = 0.000134285;
+}
+EnergyData20:
+{
+Energy = 282.0;
+BetaPara = 5.765e-05;
+BetaPerp = 6.049999999999999e-05;
+DeltaPara = -0.00042487825;
+DeltaPerp = 0.000109057;
+}
+EnergyData21:
+{
+Energy = 282.1;
+BetaPara = 5.94e-05;
+BetaPerp = 6.145e-05;
+DeltaPara = -0.0004636815;
+DeltaPerp = 8.233099999999997e-05;
+}
+EnergyData22:
+{
+Energy = 282.2;
+BetaPara = 6.355e-05;
+BetaPerp = 6.314999999999999e-05;
+DeltaPara = -0.00050279425;
+DeltaPerp = 5.448225000000004e-05;
+}
+EnergyData23:
+{
+Energy = 282.3;
+BetaPara = 6.5275e-05;
+BetaPerp = 6.485e-05;
+DeltaPara = -0.000542693;
+DeltaPerp = 2.585575000000001e-05;
+}
+EnergyData24:
+{
+Energy = 282.4;
+BetaPara = 6.7325e-05;
+BetaPerp = 6.662499999999999e-05;
+DeltaPara = -0.0005856647499999999;
+DeltaPerp = -3.834999999999939e-06;
+}
+EnergyData25:
+{
+Energy = 282.5;
+BetaPara = 7.055e-05;
+BetaPerp = 6.8475e-05;
+DeltaPara = -0.000631862;
+DeltaPerp = -3.560325000000002e-05;
+}
+EnergyData26:
+{
+Energy = 282.6;
+BetaPara = 7.3375e-05;
+BetaPerp = 7.0275e-05;
+DeltaPara = -0.000678913;
+DeltaPerp = -6.825074999999999e-05;
+}
+EnergyData27:
+{
+Energy = 282.7;
+BetaPara = 7.5975e-05;
+BetaPerp = 7.21e-05;
+DeltaPara = -0.00072924025;
+DeltaPerp = -0.00010281475;
+}
+EnergyData28:
+{
+Energy = 282.8;
+BetaPara = 7.86e-05;
+BetaPerp = 7.392500000000001e-05;
+DeltaPara = -0.0007831795;
+DeltaPerp = -0.00013955025;
+}
+EnergyData29:
+{
+Energy = 282.9;
+BetaPara = 8.125e-05;
+BetaPerp = 7.575e-05;
+DeltaPara = -0.000841532;
+DeltaPerp = -0.0001789255;
+}
+EnergyData30:
+{
+Energy = 283.0;
+BetaPara = 8.434999999999999e-05;
+BetaPerp = 7.78e-05;
+DeltaPara = -0.000905323;
+DeltaPerp = -0.00022142975;
+}
+EnergyData31:
+{
+Energy = 283.1;
+BetaPara = 9.0274e-05;
+BetaPerp = 8.109999999999999e-05;
+DeltaPara = -0.000973932;
+DeltaPerp = -0.0002668975000000001;
+}
+EnergyData32:
+{
+Energy = 283.2;
+BetaPara = 9.694125000000001e-05;
+BetaPerp = 8.472500000000001e-05;
+DeltaPara = -0.00104678825;
+DeltaPerp = -0.000315299;
+}
+EnergyData33:
+{
+Energy = 283.3;
+BetaPara = 0.0001037275;
+BetaPerp = 8.8375e-05;
+DeltaPara = -0.00112600425;
+DeltaPerp = -0.00036780675;
+}
+EnergyData34:
+{
+Energy = 283.4;
+BetaPara = 0.00011078975;
+BetaPerp = 9.218624999999999e-05;
+DeltaPara = -0.00121301575;
+DeltaPerp = -0.0004252875;
+}
+EnergyData35:
+{
+Energy = 283.5;
+BetaPara = 0.00011875125;
+BetaPerp = 9.637399999999998e-05;
+DeltaPara = -0.00131086325;
+DeltaPerp = -0.00048990775;
+}
+EnergyData36:
+{
+Energy = 283.6;
+BetaPara = 0.00013084975;
+BetaPerp = 0.00010433475;
+DeltaPara = -0.00142012675;
+DeltaPerp = -0.0005615992500000001;
+}
+EnergyData37:
+{
+Energy = 283.7;
+BetaPara = 0.000143994;
+BetaPerp = 0.000112943;
+DeltaPara = -0.001542483;
+DeltaPerp = -0.00064059725;
+}
+EnergyData38:
+{
+Energy = 283.8;
+BetaPara = 0.00015754775;
+BetaPerp = 0.000121801;
+DeltaPara = -0.001683873;
+DeltaPerp = -0.00073075475;
+}
+EnergyData39:
+{
+Energy = 283.9;
+BetaPara = 0.0001715105;
+BetaPerp = 0.00013090875;
+DeltaPara = -0.001855268;
+DeltaPerp = -0.00083840625;
+}
+EnergyData40:
+{
+Energy = 284.0;
+BetaPara = 0.0002001285;
+BetaPerp = 0.00014652825;
+DeltaPara = -0.00209147075;
+DeltaPerp = -0.00098495075;
+}
+EnergyData41:
+{
+Energy = 284.1;
+BetaPara = 0.00031900025;
+BetaPerp = 0.00021785475;
+DeltaPara = -0.0023547875;
+DeltaPerp = -0.0011483535;
+}
+EnergyData42:
+{
+Energy = 284.2;
+BetaPara = 0.00046902525;
+BetaPerp = 0.0003091965;
+DeltaPara = -0.00260787325;
+DeltaPerp = -0.00130799125;
+}
+EnergyData43:
+{
+Energy = 284.3;
+BetaPara = 0.0006313422499999999;
+BetaPerp = 0.0004100472499999999;
+DeltaPara = -0.0028780455;
+DeltaPerp = -0.00147189025;
+}
+EnergyData44:
+{
+Energy = 284.4;
+BetaPara = 0.00078925525;
+BetaPerp = 0.0005034542499999999;
+DeltaPara = -0.00323427125;
+DeltaPerp = -0.0016813365;
+}
+EnergyData45:
+{
+Energy = 284.5;
+BetaPara = 0.00106517975;
+BetaPerp = 0.00064197875;
+DeltaPara = -0.0039473525;
+DeltaPerp = -0.002110333;
+}
+EnergyData46:
+{
+Energy = 284.6;
+BetaPara = 0.002186032;
+BetaPerp = 0.0013141575;
+DeltaPara = -0.004554816;
+DeltaPerp = -0.002482023;
+}
+EnergyData47:
+{
+Energy = 284.7;
+BetaPara = 0.0034582755;
+BetaPerp = 0.00205511225;
+DeltaPara = -0.0045563945;
+DeltaPerp = -0.0024956925;
+}
+EnergyData48:
+{
+Energy = 284.8;
+BetaPara = 0.00475731775;
+BetaPerp = 0.0028133175;
+DeltaPara = -0.00413709;
+DeltaPerp = -0.00226956175;
+}
+EnergyData49:
+{
+Energy = 284.9;
+BetaPara = 0.00608363225;
+BetaPerp = 0.00358882175;
+DeltaPara = -0.003209276;
+DeltaPerp = -0.00175521625;
+}
+EnergyData50:
+{
+Energy = 285.0;
+BetaPara = 0.007110611;
+BetaPerp = 0.00423092;
+DeltaPara = -0.00116893925;
+DeltaPerp = -0.00058779725;
+}
+EnergyData51:
+{
+Energy = 285.1;
+BetaPara = 0.006257417499999999;
+BetaPerp = 0.00373597225;
+DeltaPara = 0.000787411;
+DeltaPerp = 0.00053334125;
+}
+EnergyData52:
+{
+Energy = 285.2;
+BetaPara = 0.005195099;
+BetaPerp = 0.003153716;
+DeltaPara = 0.0017201405;
+DeltaPerp = 0.0010674845;
+}
+EnergyData53:
+{
+Energy = 285.3;
+BetaPara = 0.004180619;
+BetaPerp = 0.0025951415;
+DeltaPara = 0.002214763;
+DeltaPerp = 0.0013607515;
+}
+EnergyData54:
+{
+Energy = 285.4;
+BetaPara = 0.003215034;
+BetaPerp = 0.002060491;
+DeltaPara = 0.002386379;
+DeltaPerp = 0.00147687275;
+}
+EnergyData55:
+{
+Energy = 285.5;
+BetaPara = 0.002353921;
+BetaPerp = 0.0015697645;
+DeltaPara = 0.002182326;
+DeltaPerp = 0.0013875545;
+}
+EnergyData56:
+{
+Energy = 285.6;
+BetaPara = 0.00194367975;
+BetaPerp = 0.00132482575;
+DeltaPara = 0.00187557825;
+DeltaPerp = 0.00123673275;
+}
+EnergyData57:
+{
+Energy = 285.7;
+BetaPara = 0.0015977;
+BetaPerp = 0.00110258175;
+DeltaPara = 0.00170048475;
+DeltaPerp = 0.00114459375;
+}
+EnergyData58:
+{
+Energy = 285.8;
+BetaPara = 0.001256465;
+BetaPerp = 0.0008838725;
+DeltaPara = 0.00152116775;
+DeltaPerp = 0.00103806075;
+}
+EnergyData59:
+{
+Energy = 285.9;
+BetaPara = 0.00092003925;
+BetaPerp = 0.000669404;
+DeltaPara = 0.001290937;
+DeltaPerp = 0.0008929725000000001;
+}
+EnergyData60:
+{
+Energy = 286.0;
+BetaPara = 0.00062670625;
+BetaPerp = 0.00047593225;
+DeltaPara = 0.0009235055;
+DeltaPerp = 0.0006503505;
+}
+EnergyData61:
+{
+Energy = 286.1;
+BetaPara = 0.00056898525;
+BetaPerp = 0.0004563555;
+DeltaPara = 0.0005476987499999999;
+DeltaPerp = 0.00040441025;
+}
+EnergyData62:
+{
+Energy = 286.2;
+BetaPara = 0.00054920925;
+BetaPerp = 0.0004513695;
+DeltaPara = 0.00028276675;
+DeltaPerp = 0.0002315405;
+}
+EnergyData63:
+{
+Energy = 286.3;
+BetaPara = 0.0005291525;
+BetaPerp = 0.00044797675;
+DeltaPara = 4.562300000000001e-05;
+DeltaPerp = 7.500599999999999e-05;
+}
+EnergyData64:
+{
+Energy = 286.4;
+BetaPara = 0.00050877575;
+BetaPerp = 0.00044699525;
+DeltaPara = -0.00019786075;
+DeltaPerp = -8.388174999999999e-05;
+}
+EnergyData65:
+{
+Energy = 286.5;
+BetaPara = 0.0005107262500000001;
+BetaPerp = 0.00044156875;
+DeltaPara = -0.00051409125;
+DeltaPerp = -0.00029147125;
+}
+EnergyData66:
+{
+Energy = 286.6;
+BetaPara = 0.00070023875;
+BetaPerp = 0.0005909035;
+DeltaPara = -0.0008138232500000001;
+DeltaPerp = -0.0004906735;
+}
+EnergyData67:
+{
+Energy = 286.7;
+BetaPara = 0.00092055125;
+BetaPerp = 0.000743615;
+DeltaPara = -0.000996467;
+DeltaPerp = -0.0006102169999999999;
+}
+EnergyData68:
+{
+Energy = 286.8;
+BetaPara = 0.00114848875;
+BetaPerp = 0.000904558;
+DeltaPara = -0.0011124005;
+DeltaPerp = -0.0006863939999999999;
+}
+EnergyData69:
+{
+Energy = 286.9;
+BetaPara = 0.00138412725;
+BetaPerp = 0.00107210425;
+DeltaPara = -0.0011670195;
+DeltaPerp = -0.0007196424999999999;
+}
+EnergyData70:
+{
+Energy = 287.0;
+BetaPara = 0.00160772875;
+BetaPerp = 0.00123499675;
+DeltaPara = -0.0011210715;
+DeltaPerp = -0.0006740477500000001;
+}
+EnergyData71:
+{
+Energy = 287.1;
+BetaPara = 0.0017097325;
+BetaPerp = 0.00128789525;
+DeltaPara = -0.00105346075;
+DeltaPerp = -0.0006177875;
+}
+EnergyData72:
+{
+Energy = 287.2;
+BetaPara = 0.0017986345;
+BetaPerp = 0.00133641325;
+DeltaPara = -0.00102703475;
+DeltaPerp = -0.00060294425;
+}
+EnergyData73:
+{
+Energy = 287.3;
+BetaPara = 0.00188948475;
+BetaPerp = 0.0013873765;
+DeltaPara = -0.0010036905;
+DeltaPerp = -0.000596023;
+}
+EnergyData74:
+{
+Energy = 287.4;
+BetaPara = 0.00198255225;
+BetaPerp = 0.00144066;
+DeltaPara = -0.000970099;
+DeltaPerp = -0.00058865;
+}
+EnergyData75:
+{
+Energy = 287.5;
+BetaPara = 0.0020676945;
+BetaPerp = 0.00149362725;
+DeltaPara = -0.0008986915;
+DeltaPerp = -0.0005655685;
+}
+EnergyData76:
+{
+Energy = 287.6;
+BetaPara = 0.0020723165;
+BetaPerp = 0.00150370325;
+DeltaPara = -0.0008298915;
+DeltaPerp = -0.0005479145;
+}
+EnergyData77:
+{
+Energy = 287.7;
+BetaPara = 0.002065825;
+BetaPerp = 0.001512638;
+DeltaPara = -0.000810795;
+DeltaPerp = -0.00055872575;
+}
+EnergyData78:
+{
+Energy = 287.8;
+BetaPara = 0.00205950325;
+BetaPerp = 0.001522451;
+DeltaPara = -0.0008213855;
+DeltaPerp = -0.000589321;
+}
+EnergyData79:
+{
+Energy = 287.9;
+BetaPara = 0.00205333925;
+BetaPerp = 0.001533207;
+DeltaPara = -0.0008642035000000001;
+DeltaPerp = -0.0006451305000000001;
+}
+EnergyData80:
+{
+Energy = 288.0;
+BetaPara = 0.00206837425;
+BetaPerp = 0.00155843325;
+DeltaPara = -0.00098314875;
+DeltaPerp = -0.0007734259999999999;
+}
+EnergyData81:
+{
+Energy = 288.1;
+BetaPara = 0.00222681575;
+BetaPerp = 0.001734112;
+DeltaPara = -0.00109561125;
+DeltaPerp = -0.00088962625;
+}
+EnergyData82:
+{
+Energy = 288.2;
+BetaPara = 0.00240690725;
+BetaPerp = 0.00192668825;
+DeltaPara = -0.0011168405;
+DeltaPerp = -0.0009189145;
+}
+EnergyData83:
+{
+Energy = 288.3;
+BetaPara = 0.002583643;
+BetaPerp = 0.00212436725;
+DeltaPara = -0.0010916525;
+DeltaPerp = -0.0008992937500000002;
+}
+EnergyData84:
+{
+Energy = 288.4;
+BetaPara = 0.0027571285;
+BetaPerp = 0.00232686275;
+DeltaPara = -0.00102227925;
+DeltaPerp = -0.0008254782499999999;
+}
+EnergyData85:
+{
+Energy = 288.5;
+BetaPara = 0.002916345;
+BetaPerp = 0.0025263375;
+DeltaPara = -0.0008837960000000001;
+DeltaPerp = -0.000650062;
+}
+EnergyData86:
+{
+Energy = 288.6;
+BetaPara = 0.002968703;
+BetaPerp = 0.0025496825;
+DeltaPara = -0.0007320944999999999;
+DeltaPerp = -0.00045642075;
+}
+EnergyData87:
+{
+Energy = 288.7;
+BetaPara = 0.00300891175;
+BetaPerp = 0.002566457749999999;
+DeltaPara = -0.0006210487500000001;
+DeltaPerp = -0.000332777;
+}
+EnergyData88:
+{
+Energy = 288.8;
+BetaPara = 0.00304849275;
+BetaPerp = 0.002584144;
+DeltaPara = -0.00051660225;
+DeltaPerp = -0.000226307;
+}
+EnergyData89:
+{
+Energy = 288.9;
+BetaPara = 0.003087556;
+BetaPerp = 0.0026024515;
+DeltaPara = -0.00040451225;
+DeltaPerp = -0.0001225595;
+}
+EnergyData90:
+{
+Energy = 289.0;
+BetaPara = 0.003108665;
+BetaPerp = 0.00262586775;
+DeltaPara = -0.00025105225;
+DeltaPerp = 1.385000000000001e-05;
+}
+EnergyData91:
+{
+Energy = 289.1;
+BetaPara = 0.003037299;
+BetaPerp = 0.0025514505;
+DeltaPara = -0.000113841;
+DeltaPerp = 0.00013337975;
+}
+EnergyData92:
+{
+Energy = 289.2;
+BetaPara = 0.00295208375;
+BetaPerp = 0.0024845085;
+DeltaPara = -4.015e-05;
+DeltaPerp = 0.000201671;
+}
+EnergyData93:
+{
+Energy = 289.3;
+BetaPara = 0.00286696325;
+BetaPerp = 0.00241766625;
+DeltaPara = -2.8275e-06;
+DeltaPerp = 0.00024463525;
+}
+EnergyData94:
+{
+Energy = 289.4;
+BetaPara = 0.0027818305;
+BetaPerp = 0.00235100025;
+DeltaPara = -4.8525e-06;
+DeltaPerp = 0.0002605065;
+}
+EnergyData95:
+{
+Energy = 289.5;
+BetaPara = 0.00271170275;
+BetaPerp = 0.00227842975;
+DeltaPara = -7.740574999999999e-05;
+DeltaPerp = 0.00022112;
+}
+EnergyData96:
+{
+Energy = 289.6;
+BetaPara = 0.0027623465;
+BetaPerp = 0.0023231105;
+DeltaPara = -0.00015487925;
+DeltaPerp = 0.0001772595;
+}
+EnergyData97:
+{
+Energy = 289.7;
+BetaPara = 0.00282807875;
+BetaPerp = 0.00236220475;
+DeltaPara = -0.00017224425;
+DeltaPerp = 0.00018110925;
+}
+EnergyData98:
+{
+Energy = 289.8;
+BetaPara = 0.002893559249999999;
+BetaPerp = 0.0024014385;
+DeltaPara = -0.00016307525;
+DeltaPerp = 0.00020270025;
+}
+EnergyData99:
+{
+Energy = 289.9;
+BetaPara = 0.0029588675;
+BetaPerp = 0.00244077725;
+DeltaPara = -0.000133923;
+DeltaPerp = 0.00024001325;
+}
+EnergyData100:
+{
+Energy = 290.0;
+BetaPara = 0.0030183825;
+BetaPerp = 0.0024762655;
+DeltaPara = -7.397175e-05;
+DeltaPerp = 0.00031040575;
+}
