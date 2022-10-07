@@ -7,3 +7,8 @@ tutorials/coreshell_disk/.ipynb_checkpoints/*
 tutorials/coreshell_disk/HDF5
 tutorials/pybind/.ipynb_checkpoints/*
 tutorials/pybind/*.log
+tests/validation/circle_lattice_test*
+tests/validation/3Dsphere_test*
+tests/validation/CoreShelltest*
+tests/validation/grating_test*
+tests/validation/spheretest_*
