@@ -1,4 +1,0 @@
-[submodule "cyrsoxs"]
-	path = cyrsoxs
-	url = https://github.com/usnistgov/cyrsoxs.git
-	ignore = dirty
