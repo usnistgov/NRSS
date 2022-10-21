@@ -5,14 +5,21 @@ Getting Started
 Hardware Requirements
 _____________________
 
-* The CyRSoXS submodule requires an NVIDIA GPU.
+CyRSoXS requires an NVIDIA GPU.
 
 Installation on Linux
 _____________________
 
-**NOTE:** This installation guide uses the Anaconda Python distribution. Any Python installation ``version >=3.6`` should work, you will just need to point CMake to your specific installation. git, conda, and pip are also used, and it is assumed you have working installations of all three.
+**NOTE:** This installation guide uses the Anaconda Python distribution. Any Python 
+installation ``version >=3.6`` should work, you will just need to point CMake to your 
+specific installation. git, conda, and pip are also used, and it is assumed you have 
+working installations of all three.
 
-NRSS & PyHyperScattering
+**CyRSoXS v1.1.5.0** is now Conda installable and no longer requires building from 
+source. If you need to compile from source (to enable double-precision, for example) 
+the instructions are provided below.
+
+Conda Installation
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Clone NRSS from the github repository:
@@ -21,18 +28,15 @@ Clone NRSS from the github repository:
 
     git clone https://github.com/usnistgov/NRSS.git
 
-Navigate to the cloned repository and initialize the CyRSoXS submodule and its submodules:
 
-.. code-block:: bash
-
-    git submodule update --init --recursive 
-
-Use the environment.yml file to create a new virtual environment, and activate it:
+Use the ``environment.yml`` file to create a new virtual environment, and activate it:
 
 .. code-block:: bash
 
     conda env create -f environment.yml
     conda activate nrss
+
+CyRSoXS is listed as a dependency in ``environment.yml``, and will automatically be installed.
 
 Now we can pip install NRSS, which will also install PyHyperScattering as a dependency:
 
@@ -40,12 +44,51 @@ Now we can pip install NRSS, which will also install PyHyperScattering as a depe
 
     pip install .
 
-CyRSoXS
-^^^^^^^
+The conda-forge distribution of CyRSoXS includes the executable and Python Shared Library File. 
+You can use the CyRSoXS executable from the shell:
 
-The build instructions here mirror what is provided on the usnistgov/cyrsoxs github repo, with slight modifications for the repo as a submodule.
+.. code-block:: bash
+    
+    CyRSoXS <Morphology HDF5>
 
-**NOTE:** Before installing the dependencies below, make sure to navigate out of the NRSS directory.
+or import CyRSoXS to a python script or jupyter notebook:
+
+.. code-block:: python
+
+    import CyRSoXS
+
+After importing, you should see the following output:
+
+.. code-block:: console
+
+    CyRSoXS
+    ============================================================================
+    Size of Real               : 4
+    Maximum Number Of Material : 32
+     __________________________________________________________________________________________________
+    |                                 Thanks for using Cy-RSoXS                                        |
+    |--------------------------------------------------------------------------------------------------|
+    |  Copyright          : Iowa State University                                                      |
+    |  License            : NIST                                                                       |
+    |  Acknowledgement    : ONR MURI                                                                   |
+    |                                                                                                  |
+    |  Developed at Iowa State University in collaboration with NIST                                   |
+    |                                                                                                  |
+    |  Please cite the following publication :                                                         |
+    |  Comments/Questions :                                                                            |
+    |          1. Dr. Baskar GanapathySubramanian (baskarg@iastate.edu)                                |
+    |          2. Dr. Adarsh Krishnamurthy        (adarsh@iastate.edu)                                 |
+    |          3. Dr. Dean DeLongchamp            (dean.delongchamp@nist.gov)                          |
+    -------------------------------------------------------------------------------------------------- 
+    Version   :  <version_number>
+    Git patch :  <git_patch_number>
+
+Building CyRSoXS from source
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**NOTE:** These installation instructions use Conda to install the required dependencies. 
+If you prefer to manually install and manage these dependencies, please see the 
+installation instructions at https://github.com/usnistgov/cyrsoxs/blob/main/docs/INSTALL.md
 
 **Dependencies**
 
@@ -64,67 +107,18 @@ The build instructions here mirror what is provided on the usnistgov/cyrsoxs git
 * Doxygen
 * Docker
 
-**Compiling Libconfig**
-
-Libconfig's build system is `Autotools <https://www.gnu.org/software/automake/manual/html_node/Autotools-Introduction.html>`_, which means you'll need to run ``./configure`` and then ``make`` to build.
-
-This guide recommends passing ``--prefix=`pwd`/install`` to ``./configure``, which will cause ``make install`` to copy the output files to ``[your_libconfig_dir]/install`` instead of ``/usr``. This way your libconfig install lives completely inside your libconfig folder. This is necessary if you are working on a system where you don't have admin privileges (i.e. an HPC cluster).
-
-
-Download and extract:
+Clone CyRSoXS from the github repository:
 
 .. code-block:: bash
 
-    cd $LIBCONFIG_INSTALL_DIRECTORY
-    wget http://hyperrealm.github.io/libconfig/dist/libconfig-1.7.2.tar.gz
-    tar xvf libconfig-1.7.2.tar.gz
-    rm libconfig-1.7.2.tar.gz
+    git clone https://github.com/usnistgov/cyrsoxs.git
 
-Compile and copy output files to libconfig-1.7.2/install:
+Use the ``environment-build.yml`` file to create a new virtual environment, and activate it:
 
 .. code-block:: bash
 
-    cd libconfig-1.7.2
-    ./configure --prefix=`pwd`/install
-    make -j8  # compile with 8 threads
-    make install
-
-**NOTE:** On some HPC clusters (when using the Intel compiler), the ``make`` step gives a linker error. This is the libconfig example program failing to link with the Intel runtime. This is okay - the libconfig library itself compiles just fine. Just run ``make install`` and double check that ``install/lib`` contains some ``*.a`` files.
-
-
-Permanently set ``$LIBCONFIG_DIR`` environment variable and set ``LD_LIBRARY_PATH`` to include the libconfig lib directory to prevent dynamic linking errors with libconfig++.so:
-
-.. code-block:: bash
-
-    echo "export LIBCONFIG_DIR=`pwd`/install" >> ~/.bashrc
-    echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:\$LIBCONFIG_DIR/lib" >> ~/.bashrc
-    source ~/.bashrc
-
-
-**Installing HDF5**
-
-Cy-RSoXS uses the `HDF5 <https://en.wikipedia.org/wiki/Hierarchical_Data_Format>`_ library to store morphology models and simulated scattering patterns. To install:
-
-.. code-block:: bash
-
-    cd $HDF5_INSTALL_DIRECTORY
-    wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-1.10.5/src/CMake-hdf5-1.10.5.tar.gz
-    tar -xzvf CMake-hdf5-1.10.5.tar.gz
-    rm CMake-hdf5-1.10.5.tar.gz
-    cd CMake-hdf5-1.10.5
-    ./build-unix.sh
-
-This step might take some time. Do not cancel until all the tests have passed.
-This step will create cmake files at ``$HFD5_DIR/build/_CPack_Packages/Linux/TGZ/HDF5-1.10.5-Linux/HDF_Group/HDF5/1.10.5/share/cmake/hdf5``
-
-Export the path for HDF5:
-
-.. code-block:: bash
-
-    cd build/_CPack_Packages/Linux/TGZ/HDF5-1.10.5-Linux/HDF_Group/HDF5/1.10.5/share/cmake/hdf5;
-    echo "export HDF5_DIR=`pwd`" >> ~/.bashrc
-    source ~/.bashrc
-
+    conda env create -f environment-build.yml
+    conda activate cyrsoxs-build
 
 **Building CyRSoXS without Pybind**
 
@@ -161,7 +155,7 @@ At this point you should have a working CyRSoXS installation. If you also want t
     cd $CyRSoXS_DIR
     mkdir build_pybind;
     cd build_pybind;
-    cmake .. -DCMAKE_BUILD_TYPE=Release -DPYBIND=Yes
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DPYBIND=Yes -DUSE_SUBMODULE_PYBIND=No
 
 Depending on where your python installation is, you may need to point CMake to it by including the following compile flags:
 
@@ -208,7 +202,7 @@ Now you can import CyRSoXS in a python script or jupyter notebook:
 
     import CyRSoXS
 
-You should see the following output:
+Again, you should see the following output:
 
 .. code-block:: console
 
@@ -228,7 +222,7 @@ You should see the following output:
     |  Please cite the following publication :                                                         |
     |  Comments/Questions :                                                                            |
     |          1. Dr. Baskar GanapathySubramanian (baskarg@iastate.edu)                                |
-    |          2. Dr. Adrash Krishnamurthy        (adarsh@iastate.edu)                                 |
+    |          2. Dr. Adarsh Krishnamurthy        (adarsh@iastate.edu)                                 |
     |          3. Dr. Dean DeLongchamp            (dean.delongchamp@nist.gov)                          |
     -------------------------------------------------------------------------------------------------- 
     Version   :  <version_number>
