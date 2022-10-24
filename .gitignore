@@ -14,3 +14,5 @@ tests/validation/grating_test*
 tests/validation/spheretest_*
 tests/validation/.ipynb_checkpoints/*
 tests/validation/lib/__pycache__
+.ipynb_checkpoints
+NRSS/.ipynb_checkpoints

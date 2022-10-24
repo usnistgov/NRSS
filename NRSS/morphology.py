@@ -2,8 +2,8 @@ import h5py
 import pathlib
 import CyRSoXS as cy
 import warnings
-from NRSS.checkH5 import check_NumMat
-from NRSS.reader import read_material, read_config
+from .checkH5 import check_NumMat
+from .reader import read_material, read_config
 import numpy as np
 import xarray as xr
 import sys
