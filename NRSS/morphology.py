@@ -336,8 +336,8 @@ class OpticalConstants:
     def __repr__(self):
         return f'OpticalConstants (Material : {self.name}, Number of Energies : {len(self.energies)})'
 
-    
-    def calc_constants(self, energies, reference_data, name='unknown'):
+    @classmethod
+    def calc_constants(cls, energies, reference_data, name='unknown'):
         deltabeta = dict()
         for energy in energies:
             dPara = np.interp(energy,reference_data['Energy'],reference_data['DeltaPara'])
@@ -345,9 +345,7 @@ class OpticalConstants:
             dPerp = np.interp(energy,reference_data['Energy'],reference_data['DeltaPerp'])
             bPerp = np.interp(energy,reference_data['Energy'],reference_data['BetaPerp'])
             deltabeta[energy] = [dPara, bPara, dPerp, bPerp]
-        self.energies = energies
-        self.opt_constants = deltabeta
-        self.name = name
+        return cls(energies,deltabeta,name=name)
 
     @classmethod
     def load_matfile(cls, matfile,name='unknown'):
