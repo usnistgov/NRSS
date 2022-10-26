@@ -67,15 +67,17 @@ class Morphology:
                     ,'WindowingType':['windowingType',[cy.FFTWindowing.NoPadding, cy.FFTWindowing.Hanning]]
                     }
 
+
+    
     def __init__(self, numMaterial, materials=None, PhysSize=None, NumZYX=None, 
                 config = {'CaseType':0, 'MorphologyType': 0, 'Energies': [270.0], 'EAngleRotation':[0.0, 1.0, 0.0]}, create_CyObject=False):
         self._numMaterial = numMaterial
         self._PhysSize = PhysSize
         self.NumZYX = NumZYX
-        self._config = config
+        self._config = config.copy()
         self.materials = materials
         if self.materials is not None:
-            self.config['Energies'] = materials[1].energies
+            self._config['Energies'] = materials[1].energies
         self.inputData = None
         self.simulated = False
         if create_CyObject:
@@ -121,13 +123,9 @@ class Morphology:
         return self._config
 
     @config.setter
-    def config(self,dict1=None,**kwargs):
-        if dict1:
-            self._config = dict1
-        else:
-            for key in kwargs:
-                self._config[key] = kwargs[key]
-            # update inputData to reflect config
+    def config(self,dict1):
+        self._config = dict1
+        # update inputData to reflect config
         if self.inputData:
             self.config_to_inputData()
 
@@ -158,7 +156,7 @@ class Morphology:
             
     
     def load_config(self, config_file):
-        self.config = read_config(config_file)
+        self._config = read_config(config_file)
         
     
     def load_matfile(self, matfile):
@@ -189,7 +187,7 @@ class Morphology:
 
 
     def updateOpticalConstants(self):
-        for energy in self.config['Energies']:
+        for energy in self._config['Energies']:
             all_constants = []
             for ID in range(1,self.numMaterial+1):
                 all_constants.append(self.materials[ID].opt_constants[energy])
@@ -207,11 +205,11 @@ class Morphology:
             warnings.warn('Validation failed. Double check voxel data values')
         
     def config_to_inputData(self):
-        for key in self.config:
+        for key in self._config:
             if key == "Energies":
-                self.inputData.setEnergies(self.config[key])
+                self.inputData.setEnergies(self._config[key])
             elif key == 'EAngleRotation':
-                angles = self.config[key]
+                angles = self._config[key]
                 self.inputData.setERotationAngle(StartAngle = float(angles[0]), 
                                                     EndAngle = float(angles[2]), 
                                                     IncrementAngle = float(angles[1]))
@@ -219,9 +217,12 @@ class Morphology:
             elif key in self.input_mapping.keys():
                 func = getattr(self.inputData,self.input_mapping[key][0])
                 if callable(func):
-                    func(self.input_mapping[key][1][self.config[key]])
+                    func(self.input_mapping[key][1][self._config[key]])
+                # if the attribute is not callable, use input_mapping to set the attribute
                 else:
-                    func = self.input_mapping[key][1][self.config[key]]
+                    setattr(self.inputData,
+                            self.input_mapping[key][0],
+                            self.input_mapping[key][1][self._config[key]])
             else:
                 warnings.warn(f'{key} is currently not implemented')    
             
@@ -239,6 +240,8 @@ class Morphology:
     
     #submit to CyRSoXS
     def run(self,stdout=True,stderr=True, return_xarray=True, print_vec_info=False):
+        # run one more time to make sure everything has been updated
+        self.config_to_inputData()
         # if we haven't created a ScatteringPattern object, create it now
         try:
             self.scatteringPattern
@@ -260,15 +263,15 @@ class Morphology:
                 f = open(os.devnull,'w')
                 sys.stdout = f
 
-            scattering_data = np.zeros((self.NumZYX[1],self.NumZYX[2],len(self.config['Energies'])))
+            scattering_data = np.zeros((self.NumZYX[1],self.NumZYX[2],len(self._config['Energies'])))
 
-            for i,energy in enumerate(self.config['Energies']):
+            for i,energy in enumerate(self._config['Energies']):
                 scattering_data[:,:,i] = self.scatteringPattern.dataToNumpy(energy,0)
             qy = np.fft.fftshift(np.fft.fftfreq(self.NumZYX[1],d=self.PhysSize))
             qx = np.fft.fftshift(np.fft.fftfreq(self.NumZYX[2],d=self.PhysSize))
             scattering_data = xr.DataArray(scattering_data,
                                             dims=['qy','qx','energy'],
-                                            coords={'qy':qy,'qx':qx,'energy':self.config['Energies']})
+                                            coords={'qy':qy,'qx':qx,'energy':self._config['Energies']})
             
             if not print_vec_info:
                 sys.stdout = old_stdout
