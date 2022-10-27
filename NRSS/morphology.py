@@ -75,9 +75,11 @@ class Morphology:
         self._PhysSize = PhysSize
         self.NumZYX = NumZYX
         self._config = config.copy()
-        self.materials = materials
-        if self.materials is not None:
+        if materials is not None:
+            self.materials = materials
             self._config['Energies'] = materials[1].energies
+        else:
+            self.materials = None
         self.inputData = None
         self.simulated = False
         if create_CyObject:
