@@ -8,6 +8,7 @@ import numpy as np
 import xarray as xr
 import sys
 import os
+import copy
 
 class Morphology:
     '''
@@ -54,43 +55,178 @@ class Morphology:
         Creates a CyRSoXS VoxelData object and populates it with the voxel information from the materials dict
     
     run(stdout=True,stderr=True, return_xarray=True, print_vec_info=False)
-        Creates a CyRSoXS ScatteringPattern object if not already created, and submits all CyRSoXS objects to run the simulation
+        Creates a CyRSoXS ScatteringPattern object if not already created, and submits all CyRSoXS objects to 
+        run the simulation
     
     scattering_to_xarray(return_xarray=True,print_vec_info=False)
-        Copies the CyRSoXS ScatteringPattern arrays to an xarray in the format used by PyHyperScattering for further analysis
+        Copies the CyRSoXS ScatteringPattern arrays to an xarray in the format used by PyHyperScattering for 
+        further analysis
     '''
 
     # dict to deal with specific CyRSoXS input objects. dict structure inspired from David Ackerman's cyrsoxs-framework
-    input_mapping = {'CaseType':['setCaseType',[cy.CaseType.Default,cy.CaseType.BeamDivergence,cy.CaseType.GrazingIncidence]]
-                    ,'MorphologyType':['setMorphologyType',[cy.MorphologyType.EulerAngles, cy.MorphologyType.VectorMorphology]]
-                    ,'EwaldsInterpolation':['interpolationType',[cy.InterpolationType.NearestNeighour, cy.InterpolationType.Linear]]
-                    ,'WindowingType':['windowingType',[cy.FFTWindowing.NoPadding, cy.FFTWindowing.Hanning]]
+    input_mapping = {'CaseType':['setCaseType',[cy.CaseType.Default,cy.CaseType.BeamDivergence,cy.CaseType.GrazingIncidence]],
+                     'MorphologyType':['setMorphologyType',[cy.MorphologyType.EulerAngles, cy.MorphologyType.VectorMorphology]],
+                     'EwaldsInterpolation':['interpolationType',[cy.InterpolationType.NearestNeighour, cy.InterpolationType.Linear]],
+                     'WindowingType':['windowingType',[cy.FFTWindowing.NoPadding, cy.FFTWindowing.Hanning]],
+                     'RotMask':['rotMask',[False, True]],
+                     'AlgorithmType':['setAlgorithm',[0, 1]]
                     }
 
 
+    config_default = {'CaseType':0, 'Energies':[270.0], 'EAngleRotation':[0.0, 1.0, 0.0], 
+                      'MorphologyType':0, 'AlgorithmType':0, 'WindowingType':0, 
+                      'RotMask':0, 
+                      'EwaldsInterpolation':1}
+
     
-    def __init__(self, numMaterial, materials=None, PhysSize=None, NumZYX=None, 
-                config = {'CaseType':0, 'MorphologyType': 0, 'Energies': [270.0], 'EAngleRotation':[0.0, 1.0, 0.0]}, create_CyObject=False):
+    def __init__(self, numMaterial, materials=None, PhysSize=None,
+                config = {'CaseType':0, 'MorphologyType': 0, 'Energies': [270.0], 'EAngleRotation':[0.0, 1.0, 0.0]}):
+        
         self._numMaterial = numMaterial
         self._PhysSize = PhysSize
-        self.NumZYX = NumZYX
-        self._config = config.copy()
-        if materials is not None:
-            self.materials = materials
-            self._config['Energies'] = materials[1].energies
-        else:
-            self.materials = None
+        self.NumZYX = None
         self.inputData = None
-        self.simulated = False
-        if create_CyObject:
-            self.create_InputData()
-            if self.materials:
-                self.create_OpticalConstants()
-                self.create_voxelData()
+        self.OpticalConstants = None
+        self.voxelData = None
+        self.scatteringPattern = None
+        # add config keys and values to class dict
+        for key in self.config_default:
+            if key in config:
+                self.__dict__['_'+key] = config[key]
+            else:
+                self.__dict__['_'+key] = self.config_default[key]
+
+        # add materials
+        self.materials = {}
+        for i in range(1,self._numMaterial+1):
+            if materials is None:
+                self.materials[i] = Material(materialID=i)
+            else:
+                try:
+                    self.materials[i] = materials[i].copy()
+                    if i == 1:
+                        self._Energies = materials[i].energies
+                except KeyError:
+                    warnings.warn('numMaterial is greater than number of Material objects passed in. Creating empty Material')
+                    self.materials[i] = Material(materialID=i)
+
+        # flag denoting if Morphology has been simulated
+        self._simulated = False
 
     
     def __repr__(self):
         return f'Morphology (NumMaterial : {self.numMaterial}, PhysSize : {self.PhysSize})'
+
+    @property
+    def CaseType(self):
+        return self._CaseType
+    
+    @CaseType.setter
+    def CaseType(self, casevalue):
+        if (casevalue != 0) & (casevalue != 1) & (casevalue !=2):
+            raise ValueError('CaseType must be 0, 1, or 2')
+        else:
+            self._CaseType = casevalue
+        
+            if self.inputData:
+                self.inputData.setCaseType(self.input_mapping['CaseType'][1][casevalue])
+
+    @property
+    def Energies(self):
+        return self._Energies
+    
+    @Energies.setter
+    def Energies(self, Elist):
+        self._Energies = Elist
+
+        if self.inputData:
+            self.inputData.setEnergies(Elist)
+    
+    @property
+    def EAngleRotation(self):
+        return self._EAngleRotation
+
+    @EAngleRotation.setter
+    def EAngleRotation(self, anglelist):
+        self._EAngleRotation = anglelist
+
+        if self.inputData:
+            self.inputData.setERotationAngle(StartAngle=anglelist[0],
+                                             EndAngle=anglelist[2],
+                                             IncrementAngle=anglelist[1])
+    
+    @property
+    def MorphologyType(self):
+        return self._MorphologyType
+    
+    @MorphologyType.setter
+    def MorphologyType(self, value):
+        if value != 0:
+            raise ValueError('Only Euler Morphology is currently supported')
+        else:
+            self._MorphologyType = value
+
+            if self.inputData:
+                self.inputData.setMorphologyType(self.input_mapping['MorphologyType'][1][value])
+    
+    @property
+    def AlgorithmType(self):
+        return self._AlgorithmType
+    
+    @AlgorithmType.setter
+    def AlgorithmType(self, value):
+        if (value != 0) & (value != 1):
+            raise ValueError('AlgorithmType must be 0 (communication minimizing) or 1 (memory minimizing).')
+        else:
+            self._AlgorithmType = value
+            if self.inputData:
+                self.inputData.setAlgorithm(AlgorithmID=value,MaxStreams=1)
+
+    @property
+    def WindowingType(self):
+        return self._WindowingType
+    
+    @WindowingType.setter
+    def WindowingType(self, value):
+        if (value != 0) & (value != 1):
+            raise ValueError('WindowingType must be 0 (None) or 1 (Hanning).')
+        else:
+            self._WindowingType = value
+
+            if self.inputData:
+                self.inputData.windowingType = self.input_mapping['WindowingType'][1][value]
+    
+    @property
+    def RotMask(self):
+        return self._RotMask
+    
+    @RotMask.setter
+    def RotMask(self, value):
+        if (value != 0) & (value != 1):
+            raise ValueError('RotMask must be 0 (False) or 1 (True).')
+        else:
+            self._RotMask = value
+
+            if self.inputData:
+                self.inputData.rotMask = self._RotMask
+    
+    @property
+    def EwaldsInterpolation(self):
+        return self._EwaldsInterpolation
+    
+    @EwaldsInterpolation.setter
+    def EwaldsInterpolation(self, value):
+        if (value != 0) & (value != 1):
+            raise ValueError('EwaldsInterpolation must be 0 (Nearest Neighbor) or 1 (Trilinear).')
+        else:
+            self._EwaldsInterpolation = value
+
+            if self.inputData:
+                self.inputData.interpolationType = self.input_mapping['EwaldsInterpolation'][1][value]
+    
+    @property
+    def simulated(self):
+        return self._simulated
 
     @property
     def PhysSize(self):
@@ -109,30 +245,32 @@ class Morphology:
     def numMaterial(self):
         return self._numMaterial
     
-    @numMaterial.setter
-    def numMaterial(self, val):
-        if val < 0:
-            raise ValueError('numMaterial must be greater than 0')
-        self._numMaterial = int(val)
-        # if we change the number of materials and we have an inputData object, we need to recreate it with the new number of materials
-        if self.inputData:
-            self.create_InputData()
-        if self.OpticalConstants:
-            self.updateOpticalConstants()
+    # @numMaterial.setter
+    # def numMaterial(self, val):
+    #     if val < 0:
+    #         raise ValueError('numMaterial must be greater than 0')
+    #     self._numMaterial = int(val)
+    #     # if we change the number of materials and we have an inputData object, we need to recreate it with the new number of materials
+    #     if self.inputData:
+    #         self.create_InputData()
+    #     if self.OpticalConstants:
+    #         self.updateOpticalConstants()
     
     @property
     def config(self):
-        return self._config
+        return {key: self.__dict__['_'+key] for key in self.config_default}
 
     @config.setter
     def config(self,dict1):
-        self._config = dict1
-        # update inputData to reflect config
-        if self.inputData:
-            self.config_to_inputData()
+        for key in dict1:
+            if key in self.config_default:
+                self.__dict__['_'+key] = dict1[key]
+            else:
+                warnings.warn(f'Key {key} not supported')
+
 
     @classmethod
-    def load_morph_hdf5(cls,hdf5_file, create_CyObject=True):
+    def load_morph_hdf5(cls,hdf5_file):
         with h5py.File(hdf5_file,'r') as f:
             if 'Euler_Angles' not in f.keys():
                 raise KeyError('Only the Euler Angle convention is currently supported')
@@ -154,13 +292,12 @@ class Morphology:
                                                  psi=psi,
                                                  NumZYX=Vfrac.shape)
 
-        return cls(numMat, materials=materials, PhysSize=PhysSize, NumZYX=materials[materialID].NumZYX, create_CyObject=True)
+        return cls(numMat, materials=materials, PhysSize=PhysSize)
             
     
     def load_config(self, config_file):
-        self._config = read_config(config_file)
+        self.config = read_config(config_file)
         
-    
     def load_matfile(self, matfile):
         return read_material(matfile)
 
@@ -189,7 +326,7 @@ class Morphology:
 
 
     def updateOpticalConstants(self):
-        for energy in self._config['Energies']:
+        for energy in self.Energies:
             all_constants = []
             for ID in range(1,self.numMaterial+1):
                 all_constants.append(self.materials[ID].opt_constants[energy])
@@ -197,37 +334,61 @@ class Morphology:
 
     def create_voxelData(self):
         self.voxelData = cy.VoxelData(InputData = self.inputData)
+        self.update_voxelData()
+        if not self.voxelData.validate():
+            warnings.warn('Validation failed. Double check voxel data values')
+
+    def update_voxelData(self):
         for ID in range(1, self.numMaterial+1):
             self.voxelData.addVoxelData(S=self.materials[ID].S.astype(np.single),
                                         Theta=self.materials[ID].theta.astype(np.single),
                                         Psi=self.materials[ID].psi.astype(np.single),
                                         Vfrac=self.materials[ID].Vfrac.astype(np.single),
                                         MaterialID=ID)
-        if not self.voxelData.validate():
-            warnings.warn('Validation failed. Double check voxel data values')
-        
+
     def config_to_inputData(self):
-        for key in self._config:
+        for key in self.config:
             if key == "Energies":
-                self.inputData.setEnergies(self._config[key])
+                self.inputData.setEnergies(self.config[key])
             elif key == 'EAngleRotation':
-                angles = self._config[key]
+                angles = self.config[key]
                 self.inputData.setERotationAngle(StartAngle = float(angles[0]), 
                                                     EndAngle = float(angles[2]), 
                                                     IncrementAngle = float(angles[1]))
+            elif key == 'AlgorithmType':
+                self.inputData.setAlgorithm(AlgorithmID=self.config[key], MaxStreams=1)
             # if the key corresponds to one of the idiosyncratic methods, use this
             elif key in self.input_mapping.keys():
                 func = getattr(self.inputData,self.input_mapping[key][0])
                 if callable(func):
-                    func(self.input_mapping[key][1][self._config[key]])
+                    func(self.input_mapping[key][1][self.config[key]])
                 # if the attribute is not callable, use input_mapping to set the attribute
                 else:
                     setattr(self.inputData,
                             self.input_mapping[key][0],
-                            self.input_mapping[key][1][self._config[key]])
+                            self.input_mapping[key][1][self.config[key]])
             else:
                 warnings.warn(f'{key} is currently not implemented')    
-            
+    def create_update_Cy(self):
+        # create or update all CyRSoXS objects
+        if self.inputData:
+            self.config_to_inputData()
+        else:
+            self.create_InputData()
+
+        #create or update OpticalConstants
+        if self.OpticalConstants:
+            self.updateOpticalConstants()            
+        else:
+            self.create_OpticalConstants()
+        
+        #create or udpate voxelData
+        if self.voxelData:
+            self.voxelData.reset()
+            self.update_voxelData()
+        else:
+            self.create_voxelData()
+
     #TODO : function to write morphology to HDF5
     def write_hdf5(self,):
         pass
@@ -242,19 +403,18 @@ class Morphology:
     
     #submit to CyRSoXS
     def run(self,stdout=True,stderr=True, return_xarray=True, print_vec_info=False):
-        # run one more time to make sure everything has been updated
-        self.config_to_inputData()
+
+        self.create_update_Cy()
+        
         # if we haven't created a ScatteringPattern object, create it now
-        try:
-            self.scatteringPattern
-        except AttributeError:
+        if not self.scatteringPattern:
             self.scatteringPattern = cy.ScatteringPattern(self.inputData)
         with cy.ostream_redirect(stdout=stdout,stderr=stderr):
             cy.launch(VoxelData=self.voxelData, 
                       RefractiveIndexData=self.OpticalConstants, 
                       InputData=self.inputData,
                       ScatteringPattern=self.scatteringPattern)
-        self.simulated = True
+        self._simulated = True
         if return_xarray:
             return self.scattering_to_xarray(return_xarray=return_xarray,print_vec_info=print_vec_info)
 
@@ -265,15 +425,15 @@ class Morphology:
                 f = open(os.devnull,'w')
                 sys.stdout = f
 
-            scattering_data = np.zeros((self.NumZYX[1],self.NumZYX[2],len(self._config['Energies'])))
+            scattering_data = np.zeros((self.NumZYX[1],self.NumZYX[2],len(self.config['Energies'])))
 
-            for i,energy in enumerate(self._config['Energies']):
+            for i,energy in enumerate(self.config['Energies']):
                 scattering_data[:,:,i] = self.scatteringPattern.dataToNumpy(energy,0)
             qy = np.fft.fftshift(np.fft.fftfreq(self.NumZYX[1],d=self.PhysSize))
             qx = np.fft.fftshift(np.fft.fftfreq(self.NumZYX[2],d=self.PhysSize))
             scattering_data = xr.DataArray(scattering_data,
                                             dims=['qy','qx','energy'],
-                                            coords={'qy':qy,'qx':qx,'energy':self._config['Energies']})
+                                            coords={'qy':qy,'qx':qx,'energy':self.config['Energies']})
             
             if not print_vec_info:
                 sys.stdout = old_stdout
@@ -407,3 +567,16 @@ class Material(OpticalConstants):
     def __repr__(self):
         return f'Material (Name : {self.name}, ID : {self.materialID}, Shape : {self.NumZYX})'
 
+    def __copy__(self):
+        return Material(materialID=self.materialID,
+                        Vfrac=self.Vfrac.copy(),
+                        S=self.S.copy(),
+                        theta=self.theta.copy(),
+                        psi=self.psi.copy(),
+                        NumZYX=self.NumZYX,
+                        energies=self.energies,
+                        opt_constants=self.opt_constants,
+                        name=self.name)
+    
+    def copy(self):
+        return copy.copy(self)
