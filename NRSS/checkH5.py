@@ -89,8 +89,10 @@ def readH5_vector(filename):
     theta = S.copy()
     psi = S.copy()
     
-    S = np.sum(alignment**2,axis=-1)
-    Vfrac = unaligned + S
+    s2 = np.sum(alignment**2,axis=-1)
+    Vfrac = unaligned + s2
+    S = s2/Vfrac
+    np.nan_to_num(S, copy=False)
     
     #calculate theta and psi from vectors
     z = np.array([0,0,1])
@@ -100,6 +102,9 @@ def readH5_vector(filename):
     np.nan_to_num(normed_vectors,copy=False)
     theta = np.arccos(np.dot(normed_vectors,z))
     psi = np.arccos(np.dot(normed_vectors,x))
+    
+    S = np.round(S, 6)
+    Vfrac = np.round(Vfrac, 6)
     
     return Vfrac, S, theta, psi
 
