@@ -5,7 +5,7 @@ import warnings
 import pathlib
 
 
-def write_hdf5(material_list, PhysSize, fname, MorphologyType = 0, ordering='ZYX', author='NIST'):
+def write_hdf5(material_list, PhysSize, fname, MorphologyType=0, ordering='ZYX', author='NIST'):
     '''
     Writes Euler or Vector Morphology format into CyRSoXS-compatible HDF5 file and returns the hdf5 filename
 
@@ -34,7 +34,7 @@ def write_hdf5(material_list, PhysSize, fname, MorphologyType = 0, ordering='ZYX
     '''
 
     print(f'--> Marking {fname}')
-    with h5py.File(fname,'w') as f:
+    with h5py.File(fname, 'w') as f:
         num_mat = len(material_list)
         if MorphologyType == 0:
             i = 1
@@ -68,13 +68,14 @@ def write_hdf5(material_list, PhysSize, fname, MorphologyType = 0, ordering='ZYX
         f.create_dataset('Morphology_Parameters/morphology_creator', data=author)
         f.create_dataset('Morphology_Parameters/PhysSize', data=PhysSize)
         f.create_dataset('Morphology_Parameters/NumMaterial', data=num_mat)
-    
+
     return fname
 
-def write_config(Energies, EAngleRotation, CaseType=0, MorphologyType=0, 
-                NumThreads=4, AlgorithmType=0, DumpMorphology=False,
-                ScatterApproach=0, WindowingType=0, RotMask=False,
-                EwaldsInterpolation=1):
+
+def write_config(Energies, EAngleRotation, CaseType=0, MorphologyType=0,
+                 NumThreads=4, AlgorithmType=0, DumpMorphology=False,
+                 ScatterApproach=0, WindowingType=0, RotMask=False,
+                 EwaldsInterpolation=1):
     """
     Writes config.txt file for CyRSoXS simulations
 
@@ -115,20 +116,20 @@ def write_config(Energies, EAngleRotation, CaseType=0, MorphologyType=0,
             Type of interpolation for Ewald Sphere projection
             0 - Nearest Neighbor
             1 - Trilinear
-        
+
     Returns
     -------
         None
     """
     f = open('config.txt', "w")
-    
+
     # required
     f.write("CaseType = " + str(CaseType) + ";\n")
     f.write("Energies = " + str(Energies) + ";\n")
     f.write("EAngleRotation = " + str(EAngleRotation) + ";\n")
     f.write("MorphologyType = " + str(MorphologyType) + ";\n")
-    
-    #optional, but written by default
+
+    # optional, but written by default
     f.write("AlgorithmType = " + str(AlgorithmType) + ";\n")
     f.write("NumThreads = " + str(NumThreads) + ";\n")
     f.write("DumpMorphology = " + str(DumpMorphology) + ";\n")
@@ -150,12 +151,12 @@ def write_slurm(hdf5_filename, cyrsoxs_version='latest'):
             Name of morphology HDF5 file to be simulated. Can include path
         cyrsoxs_version : str
             String denoting which version of CyRSoXS to run
-    
+
     Returns
     -------
         None
     """
-    
+
     f = open("job.slurm","w")
     f.write('#!/bin/bash -l\n')
     f.write('#SBATCH --job-name=CYRSOXS      # Job name\n')
@@ -247,16 +248,16 @@ def get_interpolated_value(array, value, nearest_id, energy_id):
 def removeDuplicates(Data, energy_id):
     """
     Function to remove duplicate energies
-    
+
     Parameters
     ----------
-    
+
     Data : ndarray
     energy_id : int
 
     Returns
     -------
-    
+
     listOut : ndarray
 
     """
@@ -387,6 +388,7 @@ def write_materials(energies, materialdict, labelEnergy, numMaterial):
                 dump_dataVacuum(i, currentEnergy, f)
         f.close()
 
+
 def write_opts(optical_constants, material_num, path):
     # pybind ordering is deltaPara, betaPara, deltaPerp, betaPerp
     # CLI ordering is betaPara, betaPerp, deltaPara, deltaPerp
@@ -394,7 +396,7 @@ def write_opts(optical_constants, material_num, path):
         fname = pathlib.Path(path, "Material" + str(material_num) + ".txt")
     else:
         fname = "Material" + str(material_num) + ".txt"
-    f = open(fname,"w")
+    f = open(fname, "w")
     for i, key in enumerate(optical_constants):
         Header = "EnergyData" + str(i) + ":\n{\n"
         f.write(Header)

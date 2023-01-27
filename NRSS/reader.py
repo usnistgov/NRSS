@@ -1,8 +1,5 @@
-import pandas as pd
-import numpy as np
-
 def read_material(filename):
-    with open(filename,'r') as f:
+    with open(filename, 'r') as f:
         lines = f.readlines()
     energy = []
     betapara = []
@@ -25,14 +22,15 @@ def read_material(filename):
         elif line.startswith('DeltaPerp'):
             split_line = line.split(' = ')
             deltaperp.append(float(split_line[1].strip(';\n')))
-        
-    deltabeta = [[val1, val2, val3, val4] for val1, val2, val3, val4 in zip(deltapara,betapara,deltaperp,betaperp)]
-    deltabeta = dict(zip(energy,deltabeta))
+
+    deltabeta = [[val1, val2, val3, val4] for val1, val2, val3, val4 in zip(deltapara, betapara, deltaperp, betaperp)]
+    deltabeta = dict(zip(energy, deltabeta))
     return energy, deltabeta
+
 
 def read_config(config_file):
     config_dict = dict()
-    with open(config_file,'r') as f:
+    with open(config_file, 'r') as f:
         d = f.readlines()
 
     # clean and split each line, adding to config dictionary
@@ -51,5 +49,5 @@ def read_config(config_file):
                 config_dict[split_line[0]] = True
             else:
                 config_dict[split_line[0]] = int(split_line[1])
-    
+
     return config_dict
