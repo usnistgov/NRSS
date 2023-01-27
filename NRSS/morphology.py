@@ -4,7 +4,7 @@ import CyRSoXS as cy
 import warnings
 from .checkH5 import check_NumMat
 from .reader import read_material, read_config
-from .writer import write_opts
+from .writer import write_opts, write_hdf5
 import numpy as np
 import xarray as xr
 import sys
@@ -35,7 +35,7 @@ class Morphology:
     config : dict
         A dictionary of configuration parameters for CyRSoXS
     
-    create_CyObject : bool
+    create_cy_object : bool
         Boolean value that decides if the CyRSoXS objects are created upon instantiation
     
     simulated : bool
@@ -43,16 +43,16 @@ class Morphology:
 
     Methods
     -------
-    load_morph_hdf5(hdf5_file, create_CyObject=True)
+    load_morph_hdf5(hdf5_file, create_cy_object=True)
         Class method that creates a Morphology object from a morphology HDF5 file
 
     create_inputData()
         Creates a CyRSoXS InputData object and populates it with parameters from self.config
     
-    create_OpticalConstants()
+    create_optical_constants()
         Creates a CyRSoXS RefractiveIndex object and populates it with optical constants from the materials dict
     
-    create_voxelData()
+    create_voxel_data()
         Creates a CyRSoXS VoxelData object and populates it with the voxel information from the materials dict
     
     run(stdout=True,stderr=True, return_xarray=True, print_vec_info=False)
@@ -83,7 +83,7 @@ class Morphology:
 
     
     def __init__(self, numMaterial, materials=None, PhysSize=None,
-                config = {'CaseType':0, 'MorphologyType': 0, 'Energies': [270.0], 'EAngleRotation':[0.0, 1.0, 0.0]},create_CyObject=False):
+                config = {'CaseType':0, 'MorphologyType': 0, 'Energies': [270.0], 'EAngleRotation':[0.0, 1.0, 0.0]},create_cy_object=True):
         
         self._numMaterial = numMaterial
         self._PhysSize = PhysSize
@@ -117,8 +117,8 @@ class Morphology:
         # flag denoting if Morphology has been simulated
         self._simulated = False
 
-        if create_CyObject:
-            self.create_update_Cy()
+        if create_cy_object:
+            self.create_update_cy()
 
     def __repr__(self):
         return f'Morphology (NumMaterial : {self.numMaterial}, PhysSize : {self.PhysSize})'
@@ -273,9 +273,9 @@ class Morphology:
     #     self._numMaterial = int(val)
     #     # if we change the number of materials and we have an inputData object, we need to recreate it with the new number of materials
     #     if self.inputData:
-    #         self.create_InputData()
+    #         self.create_inputData()
     #     if self.OpticalConstants:
-    #         self.updateOpticalConstants()
+    #         self.update_optical_constants()
     
     @property
     def config(self):
@@ -322,7 +322,7 @@ class Morphology:
     def load_matfile(self, matfile):
         return read_material(matfile)
 
-    def create_InputData(self):
+    def create_inputData(self):
         self.inputData = cy.InputData(NumMaterial=self._numMaterial)
         # parse config dictionary and assign to appropriate places in inputData object
         self.config_to_inputData()
@@ -339,27 +339,27 @@ class Morphology:
         if not self.inputData.validate():
             warnings.warn('Validation failed. Double check inputData values')
     
-    def create_OpticalConstants(self):
+    def create_optical_constants(self):
         self.OpticalConstants = cy.RefractiveIndex(self.inputData)
-        self.updateOpticalConstants()        
+        self.update_optical_constants()        
         if not self.OpticalConstants.validate():
             warnings.warn('Validation failed. Double check optical constant values')
 
 
-    def updateOpticalConstants(self):
+    def update_optical_constants(self):
         for energy in self.Energies:
             all_constants = []
             for ID in range(1,self.numMaterial+1):
                 all_constants.append(self.materials[ID].opt_constants[energy])
             self.OpticalConstants.addData(OpticalConstants=all_constants, Energy=energy)
 
-    def create_voxelData(self):
+    def create_voxel_data(self):
         self.voxelData = cy.VoxelData(InputData = self.inputData)
-        self.update_voxelData()
+        self.update_voxel_data()
         if not self.voxelData.validate():
             warnings.warn('Validation failed. Double check voxel data values')
 
-    def update_voxelData(self):
+    def update_voxel_data(self):
         for ID in range(1, self.numMaterial+1):
             self.voxelData.addVoxelData(S=self.materials[ID].S.astype(np.single),
                                         Theta=self.materials[ID].theta.astype(np.single),
@@ -391,29 +391,32 @@ class Morphology:
             else:
                 warnings.warn(f'{key} is currently not implemented')
 
-    def create_update_Cy(self):
+    def create_update_cy(self):
         # create or update all CyRSoXS objects
         if self.inputData:
             self.config_to_inputData()
         else:
-            self.create_InputData()
+            self.create_inputData()
 
         #create or update OpticalConstants
         if self.OpticalConstants:
-            self.updateOpticalConstants()            
+            self.update_optical_constants()            
         else:
-            self.create_OpticalConstants()
+            self.create_optical_constants()
         
         #create or udpate voxelData
         if self.voxelData:
             self.voxelData.reset()
-            self.update_voxelData()
+            self.update_voxel_data()
         else:
-            self.create_voxelData()
+            self.create_voxel_data()
 
-    #TODO : function to write morphology to HDF5
-    def write_hdf5(self,):
-        pass
+    def write_to_file(self, fname, author='NIST'):
+        _ = write_hdf5([[self.materials[i].Vfrac, 
+                    self.materials[i].S, 
+                    self.materials[i].theta, 
+                    self.materials[i].psi] for i in self.materials],
+                    self.PhysSize, fname, self.MorphologyType, ordering='ZYX', author=author)
     
     #TODO : function to write a config.txt file from config dict
     def write_config(self,):
@@ -426,7 +429,7 @@ class Morphology:
     #submit to CyRSoXS
     def run(self,stdout=True,stderr=True, return_xarray=True, print_vec_info=False):
 
-        self.create_update_Cy()
+        self.create_update_cy()
         
         # if we haven't created a ScatteringPattern object, create it now
         if not self.scatteringPattern:
@@ -446,11 +449,6 @@ class Morphology:
                 old_stdout = sys.stdout
                 f = open(os.devnull,'w')
                 sys.stdout = f
-
-            # scattering_data = np.zeros((self.NumZYX[1],self.NumZYX[2],len(self.config['Energies'])))
-
-            # for i,energy in enumerate(self.config['Energies']):
-            #     scattering_data[:,:,i] = self.scatteringPattern.dataToNumpy(energy,0)
 
             # data will be returned in shape [energy, NumY, NumX]
             scattering_data = self.scatteringPattern.writeAllToNumpy(kID=0)
@@ -472,7 +470,7 @@ class Morphology:
             warnings.warn('You haven\'t run your simulation yet')
 
     #TODO : restructure to have a single checkH5 engine for both NRSS and command line formats
-    def check_materials(self,):
+    def check_materials(self, quiet=True):
         Vfrac_test = np.zeros(self.materials[1].Vfrac.shape)
         for i in range(1, self._numMaterial+1):
             Vfrac_test += self.materials[i].Vfrac
@@ -491,20 +489,20 @@ class Morphology:
         # delete Vfrac_test after validation
         del Vfrac_test
 
-    def validate_all(self):
-        passed = 0
-        if self.inputData.validate():
-            print('inputData has passed validation.')
-            passed += 1
-        if self.OpticalConstants.validate():
-            print('OpticalConstants has passed validation.')
-            passed += 1
-        if self.voxelData.validate():
-            print('voxelData has passed validation.')
-            passed += 1
-        if passed == 3:
-            print('\n')
-            print('All CyRSoXS objects have passed validation, you can run your simulation.')
+        if not quiet:
+            print('All material checks have passed')
+
+    def validate_all(self, quiet=True):
+        self.check_materials(quiet=quiet)
+        input_check = self.inputData.validate()
+        opt_const_check = self.OpticalConstants.validate()
+        voxel_check = self.voxelData.validate()
+        assert (input_check), 'CyRSoXS object inputData validation has failed'
+        assert (opt_const_check), 'CyRSoXS object OpticalConstants validation has failed'
+        assert (voxel_check), 'CyRSoXS object voxelData validation has failed'
+        if not quiet:
+            print('All objects have been validated successfully. You can run your simulation')
+        
 
 
 class OpticalConstants:
@@ -597,13 +595,18 @@ class Material(OpticalConstants):
         self.psi = psi
         self.NumZYX = NumZYX
         self.name = name
+        self.energies = energies
+        self.opt_constants = opt_constants
         if self.NumZYX is None:
             try:
                 self.NumZYX = Vfrac.shape
             except AttributeError:
                 pass
         
-        super().__init__(energies, opt_constants, name=name)
+        if (energies is None) & (opt_constants is not None):
+            self.energies = list(opt_constants.keys())
+        
+        super().__init__(self.energies, self.opt_constants, name=name)
 
     def __repr__(self):
         return f'Material (Name : {self.name}, ID : {self.materialID}, Shape : {self.NumZYX})'
