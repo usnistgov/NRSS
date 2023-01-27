@@ -4,6 +4,7 @@ import CyRSoXS as cy
 import warnings
 from .checkH5 import check_NumMat
 from .reader import read_material, read_config
+from .writer import write_opts
 import numpy as np
 import xarray as xr
 import sys
@@ -69,18 +70,20 @@ class Morphology:
                      'EwaldsInterpolation':['interpolationType',[cy.InterpolationType.NearestNeighour, cy.InterpolationType.Linear]],
                      'WindowingType':['windowingType',[cy.FFTWindowing.NoPadding, cy.FFTWindowing.Hanning]],
                      'RotMask':['rotMask',[False, True]],
-                     'AlgorithmType':['setAlgorithm',[0, 1]]
+                     'AlgorithmType':['setAlgorithm',[0, 1]],
+                     'ReferenceFrame':['referenceFrame',[0,1]]
                     }
 
 
     config_default = {'CaseType':0, 'Energies':[270.0], 'EAngleRotation':[0.0, 1.0, 0.0], 
                       'MorphologyType':0, 'AlgorithmType':0, 'WindowingType':0, 
                       'RotMask':0, 
+                      'ReferenceFrame':1,
                       'EwaldsInterpolation':1}
 
     
     def __init__(self, numMaterial, materials=None, PhysSize=None,
-                config = {'CaseType':0, 'MorphologyType': 0, 'Energies': [270.0], 'EAngleRotation':[0.0, 1.0, 0.0]}):
+                config = {'CaseType':0, 'MorphologyType': 0, 'Energies': [270.0], 'EAngleRotation':[0.0, 1.0, 0.0]},create_CyObject=False):
         
         self._numMaterial = numMaterial
         self._PhysSize = PhysSize
@@ -106,6 +109,7 @@ class Morphology:
                     self.materials[i] = materials[i].copy()
                     if i == 1:
                         self._Energies = materials[i].energies
+                        self.NumZYX = materials[i].NumZYX
                 except KeyError:
                     warnings.warn('numMaterial is greater than number of Material objects passed in. Creating empty Material')
                     self.materials[i] = Material(materialID=i)
@@ -113,7 +117,9 @@ class Morphology:
         # flag denoting if Morphology has been simulated
         self._simulated = False
 
-    
+        if create_CyObject:
+            self.create_update_Cy()
+
     def __repr__(self):
         return f'Morphology (NumMaterial : {self.numMaterial}, PhysSize : {self.PhysSize})'
 
@@ -224,6 +230,21 @@ class Morphology:
             if self.inputData:
                 self.inputData.interpolationType = self.input_mapping['EwaldsInterpolation'][1][value]
     
+
+    @property
+    def ReferenceFrame(self):
+        return self._ReferenceFrame
+
+    @ReferenceFrame.setter
+    def ReferenceFrame(self, value):
+        if (value != 0) & (value != 1):
+            raise ValueError('ReferenceFrame must be 0 (Material Frame) or 1 (Lab Frame - Default).')
+        else:
+            self._ReferenceFrame = value
+
+            if self.inputData:
+                self.inputData.referenceFrame = self.input_mapping['ReferenceFrame'][1][value]
+
     @property
     def simulated(self):
         return self._simulated
@@ -275,16 +296,16 @@ class Morphology:
             if 'Euler_Angles' not in f.keys():
                 raise KeyError('Only the Euler Angle convention is currently supported')
             # get number of materials in HDF5
-            numMat = check_NumMat(f)
-            PhysSize = f['Morphology_Parameters/PhysSize']
+            numMat = check_NumMat(f, morphology_type=0)
+            PhysSize = f['Morphology_Parameters/PhysSize'][()]
             materials = dict()
 
             for i in range(numMat):
                 materialID = i + 1
-                Vfrac= f[f'Euler_Angles/Mat_{i+1}_Vfrac']
-                S = f[f'Euler_Angles/Mat_{i+1}_S']
-                theta = f[f'Euler_Angles/Mat_{i+1}_Theta']
-                psi = f[f'Euler_Angles/Mat_{i+1}_Psi']
+                Vfrac= f[f'Euler_Angles/Mat_{i+1}_Vfrac'][()]
+                S = f[f'Euler_Angles/Mat_{i+1}_S'][()]
+                theta = f[f'Euler_Angles/Mat_{i+1}_Theta'][()]
+                psi = f[f'Euler_Angles/Mat_{i+1}_Psi'][()]
                 materials[materialID] = Material(materialID=materialID, 
                                                  Vfrac=Vfrac,
                                                  S=S,
@@ -368,7 +389,8 @@ class Morphology:
                             self.input_mapping[key][0],
                             self.input_mapping[key][1][self.config[key]])
             else:
-                warnings.warn(f'{key} is currently not implemented')    
+                warnings.warn(f'{key} is currently not implemented')
+
     def create_update_Cy(self):
         # create or update all CyRSoXS objects
         if self.inputData:
@@ -397,9 +419,9 @@ class Morphology:
     def write_config(self,):
         pass
     
-    #TODO : function to write constants to MaterialX.txt files
-    def write_constants(self,):
-        pass
+    def write_constants(self,path=None):
+        for i in range(1, self._numMaterial+1):
+            write_opts(self.materials[i].opt_constants,i, path)
     
     #submit to CyRSoXS
     def run(self,stdout=True,stderr=True, return_xarray=True, print_vec_info=False):
@@ -425,14 +447,17 @@ class Morphology:
                 f = open(os.devnull,'w')
                 sys.stdout = f
 
-            scattering_data = np.zeros((self.NumZYX[1],self.NumZYX[2],len(self.config['Energies'])))
+            # scattering_data = np.zeros((self.NumZYX[1],self.NumZYX[2],len(self.config['Energies'])))
 
-            for i,energy in enumerate(self.config['Energies']):
-                scattering_data[:,:,i] = self.scatteringPattern.dataToNumpy(energy,0)
-            qy = np.fft.fftshift(np.fft.fftfreq(self.NumZYX[1],d=self.PhysSize))
-            qx = np.fft.fftshift(np.fft.fftfreq(self.NumZYX[2],d=self.PhysSize))
+            # for i,energy in enumerate(self.config['Energies']):
+            #     scattering_data[:,:,i] = self.scatteringPattern.dataToNumpy(energy,0)
+
+            # data will be returned in shape [energy, NumY, NumX]
+            scattering_data = self.scatteringPattern.writeAllToNumpy(kID=0)
+            qy = 2*np.pi*np.fft.fftshift(np.fft.fftfreq(self.NumZYX[1],d=self.PhysSize))
+            qx = 2*np.pi*np.fft.fftshift(np.fft.fftfreq(self.NumZYX[2],d=self.PhysSize))
             scattering_data = xr.DataArray(scattering_data,
-                                            dims=['qy','qx','energy'],
+                                            dims=['energy','qy','qx'],
                                             coords={'qy':qy,'qx':qx,'energy':self.config['Energies']})
             
             if not print_vec_info:
@@ -446,9 +471,25 @@ class Morphology:
         else:
             warnings.warn('You haven\'t run your simulation yet')
 
-    #TODO : call checkH5 to validate morphology
+    #TODO : restructure to have a single checkH5 engine for both NRSS and command line formats
     def check_materials(self,):
-        pass
+        Vfrac_test = np.zeros(self.materials[1].Vfrac.shape)
+        for i in range(1, self._numMaterial+1):
+            Vfrac_test += self.materials[i].Vfrac
+
+            # test that S and Vfrac lie between 0 and 1 for each material
+            assert np.all((self.materials[i].S >= 0) & (self.materials[i].S <= 1)), f'Material {i} S value(s) does not lie between 0 and 1'
+            assert np.all((self.materials[i].Vfrac >= 0) & (self.materials[i].Vfrac <= 1)), f'Material {i} Vfrac value(s) does not lie between 0 and 1'
+
+            #test for NaNs
+            for name in ['S','Vfrac','theta','psi']:
+                assert np.all(~np.isnan(getattr(self.materials[i],name))), f'NaNs are present in Material {i} {name}'
+                assert ('float' in getattr(self.materials[i],name).dtype.name), f'Material {i} {name} is not of type float' 
+
+        assert np.allclose(Vfrac_test, 1), 'Total material volume fractions do not sum to 1'
+
+        # delete Vfrac_test after validation
+        del Vfrac_test
 
     def validate_all(self):
         passed = 0

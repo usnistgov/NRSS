@@ -2,6 +2,7 @@ import numpy as np
 import h5py
 import datetime
 import warnings
+import pathlib
 
 
 def write_hdf5(material_list, PhysSize, fname, MorphologyType = 0, ordering='ZYX', author='NIST'):
@@ -122,20 +123,20 @@ def write_config(Energies, EAngleRotation, CaseType=0, MorphologyType=0,
     f = open('config.txt', "w")
     
     # required
-    f.write("CaseType = " + str(CaseType) + ";\n");
-    f.write("Energies = " + str(Energies) + ";\n");
-    f.write("EAngleRotation = " + str(EAngleRotation) + ";\n");
-    f.write("MorphologyType = " + str(MorphologyType) + ";\n");
+    f.write("CaseType = " + str(CaseType) + ";\n")
+    f.write("Energies = " + str(Energies) + ";\n")
+    f.write("EAngleRotation = " + str(EAngleRotation) + ";\n")
+    f.write("MorphologyType = " + str(MorphologyType) + ";\n")
     
     #optional, but written by default
-    f.write("AlgorithmType = " + str(AlgorithmType) + ";\n");
-    f.write("NumThreads = " + str(NumThreads) + ";\n");
-    f.write("DumpMorphology = " + str(DumpMorphology) + ";\n");
-    f.write("ScatterApproach = " + str(ScatterApproach) + ";\n");
-    f.write("WindowingType = " + str(WindowingType) + ";\n");
-    f.write("RotMask = " + str(RotMask) + ";\n");
-    f.write("EwaldsInterpolation = " + str(EwaldsInterpolation) + ";\n");        
-    f.close();
+    f.write("AlgorithmType = " + str(AlgorithmType) + ";\n")
+    f.write("NumThreads = " + str(NumThreads) + ";\n")
+    f.write("DumpMorphology = " + str(DumpMorphology) + ";\n")
+    f.write("ScatterApproach = " + str(ScatterApproach) + ";\n")
+    f.write("WindowingType = " + str(WindowingType) + ";\n")
+    f.write("RotMask = " + str(RotMask) + ";\n")
+    f.write("EwaldsInterpolation = " + str(EwaldsInterpolation) + ";\n")        
+    f.close()
 
 
 # NIST specific
@@ -385,3 +386,27 @@ def write_materials(energies, materialdict, labelEnergy, numMaterial):
                 currentEnergy = energies[i]
                 dump_dataVacuum(i, currentEnergy, f)
         f.close()
+
+def write_opts(optical_constants, material_num, path):
+    # pybind ordering is deltaPara, betaPara, deltaPerp, betaPerp
+    # CLI ordering is betaPara, betaPerp, deltaPara, deltaPerp
+    if path:
+        fname = pathlib.Path(path, "Material" + str(material_num) + ".txt")
+    else:
+        fname = "Material" + str(material_num) + ".txt"
+    f = open(fname,"w")
+    for i, key in enumerate(optical_constants):
+        Header = "EnergyData" + str(i) + ":\n{\n"
+        f.write(Header)
+        Energy = "Energy = " + str(key) + ";\n"
+        f.write(Energy)
+        BetaPara = "BetaPara = " + str(optical_constants[key][1]) + ";\n"
+        f.write(BetaPara)
+        BetaPerp = "BetaPerp = " + str(optical_constants[key][3]) + ";\n"
+        f.write(BetaPerp)
+        DeltaPara = "DeltaPara = " + str(optical_constants[key][0]) + ";\n"
+        f.write(DeltaPara)
+        DeltaPerp = "DeltaPerp = " + str(optical_constants[key][2]) + ";\n"
+        f.write(DeltaPerp)
+        f.write("}\n")
+    f.close()
