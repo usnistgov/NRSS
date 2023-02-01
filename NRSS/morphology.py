@@ -463,7 +463,7 @@ class Morphology:
         else:
             warnings.warn('You haven\'t run your simulation yet')
 
-    # TODO : restructure to have a single checkH5 engine for both NRSS and 
+    # TODO : restructure to have a single checkH5 engine for both NRSS and
     # command line formats
     def check_materials(self, quiet=True):
         Vfrac_test = np.zeros(self.materials[1].Vfrac.shape)
@@ -474,7 +474,7 @@ class Morphology:
             assert np.all((self.materials[i].S >= 0) & (self.materials[i].S <= 1)), f'Material {i} S value(s) does not lie between 0 and 1'
             assert np.all((self.materials[i].Vfrac >= 0) & (self.materials[i].Vfrac <= 1)), f'Material {i} Vfrac value(s) does not lie between 0 and 1'
 
-            #test for NaNs
+            # test for NaNs
             for name in ['S', 'Vfrac', 'theta', 'psi']:
                 assert np.all(~np.isnan(getattr(self.materials[i], name))), f'NaNs are present in Material {i} {name}'
                 assert ('float' in getattr(self.materials[i], name).dtype.name), f'Material {i} {name} is not of type float' 
