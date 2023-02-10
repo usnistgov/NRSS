@@ -5,6 +5,8 @@ import warnings
 from .checkH5 import check_NumMat
 from .reader import read_material, read_config
 from .writer import write_opts, write_hdf5
+from .visualizer import morphology_visualizer
+
 import numpy as np
 import xarray as xr
 import sys
@@ -486,6 +488,87 @@ class Morphology:
 
         if not quiet:
             print('All material checks have passed')
+
+    def visualize_materials(
+        self,
+        z_slice=0,
+        subsample=None,
+        translate_x = None,
+        translate_y = None,
+        screen_euler = True,
+        outputmat=None,
+        outputplot=None,
+        outputaxes=True,
+        vfrac_range=None,
+        S_range=None,
+        vfrac_cmap=None,
+        S_cmap=None,
+        runquiet=False,
+        plotstyle="light",
+        dpi=300,
+    ):
+        """
+        Reads in morphology HDF5 file and checks that the format is consistent for CyRSoXS. Optionally plots and returns select quantities.
+
+        Parameters
+        ----------
+
+            filename : str or path
+                Name of HDF5 morphology file to check
+            z_slice : int
+                Which z-slice of the array to plot.
+            subsample : int
+                Number of voxels to display in X and Y
+            translate_x : int
+                Number of voxels to translate image in x; meant for use with subsample
+            translate_y : int
+                Number of voxels to translate image in y; meant for use with subsample
+            screen_euler : bool
+                Suppress visualization of euler angles where vfrac < 0.05 or S < 0.05; intended to hilight edges
+            outputmat : list of ints
+                Number of which materials to return
+            outputplot : list of strings
+                Number of which plots to return, can include 'vfrac', 'S', 'theta', 'psi'
+            vfrac_range: list of tuples as [float, float]
+                A custom range for vfrac colorbar
+            S_range: list of tuples as [float, float]
+                A custom range for S colorbar
+            vfrac_cmap: str
+                A custom substitution for vfrac colormap
+            S_cmap: str
+                A custom substitution for vfrac colormap
+            outputaxes : bool
+                If a plot is returned, include its axes
+            runquiet : bool
+                Boolean flag for running without plotting or outputting to console
+            plotstyle : str
+                Use a light or dark background for plots. 'dark' - dark, 'light' - light
+            dpi : integer
+                The dpi at which the plot is generated. Per-material plot dimensions are 8.5" x 12.75"
+
+        Returns
+        -------
+            If outputmat and outputplot are correctly entered, will return an index list of images of the selected material and plot. Each list element will be  a numpy array in RGB format that be displayed with imshow
+
+        """
+        return morphology_visualizer(
+            self,
+            z_slice=z_slice,
+            subsample=subsample,
+            translate_x = translate_x,
+            translate_y = translate_y,
+            screen_euler = screen_euler,
+            outputmat=outputmat,
+            outputplot=outputplot,
+            outputaxes=outputaxes,
+            vfrac_range=vfrac_range,
+            S_range=S_range,
+            vfrac_cmap=vfrac_cmap,
+            S_cmap=S_cmap,
+            runquiet=runquiet,
+            plotstyle=plotstyle,
+            dpi=dpi,
+        )
 
     def validate_all(self, quiet=True):
         self.check_materials(quiet=quiet)
