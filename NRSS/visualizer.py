@@ -494,8 +494,6 @@ def morphology_visualizer(
                         fig_xl = ax6.get_window_extent().intervalx[0].astype(int)
                         fig_xr = ax6.get_window_extent().intervalx[1].astype(int)
                     rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
-
-
         if not runquiet:
             plt.show()
         plt.clf()
