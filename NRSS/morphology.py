@@ -289,7 +289,7 @@ class Morphology:
                 warnings.warn(f'Key {key} not supported')
 
     @classmethod
-    def load_morph_hdf5(cls, hdf5_file):
+    def load_morph_hdf5(cls, hdf5_file, create_cy_object=False):
         with h5py.File(hdf5_file, 'r') as f:
             if 'Euler_Angles' not in f.keys():
                 raise KeyError('Only the Euler Angle convention is currently supported')
@@ -311,7 +311,7 @@ class Morphology:
                                                  psi=psi,
                                                  NumZYX=Vfrac.shape)
 
-        return cls(numMat, materials=materials, PhysSize=PhysSize)
+        return cls(numMat, materials=materials, PhysSize=PhysSize, create_cy_object=create_cy_object)
 
     def load_config(self, config_file):
         self.config = read_config(config_file)
