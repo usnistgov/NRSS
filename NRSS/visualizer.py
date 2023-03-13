@@ -89,8 +89,8 @@ def morphology_visualizer(
         print("")
 
     if z_slice > (morphology.NumZYX[0] - 1):
-        print(
-            f"Error: z_slice of {z_slice} is greater than the maximum index of {morphology.NumZYX[0]-1}. Using z_slice = {morphology.NumZYX[0]-1} instead."
+        warnings.warn(
+            f"z_slice of {z_slice} is greater than the maximum index of {morphology.NumZYX[0]-1}. Using z_slice = {morphology.NumZYX[0]-1} instead."
         )
         z_slice = morphology.NumZYX[0] - 1
 
@@ -136,7 +136,7 @@ def morphology_visualizer(
                 morphology.materials[i].theta.max() > (np.pi)
             ):
                 warnings.warn(
-                    "Caution: visualization expects theta to have bounds of [0,pi]. This model has theta outside those bounds and visualization may be incorrect."
+                    "Visualization expects theta to have bounds of [0,pi]. This model has theta outside those bounds and visualization may be incorrect."
                 )
 
             # run if you done want runquiet or run if you've selected this material for output
