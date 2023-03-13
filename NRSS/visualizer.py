@@ -12,9 +12,11 @@ def morphology_visualizer(
     morphology,
     z_slice=0,
     subsample=None,
-    translate_x = None,
-    translate_y = None,
-    screen_euler = True,
+    translate_x=None,
+    translate_y=None,
+    screen_euler=True,
+    add_quiver=False,
+    quiver_bw=True,
     outputmat=None,
     outputplot=None,
     outputaxes=True,
@@ -42,6 +44,10 @@ def morphology_visualizer(
             Number of voxels to translate image in y; meant for use with subsample
         screen_euler : bool
             Suppress visualization of euler angles where vfrac < 0.05 or S < 0.05; intended to hilight edges
+        add_quiver : bool
+            Adds lines to every voxel on the psi plot that indicate in-plane direction. Not recommended for resolutions larger than 128x128, best for resolutions 64x64 or lower.
+        quiver_bw : bool
+            Intended to be used when add_quiver == True, when quiver_bw is True, the quiver arrows will be black and white instead of colored.
         outputmat : list of ints
             Number of which materials to return
         outputplot : list of strings
@@ -98,19 +104,21 @@ def morphology_visualizer(
     }
 
     rc("font", **font)
-    
-    cwdPath = pathlib.Path(__file__).resolve().parent
-    psi_cmap = matplotlib.colors.ListedColormap(np.load(cwdPath / 'cmap/infinitydouble_cmap.npy'))
 
-    backend_ =  matplotlib.get_backend() 
-    
+    cwdPath = pathlib.Path(__file__).resolve().parent
+    psi_cmap = matplotlib.colors.ListedColormap(
+        np.load(cwdPath / "cmap/infinitydouble_cmap.npy")
+    )
+
+    backend_ = matplotlib.get_backend()
+
     try:
         if runquiet:
             matplotlib.use("Agg")  # Prevent showing stuff
 
         for i in range(1, morphology._numMaterial + 1):
             fig = plt.figure(figsize=(8.5, 12.75), dpi=dpi)
-            if runquiet==False:
+            if runquiet == False:
                 print(
                     f"Material {i} Vfrac. Min: {morphology.materials[i].Vfrac.min()} Max: {morphology.materials[i].Vfrac.max()}"
                 )
@@ -141,15 +149,15 @@ def morphology_visualizer(
                 end = int(morphology.NumZYX[1] / 2) + int(subsample / 2)
 
                 if translate_x:
-                    start_x = max(0,start+translate_x)
-                    end_x = min(end+translate_x, morphology.NumZYX[1])
+                    start_x = max(0, start + translate_x)
+                    end_x = min(end + translate_x, morphology.NumZYX[1])
                 else:
                     start_x = start
                     end_x = end
 
                 if translate_y:
-                    start_y = max(0,start+translate_y)
-                    end_y = min(end+translate_y, morphology.NumZYX[1])
+                    start_y = max(0, start + translate_y)
+                    end_y = min(end + translate_y, morphology.NumZYX[1])
                 else:
                     start_y = start
                     end_y = end
@@ -255,6 +263,7 @@ def morphology_visualizer(
                             origin="lower",
                             interpolation="none",
                         )
+
                     else:
                         thetaplot = ax5.imshow(
                             morphology.materials[i].theta[z_slice, :, :] % np.pi,
@@ -262,7 +271,7 @@ def morphology_visualizer(
                             norm=norm,
                             origin="lower",
                             interpolation="none",
-                        )                    
+                        )
                     ax5.set_ylabel("Y index")
                     ax5.set_xlabel("X index")
                     ax5.set_title(f"Mat {i} {morphology.materials[i].name} theta")
@@ -283,7 +292,9 @@ def morphology_visualizer(
                     # creates inset legend for orientation
                     azimuths_t = np.deg2rad(np.arange(-90, 90, 1))
                     zeniths_t = np.linspace(5, 10, 50)
-                    values_t = np.mod(np.pi / 2 - azimuths_t, np.pi) * np.ones((50, 180))
+                    values_t = np.mod(np.pi / 2 - azimuths_t, np.pi) * np.ones(
+                        (50, 180)
+                    )
                     ax5i.plot(
                         0,
                         0,
@@ -317,29 +328,189 @@ def morphology_visualizer(
 
                 if (runquiet is not True) or ("psi" in outputplot):
                     ax6 = plt.subplot(gs[3, 1])
-                    norm = matplotlib.colors.Normalize(vmin=0, vmax=2*np.pi, clip=False)
+                    norm = matplotlib.colors.Normalize(
+                        vmin=0, vmax=2 * np.pi, clip=False
+                    )
                     if screen_euler:
+                        screen_mask = np.logical_or(
+                            morphology.materials[i].Vfrac[z_slice, :, :] < 0.01,
+                            morphology.materials[i].S[z_slice, :, :] < 0.01,
+                        )
                         psiplot = ax6.imshow(
                             np.ma.masked_array(
-                                morphology.materials[i].psi[z_slice, :, :],
-                                np.logical_or(
-                                    morphology.materials[i].Vfrac[z_slice, :, :] < 0.01,
-                                    morphology.materials[i].S[z_slice, :, :] < 0.01,
-                                ),
+                                morphology.materials[i].psi[z_slice, :, :]
+                                % (2 * np.pi),
+                                screen_mask,
                             ),
-                            cmap=psi_cmap, #plt.get_cmap("hsv"),
+                            cmap=psi_cmap,  # plt.get_cmap("hsv"),
                             norm=norm,
                             origin="lower",
                             interpolation="none",
                         )
+                        if add_quiver:
+                            screen_white = np.logical_or(
+                                screen_mask,
+                                (
+                                    morphology.materials[i].psi[z_slice, :, :]
+                                    % (2 * np.pi)
+                                )
+                                > np.pi,
+                            )
+                            screen_black = np.logical_or(
+                                screen_mask,
+                                (
+                                    morphology.materials[i].psi[z_slice, :, :]
+                                    % (2 * np.pi)
+                                )
+                                < np.pi,
+                            )
+                            sin_psi = np.sin(morphology.materials[i].psi[z_slice, :, :])
+                            cos_psi = np.cos(morphology.materials[i].psi[z_slice, :, :])
+                            len_scale = np.maximum(np.abs(sin_psi), np.abs(cos_psi))
+                            if quiver_bw:
+                                ax6.quiver(
+                                    np.ma.masked_array(
+                                        cos_psi / len_scale,
+                                        screen_white,
+                                    ),
+                                    np.ma.masked_array(
+                                        sin_psi / len_scale,
+                                        screen_white,
+                                    ),
+                                    angles="xy",
+                                    scale=1,
+                                    pivot="mid",
+                                    headaxislength=0,
+                                    headlength=0,
+                                    scale_units="xy",
+                                    color="white",
+                                )
+                            else:
+                                ax6.quiver(
+                                    np.ma.masked_array(
+                                        cos_psi / len_scale,
+                                        screen_white,
+                                    ),
+                                    np.ma.masked_array(
+                                        sin_psi / len_scale,
+                                        screen_white,
+                                    ),
+                                    np.ma.masked_array(
+                                        (
+                                            morphology.materials[i].psi[z_slice, :, :]
+                                            + np.pi
+                                        )
+                                        % (2 * np.pi),
+                                        screen_white,
+                                    ),
+                                    cmap=psi_cmap,  # plt.get_cmap("hsv"),
+                                    norm=norm,
+                                    angles="xy",
+                                    scale=1,
+                                    pivot="mid",
+                                    headaxislength=0,
+                                    headlength=0,
+                                    scale_units="xy",
+                                )
+                            if quiver_bw:
+                                ax6.quiver(
+                                    np.ma.masked_array(
+                                        cos_psi / len_scale,
+                                        screen_black,
+                                    ),
+                                    np.ma.masked_array(
+                                        sin_psi / len_scale,
+                                        screen_black,
+                                    ),
+                                    angles="xy",
+                                    scale=1,
+                                    pivot="mid",
+                                    headaxislength=0,
+                                    headlength=0,
+                                    scale_units="xy",
+                                    color="black",
+                                )
+                            else:
+                                ax6.quiver(
+                                    np.ma.masked_array(
+                                        cos_psi / len_scale,
+                                        screen_black,
+                                    ),
+                                    np.ma.masked_array(
+                                        sin_psi / len_scale,
+                                        screen_black,
+                                    ),
+                                    np.ma.masked_array(
+                                        (
+                                            morphology.materials[i].psi[z_slice, :, :]
+                                            + np.pi
+                                        )
+                                        % (2 * np.pi),
+                                        screen_black,
+                                    ),
+                                    cmap=psi_cmap,  # plt.get_cmap("hsv"),
+                                    norm=norm,
+                                    angles="xy",
+                                    scale=1,
+                                    pivot="mid",
+                                    headaxislength=0,
+                                    headlength=0,
+                                    scale_units="xy",
+                                )
                     else:
                         psiplot = ax6.imshow(
-                            morphology.materials[i].psi[z_slice, :, :] % (2*np.pi),
-                            cmap=psi_cmap, #plt.get_cmap("hsv"),
+                            morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi),
+                            cmap=psi_cmap,  # plt.get_cmap("hsv"),
                             norm=norm,
                             origin="lower",
                             interpolation="none",
                         )
+                        if add_quiver:
+                            screen_white = (
+                                morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi)
+                                > np.pi
+                            )
+                            screen_black = (
+                                morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi)
+                                < np.pi
+                            )
+                            sin_psi = np.sin(morphology.materials[i].psi[z_slice, :, :])
+                            cos_psi = np.cos(morphology.materials[i].psi[z_slice, :, :])
+                            len_scale = np.maximum(np.abs(sin_psi), np.abs(cos_psi))
+                            ax6.quiver(
+                                np.ma.masked_array(
+                                    cos_psi / len_scale,
+                                    screen_white,
+                                ),
+                                np.ma.masked_array(
+                                    sin_psi / len_scale,
+                                    screen_white,
+                                ),
+                                angles="xy",
+                                scale=1,
+                                pivot="mid",
+                                headaxislength=0,
+                                headlength=0,
+                                scale_units="xy",
+                                color="white",
+                            )
+                            ax6.quiver(
+                                np.ma.masked_array(
+                                    cos_psi / len_scale,
+                                    screen_black,
+                                ),
+                                np.ma.masked_array(
+                                    sin_psi / len_scale,
+                                    screen_black,
+                                ),
+                                angles="xy",
+                                scale=1,
+                                pivot="mid",
+                                headaxislength=0,
+                                headlength=0,
+                                scale_units="xy",
+                                color="black",
+                            )
 
                     ax6.set_ylabel("Y index")
                     ax6.set_xlabel("X index")
@@ -360,7 +531,7 @@ def morphology_visualizer(
                     # creates inset legend for orientation
                     azimuths = np.deg2rad(np.arange(0, 360, 1))
                     zeniths = np.linspace(5, 10, 50)
-                    values = np.mod(azimuths, 2*np.pi) * np.ones((50, 360))
+                    values = np.mod(azimuths, 2 * np.pi) * np.ones((50, 360))
                     ax4i.plot(
                         0,
                         0,
@@ -372,7 +543,9 @@ def morphology_visualizer(
                         zorder=0,
                         alpha=0.7,
                     )
-                    ax4i.pcolormesh(azimuths, zeniths, values, cmap=psi_cmap, shading="auto")
+                    ax4i.pcolormesh(
+                        azimuths, zeniths, values, cmap=psi_cmap, shading="auto"
+                    )
                     ax4i.set_axis_off()
                     ax4i.arrow(
                         0, 0, 0, 4, width=0.005, head_width=0.2, head_length=0.6, lw=0.5
@@ -413,7 +586,9 @@ def morphology_visualizer(
             if outputmat and (i in outputmat):
                 fig.canvas.draw()
                 rgb_return = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-                rgb_return = rgb_return.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+                rgb_return = rgb_return.reshape(
+                    fig.canvas.get_width_height()[::-1] + (3,)
+                )
                 if outputplot and ("vfrac" in outputplot):
                     if outputaxes:
                         fig_xl = ax1.get_tightbbox().intervalx[0].astype(int)
@@ -426,12 +601,12 @@ def morphology_visualizer(
                             0
                         ].astype(int)
                     else:
-                        fig_yt = rgb_return.shape[0] - ax1.get_window_extent().intervaly[
-                            1
-                        ].astype(int)
-                        fig_yb = rgb_return.shape[0] - ax1.get_window_extent().intervaly[
+                        fig_yt = rgb_return.shape[
                             0
-                        ].astype(int)
+                        ] - ax1.get_window_extent().intervaly[1].astype(int)
+                        fig_yb = rgb_return.shape[
+                            0
+                        ] - ax1.get_window_extent().intervaly[0].astype(int)
                         fig_xl = ax1.get_window_extent().intervalx[0].astype(int)
                         fig_xr = ax1.get_window_extent().intervalx[1].astype(int)
 
@@ -447,12 +622,12 @@ def morphology_visualizer(
                         fig_xl = ax2.get_tightbbox().intervalx[0].astype(int)
                         fig_xr = S_cbar.ax.get_tightbbox().intervalx[1].astype(int)
                     else:
-                        fig_yt = rgb_return.shape[0] - ax2.get_window_extent().intervaly[
-                            1
-                        ].astype(int)
-                        fig_yb = rgb_return.shape[0] - ax2.get_window_extent().intervaly[
+                        fig_yt = rgb_return.shape[
                             0
-                        ].astype(int)
+                        ] - ax2.get_window_extent().intervaly[1].astype(int)
+                        fig_yb = rgb_return.shape[
+                            0
+                        ] - ax2.get_window_extent().intervaly[0].astype(int)
                         fig_xl = ax2.get_window_extent().intervalx[0].astype(int)
                         fig_xr = ax2.get_window_extent().intervalx[1].astype(int)
                     rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
@@ -467,12 +642,12 @@ def morphology_visualizer(
                         fig_xl = ax5.get_tightbbox().intervalx[0].astype(int)
                         fig_xr = theta_cbar.ax.get_tightbbox().intervalx[1].astype(int)
                     else:
-                        fig_yt = rgb_return.shape[0] - ax5.get_window_extent().intervaly[
-                            1
-                        ].astype(int)
-                        fig_yb = rgb_return.shape[0] - ax5.get_window_extent().intervaly[
+                        fig_yt = rgb_return.shape[
                             0
-                        ].astype(int)
+                        ] - ax5.get_window_extent().intervaly[1].astype(int)
+                        fig_yb = rgb_return.shape[
+                            0
+                        ] - ax5.get_window_extent().intervaly[0].astype(int)
                         fig_xl = ax5.get_window_extent().intervalx[0].astype(int)
                         fig_xr = ax5.get_window_extent().intervalx[1].astype(int)
                     rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
@@ -487,12 +662,12 @@ def morphology_visualizer(
                         fig_xl = ax6.get_tightbbox().intervalx[0].astype(int)
                         fig_xr = psi_cbar.ax.get_tightbbox().intervalx[1].astype(int)
                     else:
-                        fig_yt = rgb_return.shape[0] - ax6.get_window_extent().intervaly[
-                            1
-                        ].astype(int)
-                        fig_yb = rgb_return.shape[0] - ax6.get_window_extent().intervaly[
+                        fig_yt = rgb_return.shape[
                             0
-                        ].astype(int)
+                        ] - ax6.get_window_extent().intervaly[1].astype(int)
+                        fig_yb = rgb_return.shape[
+                            0
+                        ] - ax6.get_window_extent().intervaly[0].astype(int)
                         fig_xl = ax6.get_window_extent().intervalx[0].astype(int)
                         fig_xr = ax6.get_window_extent().intervalx[1].astype(int)
                     rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
@@ -501,7 +676,7 @@ def morphology_visualizer(
         plt.clf()
         plt.close(fig)
     finally:
-        #this code can hijack the backend and "agg" will not show figures, so this needs always to run, regardless of whether there are errors in the arguments.
+        # this code can hijack the backend and "agg" will not show figures, so this needs always to run, regardless of whether there are errors in the arguments.
         matplotlib.rc_file_defaults()
         matplotlib.use(backend_)
     return rgb_return_list
