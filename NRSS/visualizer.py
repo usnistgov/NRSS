@@ -132,7 +132,14 @@ def morphology_visualizer(
                     f"Material {i} psi. Min: {morphology.materials[i].psi.min()} Max: {morphology.materials[i].psi.max()}"
                 )
 
-                # run if you done want runquiet or run if you've selected this material for output
+            if (morphology.materials[i].theta.min() < 0) or (
+                morphology.materials[i].theta.max() > (np.pi)
+            ):
+                warnings.warn(
+                    "Caution: visualization expects theta to have bounds of [0,pi]. This model has theta outside those bounds and visualization may be incorrect."
+                )
+
+            # run if you done want runquiet or run if you've selected this material for output
             if (runquiet is not True) or ((outputmat is not None) and (i in outputmat)):
 
                 gs = gridspec.GridSpec(
