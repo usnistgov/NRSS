@@ -11,4 +11,4 @@ jobs:
           docs-folder: docs/
           formats: |-
             epub
-          pip-requirements: 'requirements.txt'
+          pip-requirements: 'docs/requirements.txt'
