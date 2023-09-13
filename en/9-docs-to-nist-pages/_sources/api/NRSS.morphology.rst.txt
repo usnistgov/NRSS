@@ -2,4 +2,7 @@ NRSS.morphology
 ================
 
 .. automodule:: NRSS.morphology
-    :members:
+   :imported-members:
+   :members:
+   :undoc-members:
+   :show-inheritance:
