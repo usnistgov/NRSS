@@ -1,6 +1,7 @@
 numpy==1.22
 sphinx==5.0.2
 pydata-sphinx-theme==0.10.1
+sphinx-design
 h5py==3.6.0
 scipy==1.7.3
 pandas==1.4.3

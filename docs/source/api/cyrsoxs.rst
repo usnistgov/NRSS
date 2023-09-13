@@ -63,7 +63,7 @@ Euler Morphology HDF5 Structure
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 The Euler Morphology uses a ZYZ convention. Currently, Cy-RSoXS only supports uniaxial materials and the first Euler rotation (Phi) is unused. Theta is the rotation around the Y axis. Psi is the last rotation around the Z axis.
 
-.. image:: Euler_ZYZ-v4.gif
+.. image:: /_static/Euler_ZYZ-v4.gif
 
 .. code-block:: console
 

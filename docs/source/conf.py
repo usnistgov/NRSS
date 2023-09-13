@@ -10,7 +10,7 @@ project = "NRSS"
 author = "Peter Dudenas"
 release = "0.1.0"
 copyright = (
-    ": Official Contribution of the US Government.  Not subject to copyright in the United States."
+    ": Official Contribution of the US Government.  Not subject to copyright in the United States"
 )
 
 # -- General configuration ---------------------------------------------------
@@ -22,7 +22,7 @@ import sys
 sys.path.insert(0, os.path.abspath("../NRSS/"))
 
 
-extensions = ["sphinx.ext.autodoc", "sphinx.ext.napoleon"]  # numpydoc and google docstrings
+extensions = ["sphinx.ext.autodoc", "sphinx.ext.napoleon", "sphinx_design"]  # numpydoc and google docstrings
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
@@ -40,17 +40,24 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # a list of builtin themes.
 
 html_theme = "pydata_sphinx_theme"
-# html_logo = "source/_static/Logo_PyHyperO9_Light.svg"
+html_logo = "_static/Logo_NRSS.svg"
 html_theme_options = {
-    # "logo": {
-    #     "image_light": "source/_images/Logo_PyHyperO9_Light.svg",
-    #     "image_dark": "source/_images/Logo_PyHyperO10_Dark.svg",
-    # },
+    "logo": {
+        "image_light": "_static/Logo_NRSS.svg",
+        "image_dark": "_static/Logo_NRSS.svg",
+    },
     "github_url": "https://github.com/usnistgov/NRSS",
     "collapse_navigation": True,
-    #   "external_links": [
-    #       {"name": "Learn", "url": "https://numpy.org/numpy-tutorials/"},
-    #       ],
+    "external_links": [
+        {
+            "name": "NIST RSoXS project",
+            "url": "https://www.nist.gov/programs-projects/resonant-soft-x-ray-scattering-rsoxs",
+        },
+        {
+            "name": "PyHyperScattering",
+            "url": "https://pages.nist.gov/PyHyperScattering/en/main/index.html",
+        },
+    ],
     "header_links_before_dropdown": 6,
     # Add light/dark mode and documentation version switcher:
     "navbar_end": ["theme-switcher", "navbar-icon-links"],
