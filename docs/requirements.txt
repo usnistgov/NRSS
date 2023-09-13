@@ -7,3 +7,5 @@ scipy
 pandas
 matplotlib
 scikit-image
+cyrsoxs
+xarray
