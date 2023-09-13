@@ -2,4 +2,7 @@ NRSS.reader
 ============
 
 .. automodule:: NRSS.reader
-    :members:
+   :imported-members:
+   :members:
+   :undoc-members:
+   :show-inheritance:
