@@ -1,0 +1,1124 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>NRSS.morphology &#8212; NRSS 0.1.0 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "light";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=e353d410970836974a52" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=e353d410970836974a52" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=e353d410970836974a52" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.1.2/css/all.min.css?digest=e353d410970836974a52" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
+    <link rel="stylesheet" type="text/css" href="../_static/ntd2d.css?v=b7aaae70" />
+    <link rel="stylesheet" type="text/css" href="../_static/design-style.1e8bd061cd6da7fc9cf755528e8ffc24.min.css?v=0a3b3ea7" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=e353d410970836974a52" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=e353d410970836974a52" />
+
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js?v=40769cce"></script>
+    <script src="../_static/doctools.js?v=888ff710"></script>
+    <script src="../_static/sphinx_highlight.js?v=4825356b"></script>
+    <script src="../_static/design-tabs.js?v=36754332"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/NRSS.morphology';</script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="NRSS.reader" href="NRSS.reader.html" />
+    <link rel="prev" title="NRSS.checkH5" href="NRSS.checkH5.html" />
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+
+  <link rel="stylesheet" href="https://pages.nist.gov/nist-header-footer/css/nist-combined.css">
+  <script src="https://code.jquery.com/jquery-3.6.2.min.js" type="text/javascript" defer="defer"></script>
+  <script src="https://pages.nist.gov/nist-header-footer/js/nist-header-footer.js" type="text/javascript" defer="defer"></script>
+
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          name="__primary"
+          id="__primary"/>
+  <label class="overlay overlay-primary" for="__primary"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          name="__secondary"
+          id="__secondary"/>
+  <label class="overlay overlay-secondary" for="__secondary"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+  
+    <nav class="bd-header navbar navbar-expand-lg bd-navbar">
+<div class="bd-header__inner bd-page-width">
+  <label class="sidebar-toggle primary-toggle" for="__primary">
+    <span class="fa-solid fa-bars"></span>
+  </label>
+  
+  <div class="navbar-header-items__start">
+    
+      <div class="navbar-item">
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../_static/Logo_NRSS.svg" class="logo__image only-light" alt="Logo image"/>
+    <script>document.write(`<img src="../_static/Logo_NRSS.svg" class="logo__image only-dark" alt="Logo image"/>`);</script>
+  
+  
+</a></div>
+    
+  </div>
+  
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item"><nav class="navbar-nav">
+  <p class="sidebar-header-items__title"
+     role="heading"
+     aria-level="1"
+     aria-label="Site Navigation">
+    Site Navigation
+  </p>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../getting_started/idx_getting_started.html">
+                        Getting Started
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../user_guide/idx_user_guide.html">
+                        User Guide
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item current active">
+                      <a class="nav-link nav-internal" href="idx_api.html">
+                        Software Reference
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../development/idx_development.html">
+                        Development and Contributing:
+                      </a>
+                    </li>
+                
+
+                <li class="nav-item">
+                  <a class="nav-link nav-external" href="https://www.nist.gov/programs-projects/resonant-soft-x-ray-scattering-rsoxs">
+                    NIST RSoXS project
+                  </a>
+                </li>
+                
+
+                <li class="nav-item">
+                  <a class="nav-link nav-external" href="https://pages.nist.gov/PyHyperScattering/en/main/index.html">
+                    PyHyperScattering
+                  </a>
+                </li>
+                
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+<script>
+document.write(`
+  <button class="btn btn-sm navbar-btn search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+  </button>
+`);
+</script>
+        </div>
+      
+      
+        <div class="navbar-item">
+<script>
+document.write(`
+  <button class="theme-switch-button btn btn-sm btn-outline-primary navbar-btn rounded-circle" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="theme-switch" data-mode="light"><i class="fa-solid fa-sun"></i></span>
+    <span class="theme-switch" data-mode="dark"><i class="fa-solid fa-moon"></i></span>
+    <span class="theme-switch" data-mode="auto"><i class="fa-solid fa-circle-half-stroke"></i></span>
+  </button>
+`);
+</script></div>
+      
+        <div class="navbar-item"><ul class="navbar-icon-links navbar-nav"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/usnistgov/NRSS" title="GitHub" class="nav-link" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><span><i class="fa-brands fa-square-github"></i></span>
+            <label class="sr-only">GitHub</label></a>
+        </li>
+</ul></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+<script>
+document.write(`
+  <button class="btn btn-sm navbar-btn search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+  </button>
+`);
+</script>
+    </div>
+  
+
+  
+    <label class="sidebar-toggle secondary-toggle" for="__secondary">
+      <span class="fa-solid fa-outdent"></span>
+    </label>
+  
+</div>
+
+    </nav>
+  
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          <div class="navbar-item"><nav class="navbar-nav">
+  <p class="sidebar-header-items__title"
+     role="heading"
+     aria-level="1"
+     aria-label="Site Navigation">
+    Site Navigation
+  </p>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../getting_started/idx_getting_started.html">
+                        Getting Started
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../user_guide/idx_user_guide.html">
+                        User Guide
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item current active">
+                      <a class="nav-link nav-internal" href="idx_api.html">
+                        Software Reference
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../development/idx_development.html">
+                        Development and Contributing:
+                      </a>
+                    </li>
+                
+
+                <li class="nav-item">
+                  <a class="nav-link nav-external" href="https://www.nist.gov/programs-projects/resonant-soft-x-ray-scattering-rsoxs">
+                    NIST RSoXS project
+                  </a>
+                </li>
+                
+
+                <li class="nav-item">
+                  <a class="nav-link nav-external" href="https://pages.nist.gov/PyHyperScattering/en/main/index.html">
+                    PyHyperScattering
+                  </a>
+                </li>
+                
+  </ul>
+</nav></div>
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+<script>
+document.write(`
+  <button class="theme-switch-button btn btn-sm btn-outline-primary navbar-btn rounded-circle" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="theme-switch" data-mode="light"><i class="fa-solid fa-sun"></i></span>
+    <span class="theme-switch" data-mode="dark"><i class="fa-solid fa-moon"></i></span>
+    <span class="theme-switch" data-mode="auto"><i class="fa-solid fa-circle-half-stroke"></i></span>
+  </button>
+`);
+</script></div>
+        
+          <div class="navbar-item"><ul class="navbar-icon-links navbar-nav"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/usnistgov/NRSS" title="GitHub" class="nav-link" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><span><i class="fa-brands fa-square-github"></i></span>
+            <label class="sr-only">GitHub</label></a>
+        </li>
+</ul></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item"><nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="cyrsoxs.html">CyRSoXS Simulation Components</a></li>
+<li class="toctree-l1"><a class="reference internal" href="NRSS.writer.html">NRSS.writer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="NRSS.checkH5.html">NRSS.checkH5</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">NRSS.morphology</a></li>
+<li class="toctree-l1"><a class="reference internal" href="NRSS.reader.html">NRSS.reader</a></li>
+</ul>
+</div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+
+
+<nav aria-label="Breadcrumbs">
+  <ul class="bd-breadcrumbs" role="navigation" aria-label="Breadcrumb">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    
+    <li class="breadcrumb-item"><a href="idx_api.html" class="nav-link">Software Reference</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page">NRSS.morphology</li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article" role="main">
+                  
+  <section id="module-NRSS.morphology">
+<span id="nrss-morphology"></span><h1>NRSS.morphology<a class="headerlink" href="#module-NRSS.morphology" title="Permalink to this heading">#</a></h1>
+<dl class="py class">
+<dt class="sig sig-object py" id="NRSS.morphology.Material">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">Material</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">materialID</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Vfrac</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">S</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">theta</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">psi</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">NumZYX</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">energies</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">opt_constants</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Material" title="Permalink to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#NRSS.morphology.OpticalConstants" title="NRSS.morphology.OpticalConstants"><code class="xref py py-class docutils literal notranslate"><span class="pre">OpticalConstants</span></code></a></p>
+<p>Object to hold the voxel-level data for a CyRSoXS morphology. Inherits from the OpticalConstants class.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Material.materialID">
+<span class="sig-name descname"><span class="pre">materialID</span></span><a class="headerlink" href="#NRSS.morphology.Material.materialID" title="Permalink to this definition">#</a></dt>
+<dd><p>Integer value denoting the material number. Used in CyRSoXS</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Material.Vfrac">
+<span class="sig-name descname"><span class="pre">Vfrac</span></span><a class="headerlink" href="#NRSS.morphology.Material.Vfrac" title="Permalink to this definition">#</a></dt>
+<dd><p>Volume fractions for a Material</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Material.theta">
+<span class="sig-name descname"><span class="pre">theta</span></span><a class="headerlink" href="#NRSS.morphology.Material.theta" title="Permalink to this definition">#</a></dt>
+<dd><p>The second Euler angle (ZYZ convention)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Material.psi">
+<span class="sig-name descname"><span class="pre">psi</span></span><a class="headerlink" href="#NRSS.morphology.Material.psi" title="Permalink to this definition">#</a></dt>
+<dd><p>The third Euler angle (ZYZ convention)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Material.NumZYX">
+<span class="sig-name descname"><span class="pre">NumZYX</span></span><a class="headerlink" href="#NRSS.morphology.Material.NumZYX" title="Permalink to this definition">#</a></dt>
+<dd><p>Dimensions of the Material arrays (NumZ, NumY, NumX)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple or list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Material.name">
+<span class="sig-name descname"><span class="pre">name</span></span><a class="headerlink" href="#NRSS.morphology.Material.name" title="Permalink to this definition">#</a></dt>
+<dd><p>Name of the Material (e.g. ‘Polystyrene’)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Material.copy">
+<span class="sig-name descname"><span class="pre">copy</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Material.copy" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">Morphology</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">numMaterial</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">materials</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">PhysSize</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">config</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">{'CaseType':</span> <span class="pre">0,</span> <span class="pre">'EAngleRotation':</span> <span class="pre">[0.0,</span> <span class="pre">1.0,</span> <span class="pre">0.0],</span> <span class="pre">'Energies':</span> <span class="pre">[270.0],</span> <span class="pre">'MorphologyType':</span> <span class="pre">0}</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">create_cy_object</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology" title="Permalink to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Object used to hold all the components necessary for a complete CyRSoXS morphology</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.input_mapping">
+<span class="sig-name descname"><span class="pre">input_mapping</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.input_mapping" title="Permalink to this definition">#</a></dt>
+<dd><p>A dictionary to handle specific configuration input types</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.numMaterial">
+<span class="sig-name descname"><span class="pre">numMaterial</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.numMaterial" title="Permalink to this definition">#</a></dt>
+<dd><p>Number of materials present in the morphology</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.materials">
+<span class="sig-name descname"><span class="pre">materials</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.materials" title="Permalink to this definition">#</a></dt>
+<dd><p>A dictionary of Material objects</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.PhysSize">
+<span class="sig-name descname"><span class="pre">PhysSize</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.PhysSize" title="Permalink to this definition">#</a></dt>
+<dd><p>The physical size of each cubic voxel’s three dimensions</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>float</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.NumZYX">
+<span class="sig-name descname"><span class="pre">NumZYX</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.NumZYX" title="Permalink to this definition">#</a></dt>
+<dd><p>Number of voxels in the Z, Y, and X directions (NumZ, NumY, NumX)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple or list</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.config">
+<span class="sig-name descname"><span class="pre">config</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.config" title="Permalink to this definition">#</a></dt>
+<dd><p>A dictionary of configuration parameters for CyRSoXS</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.create_cy_object">
+<span class="sig-name descname"><span class="pre">create_cy_object</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.create_cy_object" title="Permalink to this definition">#</a></dt>
+<dd><p>Boolean value that decides if the CyRSoXS objects are created upon instantiation</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.simulated">
+<span class="sig-name descname"><span class="pre">simulated</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.simulated" title="Permalink to this definition">#</a></dt>
+<dd><p>Boolean value that tracks whether or not the simulation has been run</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.load_morph_hdf5">
+<span class="sig-name descname"><span class="pre">load_morph_hdf5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hdf5_file</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">create_cy_object</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.load_morph_hdf5" title="Permalink to this definition">#</a></dt>
+<dd><p>Class method that creates a Morphology object from a morphology HDF5 file</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.create_inputData">
+<span class="sig-name descname"><span class="pre">create_inputData</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.create_inputData" title="Permalink to this definition">#</a></dt>
+<dd><p>Creates a CyRSoXS InputData object and populates it with parameters from self.config</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.create_optical_constants">
+<span class="sig-name descname"><span class="pre">create_optical_constants</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.create_optical_constants" title="Permalink to this definition">#</a></dt>
+<dd><p>Creates a CyRSoXS RefractiveIndex object and populates it with optical constants from the materials dict</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.create_voxel_data">
+<span class="sig-name descname"><span class="pre">create_voxel_data</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.create_voxel_data" title="Permalink to this definition">#</a></dt>
+<dd><p>Creates a CyRSoXS VoxelData object and populates it with the voxel information from the materials dict</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.run">
+<span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stdout</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stderr</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">return_xarray</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">print_vec_info</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.run" title="Permalink to this definition">#</a></dt>
+<dd><p>Creates a CyRSoXS ScatteringPattern object if not already created, and submits all CyRSoXS objects to
+run the simulation</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.scattering_to_xarray">
+<span class="sig-name descname"><span class="pre">scattering_to_xarray</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">return_xarray</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">print_vec_info</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.scattering_to_xarray" title="Permalink to this definition">#</a></dt>
+<dd><p>Copies the CyRSoXS ScatteringPattern arrays to an xarray in the format used by PyHyperScattering for
+further analysis</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.AlgorithmType">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">AlgorithmType</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.AlgorithmType" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.CaseType">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">CaseType</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.CaseType" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.EAngleRotation">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">EAngleRotation</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.EAngleRotation" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.Energies">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">Energies</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.Energies" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.EwaldsInterpolation">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">EwaldsInterpolation</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.EwaldsInterpolation" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.MorphologyType">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">MorphologyType</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.MorphologyType" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="id0">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">PhysSize</span></span><a class="headerlink" href="#id0" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.ReferenceFrame">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ReferenceFrame</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.ReferenceFrame" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.RotMask">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">RotMask</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.RotMask" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.WindowingType">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">WindowingType</span></span><a class="headerlink" href="#NRSS.morphology.Morphology.WindowingType" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.check_materials">
+<span class="sig-name descname"><span class="pre">check_materials</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">quiet</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.check_materials" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="id1">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">config</span></span><a class="headerlink" href="#id1" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.config_default">
+<span class="sig-name descname"><span class="pre">config_default</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">{'AlgorithmType':</span> <span class="pre">0,</span> <span class="pre">'CaseType':</span> <span class="pre">0,</span> <span class="pre">'EAngleRotation':</span> <span class="pre">[0.0,</span> <span class="pre">1.0,</span> <span class="pre">0.0],</span> <span class="pre">'Energies':</span> <span class="pre">[270.0],</span> <span class="pre">'EwaldsInterpolation':</span> <span class="pre">1,</span> <span class="pre">'MorphologyType':</span> <span class="pre">0,</span> <span class="pre">'ReferenceFrame':</span> <span class="pre">1,</span> <span class="pre">'RotMask':</span> <span class="pre">0,</span> <span class="pre">'WindowingType':</span> <span class="pre">0}</span></em><a class="headerlink" href="#NRSS.morphology.Morphology.config_default" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.config_to_inputData">
+<span class="sig-name descname"><span class="pre">config_to_inputData</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.config_to_inputData" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="id2">
+<span class="sig-name descname"><span class="pre">create_inputData</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#id2" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="id3">
+<span class="sig-name descname"><span class="pre">create_optical_constants</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#id3" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.create_update_cy">
+<span class="sig-name descname"><span class="pre">create_update_cy</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.create_update_cy" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="id4">
+<span class="sig-name descname"><span class="pre">create_voxel_data</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#id4" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="id5">
+<span class="sig-name descname"><span class="pre">input_mapping</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">{'AlgorithmType':</span> <span class="pre">['setAlgorithm',</span> <span class="pre">[0,</span> <span class="pre">1]],</span> <span class="pre">'CaseType':</span> <span class="pre">['setCaseType',</span> <span class="pre">[CyRSoXS.CaseType.Default,</span> <span class="pre">CyRSoXS.CaseType.BeamDivergence,</span> <span class="pre">CyRSoXS.CaseType.GrazingIncidence]],</span> <span class="pre">'EwaldsInterpolation':</span> <span class="pre">['interpolationType',</span> <span class="pre">[CyRSoXS.InterpolationType.NearestNeighour,</span> <span class="pre">CyRSoXS.InterpolationType.Linear]],</span> <span class="pre">'MorphologyType':</span> <span class="pre">['setMorphologyType',</span> <span class="pre">[CyRSoXS.MorphologyType.EulerAngles,</span> <span class="pre">CyRSoXS.MorphologyType.VectorMorphology]],</span> <span class="pre">'ReferenceFrame':</span> <span class="pre">['referenceFrame',</span> <span class="pre">[0,</span> <span class="pre">1]],</span> <span class="pre">'RotMask':</span> <span class="pre">['rotMask',</span> <span class="pre">[False,</span> <span class="pre">True]],</span> <span class="pre">'WindowingType':</span> <span class="pre">['windowingType',</span> <span class="pre">[CyRSoXS.FFTWindowing.NoPadding,</span> <span class="pre">CyRSoXS.FFTWindowing.Hanning]]}</span></em><a class="headerlink" href="#id5" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.load_config">
+<span class="sig-name descname"><span class="pre">load_config</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config_file</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.load_config" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.load_matfile">
+<span class="sig-name descname"><span class="pre">load_matfile</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">matfile</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.load_matfile" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="id6">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">load_morph_hdf5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hdf5_file</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#id6" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="id7">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">numMaterial</span></span><a class="headerlink" href="#id7" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="id8">
+<span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stdout</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stderr</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">return_xarray</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">print_vec_info</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#id8" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="id9">
+<span class="sig-name descname"><span class="pre">scattering_to_xarray</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">return_xarray</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">print_vec_info</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#id9" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="id10">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">simulated</span></span><a class="headerlink" href="#id10" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.update_optical_constants">
+<span class="sig-name descname"><span class="pre">update_optical_constants</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.update_optical_constants" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.update_voxel_data">
+<span class="sig-name descname"><span class="pre">update_voxel_data</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.update_voxel_data" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.validate_all">
+<span class="sig-name descname"><span class="pre">validate_all</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">quiet</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.validate_all" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.write_config">
+<span class="sig-name descname"><span class="pre">write_config</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.write_config" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.write_constants">
+<span class="sig-name descname"><span class="pre">write_constants</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.write_constants" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.write_to_file">
+<span class="sig-name descname"><span class="pre">write_to_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fname</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">author</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'NIST'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.write_to_file" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="NRSS.morphology.OpticalConstants">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">OpticalConstants</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">energies</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">opt_constants</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'unknown'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.OpticalConstants" title="Permalink to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Object to hold dielectric optical constants in a format compatible with CyRSoXS</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.OpticalConstants.energies">
+<span class="sig-name descname"><span class="pre">energies</span></span><a class="headerlink" href="#NRSS.morphology.OpticalConstants.energies" title="Permalink to this definition">#</a></dt>
+<dd><p>List of energies</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list or array</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.OpticalConstants.opt_constants">
+<span class="sig-name descname"><span class="pre">opt_constants</span></span><a class="headerlink" href="#NRSS.morphology.OpticalConstants.opt_constants" title="Permalink to this definition">#</a></dt>
+<dd><p>Dictionary of optical constants, where each energy is a key in the dict</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="NRSS.morphology.OpticalConstants.name">
+<span class="sig-name descname"><span class="pre">name</span></span><a class="headerlink" href="#NRSS.morphology.OpticalConstants.name" title="Permalink to this definition">#</a></dt>
+<dd><p>String identifying the element or material for these optical constants</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.OpticalConstants.calc_constants">
+<span class="sig-name descname"><span class="pre">calc_constants</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">energies</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'unkown'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.OpticalConstants.calc_constants" title="Permalink to this definition">#</a></dt>
+<dd><p>Interpolates optical constant data to the list of energies provided</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.OpticalConstants.load_matfile">
+<span class="sig-name descname"><span class="pre">load_matfile</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">matfile</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'unknown'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.OpticalConstants.load_matfile" title="Permalink to this definition">#</a></dt>
+<dd><p>Creates an OpticalConstants object from a previously written MaterialX.txt file</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.OpticalConstants.create_vacuum">
+<span class="sig-name descname"><span class="pre">create_vacuum</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">energies</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.OpticalConstants.create_vacuum" title="Permalink to this definition">#</a></dt>
+<dd><p>Convenience function to populate zeros for all optical constants</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="id11">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">calc_constants</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">energies</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">reference_data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'unknown'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#id11" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="id12">
+<span class="sig-name descname"><span class="pre">create_vacuum</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">energies</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#id12" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="id13">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">load_matfile</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">matfile</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'unknown'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#id13" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.morphology.check_NumMat">
+<span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">check_NumMat</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">f</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">morphology_type</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.check_NumMat" title="Permalink to this definition">#</a></dt>
+<dd><p>Checks and validates the number of materials in the HDF5 file</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>f</strong> (<em>file object</em>) – </p></li>
+<li><p><strong>morphology_type</strong> (<em>int</em>) – 0 - Euler, 1 - Vector</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>num_mat</strong> – Number of materials in file</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.morphology.read_config">
+<span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">read_config</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config_file</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.read_config" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.morphology.read_material">
+<span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">read_material</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.read_material" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.morphology.write_hdf5">
+<span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">write_hdf5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">material_list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">PhysSize</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fname</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">MorphologyType</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ordering</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'ZYX'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">author</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'NIST'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.write_hdf5" title="Permalink to this definition">#</a></dt>
+<dd><p>Writes Euler or Vector Morphology format into CyRSoXS-compatible HDF5 file and returns the hdf5 filename</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>material_list</strong> (<em>lists</em>) – List of material lists.
+Euler Ex. [[Mat_1_Vfrac, Mat_1_S, Mat_1_Theta, Mat_1_Psi],[Mat_2_Vfrac, Mat_2_S, Mat_2_Theta, Mat_2_Psi]]
+Vector Ex. [[Mat_1_alignment, Mat_1_unaligned],[Mat_2_alignment, Mat_2_unaligned]]</p></li>
+<li><p><strong>PhysSize</strong> (<em>float</em>) – Voxel size</p></li>
+<li><p><strong>fname</strong> (<em>str</em><em> or </em><em>path</em>) – name of hdf5 file to write</p></li>
+<li><p><strong>MorphologyType</strong> (<em>int</em>) – 0 - Euler
+1 - Vector</p></li>
+<li><p><strong>ordering</strong> (<em>str</em>) – String denoting the axes ordering. ‘ZYX’ or ‘XYZ’</p></li>
+<li><p><strong>author</strong> (<em>str</em>) – Name of author writing the morphology</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Name of hdf5 file written</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>fname</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.morphology.write_opts">
+<span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">write_opts</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">optical_constants</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">material_num</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">path</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.write_opts" title="Permalink to this definition">#</a></dt>
+<dd></dd></dl>
+
+</section>
+
+
+                </article>
+              
+              
+              
+                <footer class="bd-footer-article">
+                  
+<div class="footer-article-items footer-article__inner">
+  
+    <div class="footer-article-item"><!-- Previous / next buttons -->
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="NRSS.checkH5.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">NRSS.checkH5</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="NRSS.reader.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">NRSS.reader</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div></div>
+  
+</div>
+
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Material"><code class="docutils literal notranslate"><span class="pre">Material</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Material.materialID"><code class="docutils literal notranslate"><span class="pre">Material.materialID</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Material.Vfrac"><code class="docutils literal notranslate"><span class="pre">Material.Vfrac</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Material.theta"><code class="docutils literal notranslate"><span class="pre">Material.theta</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Material.psi"><code class="docutils literal notranslate"><span class="pre">Material.psi</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Material.NumZYX"><code class="docutils literal notranslate"><span class="pre">Material.NumZYX</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Material.name"><code class="docutils literal notranslate"><span class="pre">Material.name</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Material.copy"><code class="docutils literal notranslate"><span class="pre">Material.copy()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology"><code class="docutils literal notranslate"><span class="pre">Morphology</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.input_mapping"><code class="docutils literal notranslate"><span class="pre">Morphology.input_mapping</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.numMaterial"><code class="docutils literal notranslate"><span class="pre">Morphology.numMaterial</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.materials"><code class="docutils literal notranslate"><span class="pre">Morphology.materials</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.PhysSize"><code class="docutils literal notranslate"><span class="pre">Morphology.PhysSize</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.NumZYX"><code class="docutils literal notranslate"><span class="pre">Morphology.NumZYX</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.config"><code class="docutils literal notranslate"><span class="pre">Morphology.config</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.create_cy_object"><code class="docutils literal notranslate"><span class="pre">Morphology.create_cy_object</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.simulated"><code class="docutils literal notranslate"><span class="pre">Morphology.simulated</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.load_morph_hdf5"><code class="docutils literal notranslate"><span class="pre">Morphology.load_morph_hdf5()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.create_inputData"><code class="docutils literal notranslate"><span class="pre">Morphology.create_inputData()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.create_optical_constants"><code class="docutils literal notranslate"><span class="pre">Morphology.create_optical_constants()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.create_voxel_data"><code class="docutils literal notranslate"><span class="pre">Morphology.create_voxel_data()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.run"><code class="docutils literal notranslate"><span class="pre">Morphology.run()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.scattering_to_xarray"><code class="docutils literal notranslate"><span class="pre">Morphology.scattering_to_xarray()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.AlgorithmType"><code class="docutils literal notranslate"><span class="pre">Morphology.AlgorithmType</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.CaseType"><code class="docutils literal notranslate"><span class="pre">Morphology.CaseType</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.EAngleRotation"><code class="docutils literal notranslate"><span class="pre">Morphology.EAngleRotation</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.Energies"><code class="docutils literal notranslate"><span class="pre">Morphology.Energies</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.EwaldsInterpolation"><code class="docutils literal notranslate"><span class="pre">Morphology.EwaldsInterpolation</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.MorphologyType"><code class="docutils literal notranslate"><span class="pre">Morphology.MorphologyType</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id0"><code class="docutils literal notranslate"><span class="pre">Morphology.PhysSize</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.ReferenceFrame"><code class="docutils literal notranslate"><span class="pre">Morphology.ReferenceFrame</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.RotMask"><code class="docutils literal notranslate"><span class="pre">Morphology.RotMask</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.WindowingType"><code class="docutils literal notranslate"><span class="pre">Morphology.WindowingType</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.check_materials"><code class="docutils literal notranslate"><span class="pre">Morphology.check_materials()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1"><code class="docutils literal notranslate"><span class="pre">Morphology.config</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.config_default"><code class="docutils literal notranslate"><span class="pre">Morphology.config_default</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.config_to_inputData"><code class="docutils literal notranslate"><span class="pre">Morphology.config_to_inputData()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id2"><code class="docutils literal notranslate"><span class="pre">Morphology.create_inputData()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id3"><code class="docutils literal notranslate"><span class="pre">Morphology.create_optical_constants()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.create_update_cy"><code class="docutils literal notranslate"><span class="pre">Morphology.create_update_cy()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id4"><code class="docutils literal notranslate"><span class="pre">Morphology.create_voxel_data()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id5"><code class="docutils literal notranslate"><span class="pre">Morphology.input_mapping</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.load_config"><code class="docutils literal notranslate"><span class="pre">Morphology.load_config()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.load_matfile"><code class="docutils literal notranslate"><span class="pre">Morphology.load_matfile()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id6"><code class="docutils literal notranslate"><span class="pre">Morphology.load_morph_hdf5()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id7"><code class="docutils literal notranslate"><span class="pre">Morphology.numMaterial</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id8"><code class="docutils literal notranslate"><span class="pre">Morphology.run()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id9"><code class="docutils literal notranslate"><span class="pre">Morphology.scattering_to_xarray()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id10"><code class="docutils literal notranslate"><span class="pre">Morphology.simulated</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.update_optical_constants"><code class="docutils literal notranslate"><span class="pre">Morphology.update_optical_constants()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.update_voxel_data"><code class="docutils literal notranslate"><span class="pre">Morphology.update_voxel_data()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.validate_all"><code class="docutils literal notranslate"><span class="pre">Morphology.validate_all()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.write_config"><code class="docutils literal notranslate"><span class="pre">Morphology.write_config()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.write_constants"><code class="docutils literal notranslate"><span class="pre">Morphology.write_constants()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.write_to_file"><code class="docutils literal notranslate"><span class="pre">Morphology.write_to_file()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.OpticalConstants"><code class="docutils literal notranslate"><span class="pre">OpticalConstants</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.OpticalConstants.energies"><code class="docutils literal notranslate"><span class="pre">OpticalConstants.energies</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.OpticalConstants.opt_constants"><code class="docutils literal notranslate"><span class="pre">OpticalConstants.opt_constants</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.OpticalConstants.name"><code class="docutils literal notranslate"><span class="pre">OpticalConstants.name</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.OpticalConstants.calc_constants"><code class="docutils literal notranslate"><span class="pre">OpticalConstants.calc_constants()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.OpticalConstants.load_matfile"><code class="docutils literal notranslate"><span class="pre">OpticalConstants.load_matfile()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.OpticalConstants.create_vacuum"><code class="docutils literal notranslate"><span class="pre">OpticalConstants.create_vacuum()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id11"><code class="docutils literal notranslate"><span class="pre">OpticalConstants.calc_constants()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id12"><code class="docutils literal notranslate"><span class="pre">OpticalConstants.create_vacuum()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id13"><code class="docutils literal notranslate"><span class="pre">OpticalConstants.load_matfile()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.check_NumMat"><code class="docutils literal notranslate"><span class="pre">check_NumMat()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.read_config"><code class="docutils literal notranslate"><span class="pre">read_config()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.read_material"><code class="docutils literal notranslate"><span class="pre">read_material()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.write_hdf5"><code class="docutils literal notranslate"><span class="pre">write_hdf5()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.write_opts"><code class="docutils literal notranslate"><span class="pre">write_opts()</span></code></a></li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+  <div class="tocsection sourcelink">
+    <a href="../_sources/api/NRSS.morphology.rst.txt">
+      <i class="fa-solid fa-file-lines"></i> Show Source
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=e353d410970836974a52"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=e353d410970836974a52"></script>
+
+
+  
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+  <p class="copyright">
+    
+      © Copyright : Official Contribution of the US Government.  Not subject to copyright in the United States.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 7.1.2.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item"><p class="theme-version">
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.13.3.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+
+  <!-- Taken from https://www.filamentgroup.com/lab/html-includes/#another-demo%3A-including-another-html-file -->
+  <iframe src="../_static/ntd2d_menu.html" onload="this.before((this.contentDocument.body||this.contentDocument).children[0]);this.remove()"></iframe>
+  </body>
+</html>
