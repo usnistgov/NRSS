@@ -6,7 +6,7 @@
 
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
 
     <title>CyRSoXS Simulation Components &#8212; NRSS 0.1.0 documentation</title>
   
@@ -18,12 +18,12 @@
   </script>
   
   <!-- Loaded before other Sphinx assets -->
-  <link href="../_static/styles/theme.css?digest=e353d410970836974a52" rel="stylesheet" />
-<link href="../_static/styles/bootstrap.css?digest=e353d410970836974a52" rel="stylesheet" />
-<link href="../_static/styles/pydata-sphinx-theme.css?digest=e353d410970836974a52" rel="stylesheet" />
+  <link href="../_static/styles/theme.css?digest=ac02cc09edc035673794" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=ac02cc09edc035673794" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=ac02cc09edc035673794" rel="stylesheet" />
 
   
-  <link href="../_static/vendor/fontawesome/6.1.2/css/all.min.css?digest=e353d410970836974a52" rel="stylesheet" />
+  <link href="../_static/vendor/fontawesome/6.1.2/css/all.min.css?digest=ac02cc09edc035673794" rel="stylesheet" />
   <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-solid-900.woff2" />
 <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-brands-400.woff2" />
 <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-regular-400.woff2" />
@@ -33,12 +33,13 @@
     <link rel="stylesheet" type="text/css" href="../_static/design-style.1e8bd061cd6da7fc9cf755528e8ffc24.min.css?v=0a3b3ea7" />
   
   <!-- Pre-loaded scripts that we'll load fully later -->
-  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=e353d410970836974a52" />
-<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=e353d410970836974a52" />
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=ac02cc09edc035673794" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=ac02cc09edc035673794" />
+  <script src="../_static/vendor/fontawesome/6.1.2/js/all.min.js?digest=ac02cc09edc035673794"></script>
 
-    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js?v=40769cce"></script>
+    <script src="../_static/documentation_options.js?v=38b66d78"></script>
     <script src="../_static/doctools.js?v=888ff710"></script>
-    <script src="../_static/sphinx_highlight.js?v=4825356b"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/design-tabs.js?v=36754332"></script>
     <script async="async" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'api/cyrsoxs';</script>
@@ -62,6 +63,15 @@
   
   
   <a class="skip-link" href="#main-content">Skip to main content</a>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>
+    Back to top
+  </button>
+
   
   <input type="checkbox"
           class="sidebar-toggle"
@@ -102,7 +112,8 @@
     <span class="fa-solid fa-bars"></span>
   </label>
   
-  <div class="navbar-header-items__start">
+  
+  <div class="col-lg-3 navbar-header-items__start">
     
       <div class="navbar-item">
   
@@ -124,7 +135,6 @@
 </a></div>
     
   </div>
-  
   
   <div class="col-lg-9 navbar-header-items">
     
@@ -190,23 +200,25 @@
       
         <div class="navbar-item navbar-persistent--container">
           
-<script>
-document.write(`
-  <button class="btn btn-sm navbar-btn search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <script>
+ document.write(`
+   <button class="btn navbar-btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
     <i class="fa-solid fa-magnifying-glass"></i>
-  </button>
-`);
-</script>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script>
         </div>
       
       
         <div class="navbar-item">
 <script>
 document.write(`
-  <button class="theme-switch-button btn btn-sm btn-outline-primary navbar-btn rounded-circle" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
-    <span class="theme-switch" data-mode="light"><i class="fa-solid fa-sun"></i></span>
-    <span class="theme-switch" data-mode="dark"><i class="fa-solid fa-moon"></i></span>
-    <span class="theme-switch" data-mode="auto"><i class="fa-solid fa-circle-half-stroke"></i></span>
+  <button class="btn btn-sm navbar-btn theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="theme-switch nav-link" data-mode="light"><i class="fa-solid fa-sun fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="dark"><i class="fa-solid fa-moon fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg"></i></span>
   </button>
 `);
 </script></div>
@@ -222,8 +234,8 @@ document.write(`
           
           
           
-          <a href="https://github.com/usnistgov/NRSS" title="GitHub" class="nav-link" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><span><i class="fa-brands fa-square-github"></i></span>
-            <label class="sr-only">GitHub</label></a>
+          <a href="https://github.com/usnistgov/NRSS" title="GitHub" class="nav-link" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><span><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i></span>
+            <span class="sr-only">GitHub</span></a>
         </li>
 </ul></div>
       
@@ -233,18 +245,20 @@ document.write(`
   
   
     <div class="navbar-persistent--mobile">
-<script>
-document.write(`
-  <button class="btn btn-sm navbar-btn search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <script>
+ document.write(`
+   <button class="btn navbar-btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
     <i class="fa-solid fa-magnifying-glass"></i>
-  </button>
-`);
-</script>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script>
     </div>
   
 
   
-    <label class="sidebar-toggle secondary-toggle" for="__secondary">
+    <label class="sidebar-toggle secondary-toggle" for="__secondary" tabindex="0">
       <span class="fa-solid fa-outdent"></span>
     </label>
   
@@ -326,10 +340,10 @@ document.write(`
           <div class="navbar-item">
 <script>
 document.write(`
-  <button class="theme-switch-button btn btn-sm btn-outline-primary navbar-btn rounded-circle" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
-    <span class="theme-switch" data-mode="light"><i class="fa-solid fa-sun"></i></span>
-    <span class="theme-switch" data-mode="dark"><i class="fa-solid fa-moon"></i></span>
-    <span class="theme-switch" data-mode="auto"><i class="fa-solid fa-circle-half-stroke"></i></span>
+  <button class="btn btn-sm navbar-btn theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="theme-switch nav-link" data-mode="light"><i class="fa-solid fa-sun fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="dark"><i class="fa-solid fa-moon fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg"></i></span>
   </button>
 `);
 </script></div>
@@ -345,8 +359,8 @@ document.write(`
           
           
           
-          <a href="https://github.com/usnistgov/NRSS" title="GitHub" class="nav-link" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><span><i class="fa-brands fa-square-github"></i></span>
-            <label class="sr-only">GitHub</label></a>
+          <a href="https://github.com/usnistgov/NRSS" title="GitHub" class="nav-link" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><span><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i></span>
+            <span class="sr-only">GitHub</span></a>
         </li>
 </ul></div>
         
@@ -393,8 +407,8 @@ document.write(`
 
 
 
-<nav aria-label="Breadcrumbs">
-  <ul class="bd-breadcrumbs" role="navigation" aria-label="Breadcrumb">
+<nav aria-label="Breadcrumb">
+  <ul class="bd-breadcrumbs">
     
     <li class="breadcrumb-item breadcrumb-home">
       <a href="../index.html" class="nav-link" aria-label="Home">
@@ -404,7 +418,7 @@ document.write(`
     
     <li class="breadcrumb-item"><a href="idx_api.html" class="nav-link">Software Reference</a></li>
     
-    <li class="breadcrumb-item active" aria-current="page">CyRSoXS Simulation Components</li>
+    <li class="breadcrumb-item active" aria-current="page">CyRSoXS...</li>
   </ul>
 </nav>
 </div>
@@ -422,7 +436,7 @@ document.write(`
                 <article class="bd-article" role="main">
                   
   <section id="cyrsoxs-simulation-components">
-<h1>CyRSoXS Simulation Components<a class="headerlink" href="#cyrsoxs-simulation-components" title="Permalink to this heading">#</a></h1>
+<h1>CyRSoXS Simulation Components<a class="headerlink" href="#cyrsoxs-simulation-components" title="Link to this heading">#</a></h1>
 <p><a class="reference external" href="https://github.com/usnistgov/cyrsoxs">Cy-RSoXS</a> is a voxel-based forward-scattering simulator calculated in the Born Approximation. This page describes the required files and file structure for use with CyRSoXS.</p>
 <ul class="simple">
 <li><dl class="simple">
@@ -448,11 +462,11 @@ document.write(`
 </li>
 </ul>
 <section id="morphology-file-structure">
-<h2>Morphology File Structure<a class="headerlink" href="#morphology-file-structure" title="Permalink to this heading">#</a></h2>
+<h2>Morphology File Structure<a class="headerlink" href="#morphology-file-structure" title="Link to this heading">#</a></h2>
 <p>Cy-RSoXS accepts two different types of morphologies: Vector and Euler. A vector morphology will use a vector to assign the direction and amount of alignment in each voxel for each material. A Euler morphology will use a set of Euler angles to assign the direction of alignment. A separate S parameter is used to denote the amount of alignment in each voxel for each material.</p>
 <p>The two structures below assume a morphology of size [1, 256, 256] where the dimensions are [Z, Y, X], and two materials in the morphology.</p>
 <section id="vector-morphology-hdf5-structure">
-<h3>Vector Morphology HDF5 Structure<a class="headerlink" href="#vector-morphology-hdf5-structure" title="Permalink to this heading">#</a></h3>
+<h3>Vector Morphology HDF5 Structure<a class="headerlink" href="#vector-morphology-hdf5-structure" title="Link to this heading">#</a></h3>
 <p><strong>NOTE:</strong> The Vector Morphology type is included for legacy support and may be deprecated in future releases. Use of the Euler Morphology type is strongly recommended.</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">Vector_Morphology/</span>
 <span class="go">    Mat_1_alignment/</span>
@@ -487,7 +501,7 @@ document.write(`
 </div>
 </section>
 <section id="euler-morphology-hdf5-structure">
-<h3>Euler Morphology HDF5 Structure<a class="headerlink" href="#euler-morphology-hdf5-structure" title="Permalink to this heading">#</a></h3>
+<h3>Euler Morphology HDF5 Structure<a class="headerlink" href="#euler-morphology-hdf5-structure" title="Link to this heading">#</a></h3>
 <p>The Euler Morphology uses a ZYZ convention. Currently, Cy-RSoXS only supports uniaxial materials and the first Euler rotation (Phi) is unused. Theta is the rotation around the Y axis. Psi is the last rotation around the Z axis.</p>
 <img alt="../_images/Euler_ZYZ-v4.gif" src="../_images/Euler_ZYZ-v4.gif" />
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">Euler_Angles/</span>
@@ -537,7 +551,7 @@ document.write(`
 </section>
 </section>
 <section id="material-optical-constant-file-structure">
-<h2>Material Optical Constant File Structure<a class="headerlink" href="#material-optical-constant-file-structure" title="Permalink to this heading">#</a></h2>
+<h2>Material Optical Constant File Structure<a class="headerlink" href="#material-optical-constant-file-structure" title="Link to this heading">#</a></h2>
 <p>CyRSoXS currently supports uniaxial optical constants. In tensor form, this can be represented as:</p>
 <div class="math notranslate nohighlight">
 \[\begin{split}\begin{bmatrix}
@@ -581,7 +595,7 @@ n_{perp} &amp; 0 &amp; 0\\
 </div>
 </section>
 <section id="configuration-file-structure">
-<h2>Configuration File Structure<a class="headerlink" href="#configuration-file-structure" title="Permalink to this heading">#</a></h2>
+<h2>Configuration File Structure<a class="headerlink" href="#configuration-file-structure" title="Link to this heading">#</a></h2>
 <p>The config.txt file has a number of options, where each option is written to a separate line in the file:</p>
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">Energies = [275.0, 275.1, ..., 299.9];</span>
 <span class="go">CaseType = 0</span>
@@ -590,7 +604,7 @@ n_{perp} &amp; 0 &amp; 0\\
 </pre></div>
 </div>
 <section id="table-of-configuration-file-options">
-<h3>Table of Configuration File Options<a class="headerlink" href="#table-of-configuration-file-options" title="Permalink to this heading">#</a></h3>
+<h3>Table of Configuration File Options<a class="headerlink" href="#table-of-configuration-file-options" title="Link to this heading">#</a></h3>
 <table class="table">
 <thead>
 <tr class="row-odd"><th class="head"><p>Option</p></th>
@@ -669,7 +683,7 @@ n_{perp} &amp; 0 &amp; 0\\
 </table>
 </section>
 <section id="configuration-file-option-descriptions">
-<h3>Configuration File Option Descriptions<a class="headerlink" href="#configuration-file-option-descriptions" title="Permalink to this heading">#</a></h3>
+<h3>Configuration File Option Descriptions<a class="headerlink" href="#configuration-file-option-descriptions" title="Link to this heading">#</a></h3>
 <ul class="simple">
 <li><dl class="simple">
 <dt>CaseType</dt><dd><ul>
@@ -813,11 +827,10 @@ n_{perp} &amp; 0 &amp; 0\\
               
               
               
-                <footer class="bd-footer-article">
-                  
-<div class="footer-article-items footer-article__inner">
-  
-    <div class="footer-article-item"><!-- Previous / next buttons -->
+              
+              
+                <footer class="prev-next-footer">
+                  <!-- Previous / next buttons -->
 <div class="prev-next-area">
     <a class="left-prev"
        href="idx_api.html"
@@ -837,10 +850,7 @@ n_{perp} &amp; 0 &amp; 0\\
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
-</div></div>
-  
 </div>
-
                 </footer>
               
             </div>
@@ -890,8 +900,8 @@ n_{perp} &amp; 0 &amp; 0\\
   </div>
   
   <!-- Scripts loaded after <body> so the DOM is not blocked -->
-  <script src="../_static/scripts/bootstrap.js?digest=e353d410970836974a52"></script>
-<script src="../_static/scripts/pydata-sphinx-theme.js?digest=e353d410970836974a52"></script>
+  <script src="../_static/scripts/bootstrap.js?digest=ac02cc09edc035673794"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=ac02cc09edc035673794"></script>
 
 
   
@@ -911,7 +921,7 @@ n_{perp} &amp; 0 &amp; 0\\
       
         <div class="footer-item">
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 7.1.2.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 7.2.6.
     <br/>
   </p>
 </div>
@@ -919,10 +929,11 @@ n_{perp} &amp; 0 &amp; 0\\
     </div>
   
   
+  
     <div class="footer-items__end">
       
         <div class="footer-item"><p class="theme-version">
-  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.13.3.
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.14.1.
 </p></div>
       
     </div>
