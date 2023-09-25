@@ -1,4 +1,4 @@
-name: nrss
+name: nrss_docs
 
 channels:
   - conda-forge
