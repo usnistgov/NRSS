@@ -14,5 +14,4 @@ jobs:
           formats: ''
           build-html-command: make html
           conda-environment: 'docs/environment_docs.yml'
-          pip-requirements: 'docs/requirements_docs.txt'
 
