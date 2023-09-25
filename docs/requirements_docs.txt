@@ -1,0 +1,12 @@
+# Requirements file for pip installing
+sphinx
+pydata-sphinx-theme
+sphinx-design
+xarray
+jupyterlab
+numpy
+scipy
+pandas
+matplotlib
+scikit-image
+h5py
