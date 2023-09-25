@@ -13,5 +13,4 @@ jobs:
           pages-url: 'https://pages.nist.gov'
           formats: ''
           build-html-command: make html
-          pip-requirements: 'docs/requirements_docs.txt'
-          conda-environment: 'environment.yml'
+          conda-environment: 'docs/environment_docs.yml'
