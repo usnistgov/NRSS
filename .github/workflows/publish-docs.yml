@@ -9,5 +9,10 @@ jobs:
       - uses: usnistgov/NISTtheDocs2Death@0.4
         with:
           docs-folder: docs/
+          pages-branch: 'nist-pages'
+          pages-url: 'https://pages.nist.gov'
           formats: ''
-          pip-requirements: 'docs/requirements.txt'
+          build-html-command: make html
+          pip-requirements: 'docs/requirements_docs.txt'
+          conda-environment: 'environment.yml'
+          include-header-footer: true
