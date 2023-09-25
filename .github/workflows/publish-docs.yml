@@ -15,4 +15,3 @@ jobs:
           build-html-command: make html
           pip-requirements: 'docs/requirements_docs.txt'
           conda-environment: 'environment.yml'
-          include-header-footer: true
