@@ -10,23 +10,26 @@ import pathlib
 
 def morphology_visualizer(
     morphology,
-    z_slice=0,
-    subsample=None,
-    translate_x=None,
-    translate_y=None,
-    screen_euler=True,
-    add_quiver=False,
-    quiver_bw=True,
-    outputmat=None,
-    outputplot=None,
-    outputaxes=True,
-    vfrac_range=None,
-    S_range=None,
-    vfrac_cmap=None,
-    S_cmap=None,
-    runquiet=False,
-    plotstyle="light",
-    dpi=300,
+    z_slice: int = 0,
+    subsample: int = None,
+    translate_x: int = None,
+    translate_y: int = None,
+    screen_euler: bool = True,
+    add_quiver: bool = False,
+    quiver_bw: bool = True,
+    outputmat: list = None,
+    outputplot: list = None,
+    outputaxes: bool = True,
+    vfrac_range: list = None,
+    S_range: list = None,
+    vfrac_cmap: str = None,
+    S_cmap: str = None,
+    runquiet: bool = False,
+    batchMode: bool = False,
+    plotstyle: str = "light",
+    dpi: int = 300,
+    exportDir: str = None,
+    exportParams: dict = None,
 ):
     """
     Reads in morphology HDF5 file and checks that the format is consistent for CyRSoXS. Optionally plots and returns select quantities.
@@ -52,6 +55,8 @@ def morphology_visualizer(
             Number of which materials to return
         outputplot : list of strings
             Number of which plots to return, can include 'vfrac', 'S', 'theta', 'psi'
+        outputaxes : bool
+            If a plot is returned, include its axes
         vfrac_range: list of tuples as [float, float]
             A custom range for vfrac colorbar
         S_range: list of tuples as [float, float]
@@ -60,15 +65,20 @@ def morphology_visualizer(
             A custom substitution for vfrac colormap
         S_cmap: str
             A custom substitution for vfrac colormap
-        outputaxes : bool
-            If a plot is returned, include its axes
         runquiet : bool
             Boolean flag for running without plotting or outputting to console
+        batchMode : bool
+            if true, prints console output and generates plots but doesnt show (provide exportDir for export)
         plotstyle : str
             Use a light or dark background for plots. 'dark' - dark, 'light' - light
-        dpi : integer
+        dpi : int
             The dpi at which the plot is generated. Per-material plot dimensions are 8.5" x 12.75"
-
+        exportDir : str, optional
+            if provided, export directory to save any generated figures into,
+            by default, will respect dpi and save as png, use exportParams to override
+        exportParams : dict, optional
+            additional params to unpack into matplotlib.pyplot.savefig. Overrides existing params.
+            ex: exportParams = {'dpi':600, format='svg'}
     Returns
     -------
         If outputmat and outputplot are correctly entered, will return an index list of images of the selected material and plot. Each list element will be  a numpy array in RGB format that be displayed with imshow
@@ -83,14 +93,16 @@ def morphology_visualizer(
 
     if not runquiet:
         print(
-            f"Dataset dimensions (Z, Y, X): {morphology.NumZYX[0]} x {morphology.NumZYX[1]} x {morphology.NumZYX[2]}"
+            f"Dataset dimensions (Z, Y, X): {morphology.NumZYX[0]} x {morphology.NumZYX[1]} x"
+            f" {morphology.NumZYX[2]}"
         )
         print(f"Number of Materials: {morphology._numMaterial}")
         print("")
 
     if z_slice > (morphology.NumZYX[0] - 1):
         warnings.warn(
-            f"z_slice of {z_slice} is greater than the maximum index of {morphology.NumZYX[0]-1}. Using z_slice = {morphology.NumZYX[0]-1} instead."
+            f"z_slice of {z_slice} is greater than the maximum index of {morphology.NumZYX[0]-1}."
+            f" Using z_slice = {morphology.NumZYX[0]-1} instead."
         )
         z_slice = morphology.NumZYX[0] - 1
 
@@ -106,9 +118,7 @@ def morphology_visualizer(
     rc("font", **font)
 
     cwdPath = pathlib.Path(__file__).resolve().parent
-    psi_cmap = matplotlib.colors.ListedColormap(
-        np.load(cwdPath / "cmap/infinitydouble_cmap.npy")
-    )
+    psi_cmap = matplotlib.colors.ListedColormap(np.load(cwdPath / "cmap/infinitydouble_cmap.npy"))
 
     backend_ = matplotlib.get_backend()
 
@@ -120,28 +130,32 @@ def morphology_visualizer(
             fig = plt.figure(figsize=(8.5, 12.75), dpi=dpi)
             if runquiet == False:
                 print(
-                    f"Material {i} Vfrac. Min: {morphology.materials[i].Vfrac.min()} Max: {morphology.materials[i].Vfrac.max()}"
+                    f"Material {i} Vfrac. Min: {morphology.materials[i].Vfrac.min()} Max:"
+                    f" {morphology.materials[i].Vfrac.max()}"
                 )
                 print(
-                    f"Material {i} S. Min: {morphology.materials[i].S.min()} Max: {morphology.materials[i].S.max()}"
+                    f"Material {i} S. Min: {morphology.materials[i].S.min()} Max:"
+                    f" {morphology.materials[i].S.max()}"
                 )
                 print(
-                    f"Material {i} theta. Min: {morphology.materials[i].theta.min()} Max: {morphology.materials[i].theta.max()}"
+                    f"Material {i} theta. Min: {morphology.materials[i].theta.min()} Max:"
+                    f" {morphology.materials[i].theta.max()}"
                 )
                 print(
-                    f"Material {i} psi. Min: {morphology.materials[i].psi.min()} Max: {morphology.materials[i].psi.max()}"
+                    f"Material {i} psi. Min: {morphology.materials[i].psi.min()} Max:"
+                    f" {morphology.materials[i].psi.max()}"
                 )
 
             if (morphology.materials[i].theta.min() < 0) or (
                 morphology.materials[i].theta.max() > (np.pi)
             ):
                 warnings.warn(
-                    "Visualization expects theta to have bounds of [0,pi]. This model has theta outside those bounds and visualization may be incorrect."
+                    "Visualization expects theta to have bounds of [0,pi]. This model has theta"
+                    " outside those bounds and visualization may be incorrect."
                 )
 
-            # run if you done want runquiet or run if you've selected this material for output
+            # run if you don't want runquiet or run if you've selected this material for output
             if (runquiet is not True) or ((outputmat is not None) and (i in outputmat)):
-
                 gs = gridspec.GridSpec(
                     nrows=5,
                     ncols=2,
@@ -171,11 +185,7 @@ def morphology_visualizer(
 
                 if (runquiet is not True) or ("vfrac" in outputplot):
                     ax1 = plt.subplot(gs[0, 0])
-                    if (
-                        vfrac_range
-                        and (len(vfrac_range) >= i)
-                        and (len(vfrac_range[i - 1]) == 2)
-                    ):
+                    if vfrac_range and (len(vfrac_range) >= i) and (len(vfrac_range[i - 1]) == 2):
                         norm = matplotlib.colors.Normalize(
                             vmin=vfrac_range[i - 1][0], vmax=vfrac_range[i - 1][1]
                         )
@@ -299,9 +309,7 @@ def morphology_visualizer(
                     # creates inset legend for orientation
                     azimuths_t = np.deg2rad(np.arange(-90, 90, 1))
                     zeniths_t = np.linspace(5, 10, 50)
-                    values_t = np.mod(np.pi / 2 - azimuths_t, np.pi) * np.ones(
-                        (50, 180)
-                    )
+                    values_t = np.mod(np.pi / 2 - azimuths_t, np.pi) * np.ones((50, 180))
                     ax5i.plot(
                         0,
                         0,
@@ -313,9 +321,7 @@ def morphology_visualizer(
                         zorder=0,
                         alpha=0.7,
                     )
-                    ax5i.pcolormesh(
-                        azimuths_t, zeniths_t, values_t, cmap=cm.jet, shading="auto"
-                    )
+                    ax5i.pcolormesh(azimuths_t, zeniths_t, values_t, cmap=cm.jet, shading="auto")
                     ax5i.set_axis_off()
                     ax5i.arrow(
                         0, 0, 0, 4, width=0.005, head_width=0.2, head_length=0.6, lw=0.5
@@ -335,9 +341,7 @@ def morphology_visualizer(
 
                 if (runquiet is not True) or ("psi" in outputplot):
                     ax6 = plt.subplot(gs[3, 1])
-                    norm = matplotlib.colors.Normalize(
-                        vmin=0, vmax=2 * np.pi, clip=False
-                    )
+                    norm = matplotlib.colors.Normalize(vmin=0, vmax=2 * np.pi, clip=False)
                     if screen_euler:
                         screen_mask = np.logical_or(
                             morphology.materials[i].Vfrac[z_slice, :, :] < 0.01,
@@ -345,8 +349,7 @@ def morphology_visualizer(
                         )
                         psiplot = ax6.imshow(
                             np.ma.masked_array(
-                                morphology.materials[i].psi[z_slice, :, :]
-                                % (2 * np.pi),
+                                morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi),
                                 screen_mask,
                             ),
                             cmap=psi_cmap,  # plt.get_cmap("hsv"),
@@ -357,19 +360,11 @@ def morphology_visualizer(
                         if add_quiver:
                             screen_white = np.logical_or(
                                 screen_mask,
-                                (
-                                    morphology.materials[i].psi[z_slice, :, :]
-                                    % (2 * np.pi)
-                                )
-                                > np.pi,
+                                (morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi)) > np.pi,
                             )
                             screen_black = np.logical_or(
                                 screen_mask,
-                                (
-                                    morphology.materials[i].psi[z_slice, :, :]
-                                    % (2 * np.pi)
-                                )
-                                < np.pi,
+                                (morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi)) < np.pi,
                             )
                             sin_psi = np.sin(morphology.materials[i].psi[z_slice, :, :])
                             cos_psi = np.cos(morphology.materials[i].psi[z_slice, :, :])
@@ -403,10 +398,7 @@ def morphology_visualizer(
                                         screen_white,
                                     ),
                                     np.ma.masked_array(
-                                        (
-                                            morphology.materials[i].psi[z_slice, :, :]
-                                            + np.pi
-                                        )
+                                        (morphology.materials[i].psi[z_slice, :, :] + np.pi)
                                         % (2 * np.pi),
                                         screen_white,
                                     ),
@@ -448,10 +440,7 @@ def morphology_visualizer(
                                         screen_black,
                                     ),
                                     np.ma.masked_array(
-                                        (
-                                            morphology.materials[i].psi[z_slice, :, :]
-                                            + np.pi
-                                        )
+                                        (morphology.materials[i].psi[z_slice, :, :] + np.pi)
                                         % (2 * np.pi),
                                         screen_black,
                                     ),
@@ -474,12 +463,10 @@ def morphology_visualizer(
                         )
                         if add_quiver:
                             screen_white = (
-                                morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi)
-                                > np.pi
+                                morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi) > np.pi
                             )
                             screen_black = (
-                                morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi)
-                                < np.pi
+                                morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi) < np.pi
                             )
                             sin_psi = np.sin(morphology.materials[i].psi[z_slice, :, :])
                             cos_psi = np.cos(morphology.materials[i].psi[z_slice, :, :])
@@ -550,9 +537,7 @@ def morphology_visualizer(
                         zorder=0,
                         alpha=0.7,
                     )
-                    ax4i.pcolormesh(
-                        azimuths, zeniths, values, cmap=psi_cmap, shading="auto"
-                    )
+                    ax4i.pcolormesh(azimuths, zeniths, values, cmap=psi_cmap, shading="auto")
                     ax4i.set_axis_off()
                     ax4i.arrow(
                         0, 0, 0, 4, width=0.005, head_width=0.2, head_length=0.6, lw=0.5
@@ -587,94 +572,91 @@ def morphology_visualizer(
                     ax8.set_ylabel("num voxels")
                     ax8.set_yscale("log")
 
-            if runquiet is not True:
-                plt.show()
+            if runquiet is False:  # Show plot and/or export to file
+                # Exporting plots
+                if exportDir is not None:
+                    # Attempt to export image
+                    outDir = pathlib.Path(exportDir)
+                    outPath = outDir / f"Mat{i}_viz"
+
+                    if exportParams is None:  # No user provided kwargs
+                        plt.savefig(fname=(str(outPath) + ".png"), dpi=dpi, format="png")
+                    else:  # Apply user provided kwargs
+                        # Grab format, if provided, else do png
+                        format = exportParams.get("format", "png")
+                        plt.savefig(fname=(str(outPath) + f".{format}"), **exportParams)
+                if batchMode is True:  # Dont show plots, but do export them
+                    pass
+                else:
+                    plt.show()
 
             if outputmat and (i in outputmat):
                 fig.canvas.draw()
                 rgb_return = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-                rgb_return = rgb_return.reshape(
-                    fig.canvas.get_width_height()[::-1] + (3,)
-                )
+                rgb_return = rgb_return.reshape(fig.canvas.get_width_height()[::-1] + (3,))
                 if outputplot and ("vfrac" in outputplot):
                     if outputaxes:
                         fig_xl = ax1.get_tightbbox().intervalx[0].astype(int)
                         fig_xr = Vfrac_cbar.ax.get_tightbbox().intervalx[1].astype(int)
 
-                        fig_yt = rgb_return.shape[0] - ax1.get_tightbbox().intervaly[
-                            1
-                        ].astype(int)
-                        fig_yb = rgb_return.shape[0] - ax1.get_tightbbox().intervaly[
-                            0
-                        ].astype(int)
+                        fig_yt = rgb_return.shape[0] - ax1.get_tightbbox().intervaly[1].astype(int)
+                        fig_yb = rgb_return.shape[0] - ax1.get_tightbbox().intervaly[0].astype(int)
                     else:
-                        fig_yt = rgb_return.shape[
-                            0
-                        ] - ax1.get_window_extent().intervaly[1].astype(int)
-                        fig_yb = rgb_return.shape[
-                            0
-                        ] - ax1.get_window_extent().intervaly[0].astype(int)
+                        fig_yt = rgb_return.shape[0] - ax1.get_window_extent().intervaly[1].astype(
+                            int
+                        )
+                        fig_yb = rgb_return.shape[0] - ax1.get_window_extent().intervaly[0].astype(
+                            int
+                        )
                         fig_xl = ax1.get_window_extent().intervalx[0].astype(int)
                         fig_xr = ax1.get_window_extent().intervalx[1].astype(int)
 
                     rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
                 if outputplot and "S" in outputplot:
                     if outputaxes:
-                        fig_yt = rgb_return.shape[0] - ax2.get_tightbbox().intervaly[
-                            1
-                        ].astype(int)
-                        fig_yb = rgb_return.shape[0] - ax2.get_tightbbox().intervaly[
-                            0
-                        ].astype(int)
+                        fig_yt = rgb_return.shape[0] - ax2.get_tightbbox().intervaly[1].astype(int)
+                        fig_yb = rgb_return.shape[0] - ax2.get_tightbbox().intervaly[0].astype(int)
                         fig_xl = ax2.get_tightbbox().intervalx[0].astype(int)
                         fig_xr = S_cbar.ax.get_tightbbox().intervalx[1].astype(int)
                     else:
-                        fig_yt = rgb_return.shape[
-                            0
-                        ] - ax2.get_window_extent().intervaly[1].astype(int)
-                        fig_yb = rgb_return.shape[
-                            0
-                        ] - ax2.get_window_extent().intervaly[0].astype(int)
+                        fig_yt = rgb_return.shape[0] - ax2.get_window_extent().intervaly[1].astype(
+                            int
+                        )
+                        fig_yb = rgb_return.shape[0] - ax2.get_window_extent().intervaly[0].astype(
+                            int
+                        )
                         fig_xl = ax2.get_window_extent().intervalx[0].astype(int)
                         fig_xr = ax2.get_window_extent().intervalx[1].astype(int)
                     rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
                 if outputplot and "theta" in outputplot:
                     if outputaxes:
-                        fig_yt = rgb_return.shape[0] - ax5.get_tightbbox().intervaly[
-                            1
-                        ].astype(int)
-                        fig_yb = rgb_return.shape[0] - ax5.get_tightbbox().intervaly[
-                            0
-                        ].astype(int)
+                        fig_yt = rgb_return.shape[0] - ax5.get_tightbbox().intervaly[1].astype(int)
+                        fig_yb = rgb_return.shape[0] - ax5.get_tightbbox().intervaly[0].astype(int)
                         fig_xl = ax5.get_tightbbox().intervalx[0].astype(int)
                         fig_xr = theta_cbar.ax.get_tightbbox().intervalx[1].astype(int)
                     else:
-                        fig_yt = rgb_return.shape[
-                            0
-                        ] - ax5.get_window_extent().intervaly[1].astype(int)
-                        fig_yb = rgb_return.shape[
-                            0
-                        ] - ax5.get_window_extent().intervaly[0].astype(int)
+                        fig_yt = rgb_return.shape[0] - ax5.get_window_extent().intervaly[1].astype(
+                            int
+                        )
+                        fig_yb = rgb_return.shape[0] - ax5.get_window_extent().intervaly[0].astype(
+                            int
+                        )
                         fig_xl = ax5.get_window_extent().intervalx[0].astype(int)
                         fig_xr = ax5.get_window_extent().intervalx[1].astype(int)
                     rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
                 if outputplot and "psi" in outputplot:
                     if outputaxes:
-                        fig_yt = rgb_return.shape[0] - ax6.get_tightbbox().intervaly[
-                            1
-                        ].astype(int)
-                        fig_yb = rgb_return.shape[0] - ax6.get_tightbbox().intervaly[
-                            0
-                        ].astype(int)
+                        fig_yt = rgb_return.shape[0] - ax6.get_tightbbox().intervaly[1].astype(int)
+                        fig_yb = rgb_return.shape[0] - ax6.get_tightbbox().intervaly[0].astype(int)
                         fig_xl = ax6.get_tightbbox().intervalx[0].astype(int)
                         fig_xr = psi_cbar.ax.get_tightbbox().intervalx[1].astype(int)
                     else:
-                        fig_yt = rgb_return.shape[
-                            0
-                        ] - ax6.get_window_extent().intervaly[1].astype(int)
-                        fig_yb = rgb_return.shape[
-                            0
-                        ] - ax6.get_window_extent().intervaly[0].astype(int)
+                        fig_yt = rgb_return.shape[0] - ax6.get_window_extent().intervaly[1].astype(
+                            int
+                        )
+                        fig_yb = rgb_return.shape[0] - ax6.get_window_extent().intervaly[0].astype(
+                            int
+                        )
                         fig_xl = ax6.get_window_extent().intervalx[0].astype(int)
                         fig_xr = ax6.get_window_extent().intervalx[1].astype(int)
                     rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
