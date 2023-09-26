@@ -79,12 +79,12 @@
 
 /* add menu styling for active variant */
 
-/* note: li.ntd2d_9-docs-to-nist-pages doesn't reliably work with dotted names */
+/* note: li.ntd2d_7_merge doesn't reliably work with dotted names */
 
-li[class~="ntd2d_9-docs-to-nist-pages"] {
+li[class~="ntd2d_7_merge"] {
   font-weight: bold;
 }
 
-li[class~="ntd2d_9-docs-to-nist-pages"] a:hover {
+li[class~="ntd2d_7_merge"] a:hover {
   text-decoration: none;
 }
