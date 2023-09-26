@@ -1,19 +1,22 @@
+.. _Getting_Started:
+
 ===============
 Getting Started
 ===============
 
 Hardware Requirements
 _____________________
-
-CyRSoXS requires an NVIDIA GPU.
+.. warning::
+    CyRSoXS requires an NVIDIA GPU.
 
 Installation on Linux
 _____________________
 
-**NOTE:** This installation guide uses the Anaconda Python distribution. Any Python 
-installation ``version >=3.6`` should work, you will just need to point CMake to your 
-specific installation. git, conda, and pip are also used, and it is assumed you have 
-working installations of all three.
+.. note:: 
+    This installation guide uses the Anaconda Python distribution. Any Python 
+    installation ``version >=3.6`` should work, you will just need to point CMake to your 
+    specific installation. git, conda, and pip are also used, and it is assumed you have 
+    working installations of all three.
 
 **CyRSoXS v1.1.5.0** is now Conda installable and no longer requires building from 
 source. If you need to compile from source (to enable double-precision, for example) 
@@ -242,5 +245,12 @@ Again, you should see the following output:
 
 
 
+Tutorials
+__________
+
+Core-Shell Disk Tutorial
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Please see the Jupyter notebook located in the `tutorials <https://github.com/usnistgov/NRSS/tree/main/tutorials>`_ folder.
 
 

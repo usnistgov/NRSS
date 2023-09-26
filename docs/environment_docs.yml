@@ -1,0 +1,22 @@
+name: nrss
+
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python==3.9
+  - cyrsoxs
+  # Workaround since github actions workflow with only conda solver was timing out
+  - pip
+  - pip:
+    - sphinx
+    - pydata-sphinx-theme==0.13.3
+    - sphinx-design
+    - xarray
+    - jupyterlab
+    - numpy
+    - scipy
+    - pandas
+    - matplotlib
+    - scikit-image
+    - h5py

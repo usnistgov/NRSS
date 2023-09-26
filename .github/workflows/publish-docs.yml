@@ -1,0 +1,17 @@
+name: "Publish Documentation to NIST Pages"
+
+on: [push, pull_request, delete]
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: usnistgov/NISTtheDocs2Death@0.4
+        with:
+          docs-folder: docs/
+          pages-branch: 'nist-pages'
+          pages-url: 'https://pages.nist.gov'
+          formats: ''
+          build-html-command: make html
+          conda-environment: 'docs/environment_docs.yml'
+

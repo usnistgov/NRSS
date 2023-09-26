@@ -14,5 +14,4 @@ dependencies:
   - matplotlib
   - scikit-image
   - h5py
-  - sphinx
-  - pydata-sphinx-theme
+  

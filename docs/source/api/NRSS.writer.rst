@@ -2,4 +2,7 @@ NRSS.writer
 ===========
 
 .. automodule:: NRSS.writer
-    :members:
+   :imported-members:
+   :members:
+   :undoc-members:
+   :show-inheritance:
