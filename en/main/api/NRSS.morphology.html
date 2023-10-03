@@ -738,7 +738,7 @@ further analysis</p>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="id6">
-<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">load_morph_hdf5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hdf5_file</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#id6" title="Link to this definition">#</a></dt>
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">load_morph_hdf5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hdf5_file</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">create_cy_object</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#id6" title="Link to this definition">#</a></dt>
 <dd></dd></dl>
 
 <dl class="py property">
@@ -775,6 +775,43 @@ further analysis</p>
 <dt class="sig sig-object py" id="NRSS.morphology.Morphology.validate_all">
 <span class="sig-name descname"><span class="pre">validate_all</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">quiet</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.validate_all" title="Link to this definition">#</a></dt>
 <dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.visualize_materials">
+<span class="sig-name descname"><span class="pre">visualize_materials</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.visualize_materials" title="Link to this definition">#</a></dt>
+<dd><p>Reads in morphology HDF5 file and checks that the format is consistent for CyRSoXS. Optionally plots and returns select quantities.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>z_slice</strong> (<em>int</em>) – Which z-slice of the array to plot.</p></li>
+<li><p><strong>subsample</strong> (<em>int</em>) – Number of voxels to display in X and Y</p></li>
+<li><p><strong>translate_x</strong> (<em>int</em>) – Number of voxels to translate image in x; meant for use with subsample</p></li>
+<li><p><strong>translate_y</strong> (<em>int</em>) – Number of voxels to translate image in y; meant for use with subsample</p></li>
+<li><p><strong>screen_euler</strong> (<em>bool</em>) – Suppress visualization of euler angles where vfrac &lt; 0.05 or S &lt; 0.05; intended to hilight edges</p></li>
+<li><p><strong>add_quiver</strong> (<em>bool</em>) – Adds lines to every voxel on the psi plot that indicate in-plane direction. Not recommended for resolutions larger than 128x128, best for resolutions 64x64 or lower.</p></li>
+<li><p><strong>quiver_bw</strong> (<em>bool</em>) – Intended to be used when add_quiver == True, when quiver_bw is True, the quiver arrows will be black and white instead of colored.</p></li>
+<li><p><strong>outputmat</strong> (<em>list</em><em> of </em><em>ints</em>) – Number of which materials to return</p></li>
+<li><p><strong>outputplot</strong> (<em>list</em><em> of </em><em>strings</em>) – Number of which plots to return, can include ‘vfrac’, ‘S’, ‘theta’, ‘psi’</p></li>
+<li><p><strong>outputaxes</strong> (<em>bool</em>) – If a plot is returned, include its axes</p></li>
+<li><p><strong>vfrac_range</strong> (<em>list</em><em> of </em><em>tuples as</em><em> [</em><em>float</em><em>, </em><em>float</em><em>]</em>) – A custom range for vfrac colorbar</p></li>
+<li><p><strong>S_range</strong> (<em>list</em><em> of </em><em>tuples as</em><em> [</em><em>float</em><em>, </em><em>float</em><em>]</em>) – A custom range for S colorbar</p></li>
+<li><p><strong>vfrac_cmap</strong> (<em>str</em>) – A custom substitution for vfrac colormap</p></li>
+<li><p><strong>S_cmap</strong> (<em>str</em>) – A custom substitution for vfrac colormap</p></li>
+<li><p><strong>runquiet</strong> (<em>bool</em>) – Boolean flag for running without plotting or outputting to console</p></li>
+<li><p><strong>batchMode</strong> (<em>bool</em>) – if true, prints console output and generates plots but doesnt show (provide exportDir for export)</p></li>
+<li><p><strong>plotstyle</strong> (<em>str</em>) – Use a light or dark background for plots. ‘dark’ - dark, ‘light’ - light</p></li>
+<li><p><strong>dpi</strong> (<em>int</em>) – The dpi at which the plot is generated. Per-material plot dimensions are 8.5” x 12.75”</p></li>
+<li><p><strong>exportDir</strong> (<em>str</em><em>, </em><em>optional</em>) – if provided, export directory to save any generated figures into,
+by default, will respect dpi and save as png, use exportParams to override</p></li>
+<li><p><strong>exportParams</strong> (<em>dict</em><em>, </em><em>optional</em>) – additional params to unpack into matplotlib.pyplot.savefig. Overrides existing params.
+ex: exportParams = {‘dpi’:600, format=’svg’}</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>If outputmat and outputplot are correctly entered, will return an index list of images of the selected material and plot. Each list element will be  a numpy array in RGB format that be displayed with imshow</p>
+</dd>
+</dl>
+</dd></dl>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="NRSS.morphology.Morphology.write_config">
@@ -882,6 +919,43 @@ further analysis</p>
 </dd>
 <dt class="field-odd">Return type<span class="colon">:</span></dt>
 <dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.morphology.morphology_visualizer">
+<span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">morphology_visualizer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">morphology</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">z_slice</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subsample</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">translate_x</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">translate_y</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">screen_euler</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">add_quiver</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quiver_bw</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outputmat</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outputplot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outputaxes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vfrac_range</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">S_range</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vfrac_cmap</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">S_cmap</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">runquiet</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batchMode</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">plotstyle</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'light'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dpi</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">300</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exportDir</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exportParams</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.morphology_visualizer" title="Link to this definition">#</a></dt>
+<dd><p>Reads in morphology HDF5 file and checks that the format is consistent for CyRSoXS. Optionally plots and returns select quantities.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>z_slice</strong> (<em>int</em>) – Which z-slice of the array to plot.</p></li>
+<li><p><strong>subsample</strong> (<em>int</em>) – Number of voxels to display in X and Y</p></li>
+<li><p><strong>translate_x</strong> (<em>int</em>) – Number of voxels to translate image in x; meant for use with subsample</p></li>
+<li><p><strong>translate_y</strong> (<em>int</em>) – Number of voxels to translate image in y; meant for use with subsample</p></li>
+<li><p><strong>screen_euler</strong> (<em>bool</em>) – Suppress visualization of euler angles where vfrac &lt; 0.05 or S &lt; 0.05; intended to hilight edges</p></li>
+<li><p><strong>add_quiver</strong> (<em>bool</em>) – Adds lines to every voxel on the psi plot that indicate in-plane direction. Not recommended for resolutions larger than 128x128, best for resolutions 64x64 or lower.</p></li>
+<li><p><strong>quiver_bw</strong> (<em>bool</em>) – Intended to be used when add_quiver == True, when quiver_bw is True, the quiver arrows will be black and white instead of colored.</p></li>
+<li><p><strong>outputmat</strong> (<em>list</em><em> of </em><em>ints</em>) – Number of which materials to return</p></li>
+<li><p><strong>outputplot</strong> (<em>list</em><em> of </em><em>strings</em>) – Number of which plots to return, can include ‘vfrac’, ‘S’, ‘theta’, ‘psi’</p></li>
+<li><p><strong>outputaxes</strong> (<em>bool</em>) – If a plot is returned, include its axes</p></li>
+<li><p><strong>vfrac_range</strong> (<em>list</em><em> of </em><em>tuples as</em><em> [</em><em>float</em><em>, </em><em>float</em><em>]</em>) – A custom range for vfrac colorbar</p></li>
+<li><p><strong>S_range</strong> (<em>list</em><em> of </em><em>tuples as</em><em> [</em><em>float</em><em>, </em><em>float</em><em>]</em>) – A custom range for S colorbar</p></li>
+<li><p><strong>vfrac_cmap</strong> (<em>str</em>) – A custom substitution for vfrac colormap</p></li>
+<li><p><strong>S_cmap</strong> (<em>str</em>) – A custom substitution for vfrac colormap</p></li>
+<li><p><strong>runquiet</strong> (<em>bool</em>) – Boolean flag for running without plotting or outputting to console</p></li>
+<li><p><strong>batchMode</strong> (<em>bool</em>) – if true, prints console output and generates plots but doesnt show (provide exportDir for export)</p></li>
+<li><p><strong>plotstyle</strong> (<em>str</em>) – Use a light or dark background for plots. ‘dark’ - dark, ‘light’ - light</p></li>
+<li><p><strong>dpi</strong> (<em>int</em>) – The dpi at which the plot is generated. Per-material plot dimensions are 8.5” x 12.75”</p></li>
+<li><p><strong>exportDir</strong> (<em>str</em><em>, </em><em>optional</em>) – if provided, export directory to save any generated figures into,
+by default, will respect dpi and save as png, use exportParams to override</p></li>
+<li><p><strong>exportParams</strong> (<em>dict</em><em>, </em><em>optional</em>) – additional params to unpack into matplotlib.pyplot.savefig. Overrides existing params.
+ex: exportParams = {‘dpi’:600, format=’svg’}</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>If outputmat and outputplot are correctly entered, will return an index list of images of the selected material and plot. Each list element will be  a numpy array in RGB format that be displayed with imshow</p>
 </dd>
 </dl>
 </dd></dl>
@@ -1031,6 +1105,7 @@ Vector Ex. [[Mat_1_alignment, Mat_1_unaligned],[Mat_2_alignment, Mat_2_unaligned
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.update_optical_constants"><code class="docutils literal notranslate"><span class="pre">Morphology.update_optical_constants()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.update_voxel_data"><code class="docutils literal notranslate"><span class="pre">Morphology.update_voxel_data()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.validate_all"><code class="docutils literal notranslate"><span class="pre">Morphology.validate_all()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.visualize_materials"><code class="docutils literal notranslate"><span class="pre">Morphology.visualize_materials()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.write_config"><code class="docutils literal notranslate"><span class="pre">Morphology.write_config()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.write_constants"><code class="docutils literal notranslate"><span class="pre">Morphology.write_constants()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.write_to_file"><code class="docutils literal notranslate"><span class="pre">Morphology.write_to_file()</span></code></a></li>
@@ -1049,6 +1124,7 @@ Vector Ex. [[Mat_1_alignment, Mat_1_unaligned],[Mat_2_alignment, Mat_2_unaligned
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.check_NumMat"><code class="docutils literal notranslate"><span class="pre">check_NumMat()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.morphology_visualizer"><code class="docutils literal notranslate"><span class="pre">morphology_visualizer()</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.read_config"><code class="docutils literal notranslate"><span class="pre">read_config()</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.read_material"><code class="docutils literal notranslate"><span class="pre">read_material()</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.write_hdf5"><code class="docutils literal notranslate"><span class="pre">write_hdf5()</span></code></a></li>
