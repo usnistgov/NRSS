@@ -5,6 +5,8 @@ import warnings
 from .checkH5 import check_NumMat
 from .reader import read_material, read_config
 from .writer import write_opts, write_hdf5
+from .visualizer import morphology_visualizer
+
 import numpy as np
 import xarray as xr
 import sys
@@ -287,7 +289,7 @@ class Morphology:
                 warnings.warn(f'Key {key} not supported')
 
     @classmethod
-    def load_morph_hdf5(cls, hdf5_file):
+    def load_morph_hdf5(cls, hdf5_file, create_cy_object=False):
         with h5py.File(hdf5_file, 'r') as f:
             if 'Euler_Angles' not in f.keys():
                 raise KeyError('Only the Euler Angle convention is currently supported')
@@ -309,7 +311,7 @@ class Morphology:
                                                  psi=psi,
                                                  NumZYX=Vfrac.shape)
 
-        return cls(numMat, materials=materials, PhysSize=PhysSize)
+        return cls(numMat, materials=materials, PhysSize=PhysSize, create_cy_object=create_cy_object)
 
     def load_config(self, config_file):
         self.config = read_config(config_file)
@@ -486,6 +488,11 @@ class Morphology:
 
         if not quiet:
             print('All material checks have passed')
+
+    def visualize_materials(self, *args,**kwargs):
+        return morphology_visualizer(self, *args,**kwargs)
+    visualize_materials.__doc__ = morphology_visualizer.__doc__
+
 
     def validate_all(self, quiet=True):
         self.check_materials(quiet=quiet)
