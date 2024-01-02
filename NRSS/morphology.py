@@ -423,9 +423,9 @@ class Morphology:
             write_opts(self.materials[i].opt_constants, i, path)
 
     # submit to CyRSoXS
-    def run(self, stdout=True, stderr=True, return_xarray=True, print_vec_info=False):
-
-        self.create_update_cy()
+    def run(self, stdout=True, stderr=True, return_xarray=True, print_vec_info=False, validate=False):
+        if validate:
+            self.create_update_cy()
 
         # if we haven't created a ScatteringPattern object, create it now
         if not self.scatteringPattern:
