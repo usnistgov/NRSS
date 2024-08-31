@@ -30,16 +30,16 @@
 
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
     <link rel="stylesheet" type="text/css" href="../_static/ntd2d.css?v=525a25f0" />
-    <link rel="stylesheet" type="text/css" href="../_static/design-style.1e8bd061cd6da7fc9cf755528e8ffc24.min.css?v=0a3b3ea7" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
   
   <!-- Pre-loaded scripts that we'll load fully later -->
   <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=e353d410970836974a52" />
 <link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=e353d410970836974a52" />
 
     <script src="../_static/documentation_options.js?v=38b66d78"></script>
-    <script src="../_static/doctools.js?v=888ff710"></script>
+    <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
-    <script src="../_static/design-tabs.js?v=36754332"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'api/NRSS.checkH5';</script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
@@ -457,7 +457,7 @@ document.write(`
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>f</strong> (<em>file object</em>) – </p></li>
+<li><p><strong>f</strong> (<em>file object</em>)</p></li>
 <li><p><strong>morphology_type</strong> (<em>int</em>) – 0 - Euler, 1 - Vector</p></li>
 </ul>
 </dd>
@@ -560,8 +560,9 @@ box_aspect: float or None
 clip_box: <cite>~matplotlib.transforms.BboxBase</cite> or None
 clip_on: bool
 clip_path: Patch or (Path, Transform) or None
-facecolor or fc: color
+facecolor or fc: <a href="#id1"><span class="problematic" id="id2">:mpltype:`color`</span></a>
 figure: <cite>~matplotlib.figure.Figure</cite>
+forward_navigation_events: bool or “auto”
 frame_on: bool
 gid: str
 in_layout: bool
@@ -687,7 +688,7 @@ does not support abbreviations or grouping).</p>
 <dd><p>Reads in Euler Morphology from HDF5 file. Checks that total material volume fractions sum to 1 for all voxels.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>filename</strong> (<em>str</em><em> or </em><em>path</em>) – </p>
+<dd class="field-odd"><p><strong>filename</strong> (<em>str</em><em> or </em><em>path</em>)</p>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
 <dd class="field-even"><p><ul class="simple">
@@ -707,7 +708,7 @@ does not support abbreviations or grouping).</p>
 <dd><p>Reads in Vector Morphology from HDF5 file and converts to Euler Morphology. Checks that total material volume fractions sum to 1 for all voxels.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>filename</strong> (<em>str</em><em> or </em><em>path</em>) – </p>
+<dd class="field-odd"><p><strong>filename</strong> (<em>str</em><em> or </em><em>path</em>)</p>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
 <dd class="field-even"><p><ul class="simple">
@@ -821,7 +822,7 @@ does not support abbreviations or grouping).</p>
       
         <div class="footer-item">
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 7.2.6.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.0.2.
     <br/>
   </p>
 </div>
