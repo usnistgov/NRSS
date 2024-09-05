@@ -6,6 +6,7 @@ from .checkH5 import check_NumMat
 from .reader import read_material, read_config
 from .writer import write_opts, write_hdf5
 from .visualizer import morphology_visualizer
+from .absorption import calculate_abs_dist, convert_nrss_opts
 
 import numpy as np
 import xarray as xr
@@ -421,6 +422,25 @@ class Morphology:
     def write_constants(self, path=None):
         for i in range(1, self._numMaterial+1):
             write_opts(self.materials[i].opt_constants, i, path)
+    
+
+    def absorption_correction(self, tfilm, E_vec):
+        all_abs = []
+        for key in self.materials:
+            if self.materials[key].name != 'vacuum':
+                wvl_tmp = 1239.8/np.array(list(self.materials[key].opt_constants.keys()))
+                theta_tmp = self.materials[key].theta
+                psi_tmp = self.materials[key].psi
+                Vfrac_tmp = self.materials[key].Vfrac
+                dist = np.histogram2d(theta_tmp[Vfrac_tmp != 0], 
+                                      psi_tmp[Vfrac_tmp != 0], 
+                                      bins=20, 
+                                      density=True, 
+                                      range=[[0,np.pi], [-np.pi, np.pi]])
+                dielectric_tmp = convert_nrss_opts(self.materials[key].opt_constants)
+                abs_tmp = calculate_abs_dist(dist, dielectric_tmp, E_vec, tfilm, wvl_tmp)
+                all_abs.append(abs_tmp)
+        return all_abs
 
     # submit to CyRSoXS
     def run(self, stdout=True, stderr=True, return_xarray=True, print_vec_info=False, validate=False):
