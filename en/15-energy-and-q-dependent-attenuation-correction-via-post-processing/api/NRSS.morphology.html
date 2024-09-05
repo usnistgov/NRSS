@@ -683,6 +683,11 @@ further analysis</p>
 <dd></dd></dl>
 
 <dl class="py method">
+<dt class="sig sig-object py" id="NRSS.morphology.Morphology.absorption_correction">
+<span class="sig-name descname"><span class="pre">absorption_correction</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tfilm</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">E_vec</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.absorption_correction" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
 <dt class="sig sig-object py" id="NRSS.morphology.Morphology.check_materials">
 <span class="sig-name descname"><span class="pre">check_materials</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">quiet</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.Morphology.check_materials" title="Link to this definition">#</a></dt>
 <dd></dd></dl>
@@ -905,6 +910,11 @@ ex: exportParams = {‘dpi’:600, format=’svg’}</p></li>
 </dd></dl>
 
 <dl class="py function">
+<dt class="sig sig-object py" id="NRSS.morphology.calculate_abs_dist">
+<span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">calculate_abs_dist</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dist</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dielectric</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">E</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tfilm</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wvl</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.calculate_abs_dist" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
 <dt class="sig sig-object py" id="NRSS.morphology.check_NumMat">
 <span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">check_NumMat</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">f</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">morphology_type</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.check_NumMat" title="Link to this definition">#</a></dt>
 <dd><p>Checks and validates the number of materials in the HDF5 file</p>
@@ -923,6 +933,11 @@ ex: exportParams = {‘dpi’:600, format=’svg’}</p></li>
 </dd>
 </dl>
 </dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.morphology.convert_nrss_opts">
+<span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">convert_nrss_opts</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">nrss_opts</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.convert_nrss_opts" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="NRSS.morphology.morphology_visualizer">
@@ -1087,6 +1102,7 @@ Vector Ex. [[Mat_1_alignment, Mat_1_unaligned],[Mat_2_alignment, Mat_2_unaligned
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.ReferenceFrame"><code class="docutils literal notranslate"><span class="pre">Morphology.ReferenceFrame</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.RotMask"><code class="docutils literal notranslate"><span class="pre">Morphology.RotMask</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.WindowingType"><code class="docutils literal notranslate"><span class="pre">Morphology.WindowingType</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.absorption_correction"><code class="docutils literal notranslate"><span class="pre">Morphology.absorption_correction()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.check_materials"><code class="docutils literal notranslate"><span class="pre">Morphology.check_materials()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1"><code class="docutils literal notranslate"><span class="pre">Morphology.config</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.Morphology.config_default"><code class="docutils literal notranslate"><span class="pre">Morphology.config_default</span></code></a></li>
@@ -1124,7 +1140,9 @@ Vector Ex. [[Mat_1_alignment, Mat_1_unaligned],[Mat_2_alignment, Mat_2_unaligned
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id13"><code class="docutils literal notranslate"><span class="pre">OpticalConstants.load_matfile()</span></code></a></li>
 </ul>
 </li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.calculate_abs_dist"><code class="docutils literal notranslate"><span class="pre">calculate_abs_dist()</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.check_NumMat"><code class="docutils literal notranslate"><span class="pre">check_NumMat()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.convert_nrss_opts"><code class="docutils literal notranslate"><span class="pre">convert_nrss_opts()</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.morphology_visualizer"><code class="docutils literal notranslate"><span class="pre">morphology_visualizer()</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.read_config"><code class="docutils literal notranslate"><span class="pre">read_config()</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.read_material"><code class="docutils literal notranslate"><span class="pre">read_material()</span></code></a></li>
