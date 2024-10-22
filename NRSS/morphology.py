@@ -490,6 +490,59 @@ class Morphology:
             print('All material checks have passed')
 
     def visualize_materials(self, *args,**kwargs):
+        """
+            Reads in morphology HDF5 file and checks that the format is consistent for CyRSoXS. Optionally plots and returns select quantities.
+
+            Parameters
+            ----------
+
+                z_slice : int
+                    Which z-slice of the array to plot.
+                subsample : int
+                    Number of voxels to display in X and Y
+                translate_x : int
+                    Number of voxels to translate image in x; meant for use with subsample
+                translate_y : int
+                    Number of voxels to translate image in y; meant for use with subsample
+                screen_euler : bool
+                    Suppress visualization of euler angles where vfrac < 0.05 or S < 0.05; intended to hilight edges
+                add_quiver : bool
+                    Adds lines to every voxel on the psi plot that indicate in-plane direction. Not recommended for resolutions larger than 128x128, best for resolutions 64x64 or lower.
+                quiver_bw : bool
+                    Intended to be used when add_quiver == True, when quiver_bw is True, the quiver arrows will be black and white instead of colored.
+                outputmat : list of ints
+                    Number of which materials to return
+                outputplot : list of strings
+                    Number of which plots to return, can include 'vfrac', 'S', 'theta', 'psi'
+                outputaxes : bool
+                    If a plot is returned, include its axes
+                vfrac_range: list of tuples as [float, float]
+                    A custom range for vfrac colorbar
+                S_range: list of tuples as [float, float]
+                    A custom range for S colorbar
+                vfrac_cmap: str
+                    A custom substitution for vfrac colormap
+                S_cmap: str
+                    A custom substitution for vfrac colormap
+                runquiet : bool
+                    Boolean flag for running without plotting or outputting to console
+                batchMode : bool
+                    if true, prints console output and generates plots but doesnt show (provide exportDir for export)
+                plotstyle : str
+                    Use a light or dark background for plots. 'dark' - dark, 'light' - light
+                dpi : int
+                    The dpi at which the plot is generated. Per-material plot dimensions are 8.5" x 12.75"
+                exportDir : str, optional
+                    if provided, export directory to save any generated figures into,
+                    by default, will respect dpi and save as png, use exportParams to override
+                exportParams : dict, optional
+                    additional params to unpack into matplotlib.pyplot.savefig. Overrides existing params.
+                    ex: exportParams = {'dpi':600, format='svg'}
+            Returns
+            -------
+                If outputmat and outputplot are correctly entered, will return an index list of images of the selected material and plot. Each list element will be  a numpy array in RGB format that be displayed with imshow
+
+            """        
         return morphology_visualizer(self, *args,**kwargs)
     visualize_materials.__doc__ = morphology_visualizer.__doc__
 
