@@ -1,3 +1,4 @@
+from enum import Enum
 import numpy as np
 from NRSS.morphology import Material, Morphology
 from PyHyperScattering.integrate import WPIntegrator
@@ -9,7 +10,25 @@ from pprint import pprint
 from matplotlib import colormaps, gridspec, rc
 from matplotlib import pyplot as plt
 
-# FROM NOTEBOOK 1
+# FROM NOTEBOOK 2
+
+# class syntax
+class EulerStyle(Enum):
+    """
+    a class for qualitative model changes to Euler angle style relative to particle
+    """
+    RADIAL = 1
+    """
+    creates extraordindary index orientation that is radial to the core particle center
+    """
+    TANGENTIAL_LAT = 2
+    """
+    creates extraordindary index orientation that is tangential to the core particle center and latitudinal such that all orientations are parallel to the XY plane
+    """
+    TANGENTIAL_LONG = 3
+    """
+    creates extraordindary index orientation that is tangential to the core particle center and longitudinal such that all orientations are not parallel to the XY plane except at the north and south poles
+    """
 def adsorbed_polymer_morphology(args):
     """
     Generates a morphology object for an adsorbed polymer on a sphere.
@@ -20,7 +39,7 @@ def adsorbed_polymer_morphology(args):
             - "ld" (int): The lateral dimension of the grid.
             - "radius_nm" (float): The radius of the sphere in nanometers.
             - "PhysSize_nm_per_voxel" (float): The physical size of each voxel in nanometers.
-            - "euler_style" (str): The style of Euler angles to use. Can be "radial", "tangential_lat", or "tangential_lon".
+            - "euler_style" (str): The style of Euler angles to use. From an enumerated type: EulerStyle.RADIAL, EulerStyle.TANGENTIAL_LAT, or EulerStyle.TANGENTIAL_LONG.
             - "S0" (float): The initial value of the S-field next to the nanoparticle.
             - "S_slope_per_nm" (float): The slope of the S-field in nanometers.
             - "energies" (list): A list of energies for the model.
@@ -52,17 +71,21 @@ def adsorbed_polymer_morphology(args):
 
     # match - case is similar to a series of if - elseif statements
     match args["euler_style"]:
-        case "radial":
+        case EulerStyle.RADIAL:
             pass
             # do nothing because psi and theta are already correct for radial
-        case "tangential_lat":
+        case EulerStyle.TANGENTIAL_LAT:
             # modify the psi and theta for tangential_lat
             theta = np.full_like(theta, np.pi / 2)
             psi = psi - np.pi / 2
-        case "tangential_lon":
+        case EulerStyle.TANGENTIAL_LONG:
             # modify the psi and theta for tangential_lon
             psi = psi
             theta = np.where(theta < np.pi / 2, theta + np.pi / 2, theta - np.pi / 2)
+        case _:
+            # raise a value error if this doesn't come in as one of the enumerated types
+            raise ValueError("invalid euler style")
+        
     # S-field math
     S_field = (
         args["S0"]
