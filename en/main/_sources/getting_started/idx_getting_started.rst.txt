@@ -262,10 +262,12 @@ This Jupyter notebook series describes how to convert Near Edge X-ray Absorption
 Both notebooks additionally include calculation code to predict binary contrast from pairs of complex 
 indices in real materials.
 
-The tutorial series has two notebooks (TODO:add links):
-# Scalar complex index of refraction determination from NEXAFS of poly(styrene) (PS) and poly(methyl methacrylate) (PMMA)
-# Tensor (uniaxial) complex index of refraction determination from NEXAFS of PM6 and Y6, common materials used in organic photovoltaic devices.
+The tutorial series has two notebooks:
+1. `Scalar complex index of refraction. <https://github.com/usnistgov/NRSS/blob/main/tutorials/kkcalc_for_NRSS/kkcalc_ps_pmma_xr.ipynb>`_ determination from NEXAFS of poly(styrene) (PS) and poly(methyl methacrylate) (PMMA)
+
+2. `Tensor (uniaxial) complex index of refraction. <https://github.com/usnistgov/NRSS/blob/main/tutorials/kkcalc_for_NRSS/kkcalc_orientation_Y6_PM6.ipynb>`_ determination from NEXAFS of PM6 and Y6, common materials used in organic photovoltaic devices.
 It is recommended to master the scalar notebook before attempting the tensor notebook.
+
 
 Core-Shell Radial Disk in the NRSS
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -278,6 +280,7 @@ orientation of the extraordinary component of a tensor uniaxial index of refract
 * `Commandline / slurm queue version. <https://github.com/usnistgov/NRSS/blob/main/tutorials/coreshell_disk/CoreShell.ipynb>`_ 
 This tutorial describes how to create the radial disk morphology and serialize the model to hard drive,
 submit a CyRSoXS job via slurm, and examine the simulation result.
+
 * `Pybind version. <https://github.com/usnistgov/NRSS/blob/main/tutorials/pybind/MorphologyClass.ipynb>`_ 
 This tutorial describes how to create the radial disk morphology, submit the simulation job within Python, and examine the simulation result.
 This tutorial relies on index of refraction information stored in the commandline / slurm queue version subdirectory,
@@ -296,18 +299,23 @@ index of refraction effects and their manifestation in pure core-shell form fact
 might include multiple spheres, potential structure factor effects between them, dispersity in sphere and shell dimensions, etc.
 
 Tutorial notebooks in this series include:
-# `Basic model creation <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/01_polymer_adsorption_model.ipynb>`_:
+1. `Basic model creation <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/01_polymer_adsorption_model.ipynb>`_:
 describes how to create composition fields and Euler angle fields for radial and tangential chain orientation,
 run simulation within Python, and examine the simulation result.
-# `Models with functions <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/02_polymer_adsorption_functions.ipynb>`_:
+
+2. `Models with functions <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/02_polymer_adsorption_functions.ipynb>`_:
 Move model construction from Jupyter cells into functions with arguments for model creation and functions for running models.
-# `Model variable sweeps <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/03_polymer_adsorption_sweeps.ipynb>`_:
+
+3. `Model variable sweeps <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/03_polymer_adsorption_sweeps.ipynb>`_:
 Sweep model variables using Python loop structures, and save the results using pickle.
-# `Model variable sweeps - streamlined <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/04_polymer_adsorption_sweep_streamlined.ipynb>`_:
+
+4. `Model variable sweeps - streamlined <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/04_polymer_adsorption_sweep_streamlined.ipynb>`_:
 Advanced sweep infrastructure in which most of the code to run variable sweeps are functions imported from a library.
-# `Visualizing simulation results <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/05_visualizing_simulation_results.ipynb>`_:
+
+5. `Visualizing simulation results <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/05_visualizing_simulation_results.ipynb>`_:
 Examining and plotting NRSS simulation results using the matplotlib library.
-# `Visualizing sweeps as animations <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/06_visualizing_sweeps_of_sweeps.ipynb>`_:
+
+6. `Visualizing sweeps as animations <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/06_visualizing_sweeps_of_sweeps.ipynb>`_:
 Collate result visualization collections of variable sweep campaigns into mp4 video using ffmpeg.
 
 
