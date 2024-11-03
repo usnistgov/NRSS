@@ -262,7 +262,7 @@ This Jupyter notebook series describes how to convert Near Edge X-ray Absorption
 Both notebooks additionally include calculation code to predict binary contrast from pairs of complex 
 indices in real materials.
 
-The tutorial series has two notebooks (TODO:add links):
+The tutorial series has two notebooks:
 1. `Scalar complex index of refraction. <https://github.com/usnistgov/NRSS/blob/main/tutorials/kkcalc_for_NRSS/kkcalc_ps_pmma_xr.ipynb>`_ determination from NEXAFS of poly(styrene) (PS) and poly(methyl methacrylate) (PMMA)
 
 2. `Tensor (uniaxial) complex index of refraction. <https://github.com/usnistgov/NRSS/blob/main/tutorials/kkcalc_for_NRSS/kkcalc_orientation_Y6_PM6.ipynb>`_ determination from NEXAFS of PM6 and Y6, common materials used in organic photovoltaic devices.
