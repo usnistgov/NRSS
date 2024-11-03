@@ -599,11 +599,64 @@ mv<span class="w"> </span>CyRSoXS.so<span class="w"> </span>lib/
 </div>
 </section>
 </section>
-<section id="tutorials">
-<h2>Tutorials<a class="headerlink" href="#tutorials" title="Link to this heading">#</a></h2>
-<section id="core-shell-disk-tutorial">
-<h3>Core-Shell Disk Tutorial<a class="headerlink" href="#core-shell-disk-tutorial" title="Link to this heading">#</a></h3>
-<p>Please see the Jupyter notebook located in the <a class="reference external" href="https://github.com/usnistgov/NRSS/tree/main/tutorials">tutorials</a> folder.</p>
+<section id="nrss-tutorials">
+<h2>NRSS Tutorials<a class="headerlink" href="#nrss-tutorials" title="Link to this heading">#</a></h2>
+<p>Several tutorials are available in the <a class="reference external" href="https://github.com/usnistgov/NRSS/tree/main/tutorials">tutorials</a>
+folder. Most of these tutorials include Jupyter notebooks with explanatory prose, example code, and code use strategies.</p>
+<p>For all tutorials, it is recommended to copy the entire tutorial folder out of the installed repository location before
+running, because some tutorials will generate file changes and new serialized objects within repository directories.</p>
+<section id="kkcalc-for-nrss">
+<h3>kkcalc for NRSS<a class="headerlink" href="#kkcalc-for-nrss" title="Link to this heading">#</a></h3>
+<p>This Jupyter notebook series describes how to convert Near Edge X-ray Absorption Fine Structure
+(NEXAFS) data into a complex index of refraction for use in NRSS computations. Conditioning of the NEXAFS and the use of the
+<a class="reference external" href="https://github.com/benajamin/kkcalc">kkcalc library</a> to develop this complex index are demonstrated.
+Both notebooks additionally include calculation code to predict binary contrast from pairs of complex
+indices in real materials.</p>
+<p>The tutorial series has two notebooks (TODO:add links):
+# Scalar complex index of refraction determination from NEXAFS of poly(styrene) (PS) and poly(methyl methacrylate) (PMMA)
+# Tensor (uniaxial) complex index of refraction determination from NEXAFS of PM6 and Y6, common materials used in organic photovoltaic devices.
+It is recommended to master the scalar notebook before attempting the tensor notebook.</p>
+</section>
+<section id="core-shell-radial-disk-in-the-nrss">
+<h3>Core-Shell Radial Disk in the NRSS<a class="headerlink" href="#core-shell-radial-disk-in-the-nrss" title="Link to this heading">#</a></h3>
+<p>This Jupyter notebook is a basic introduction to the NRSS. It has two different versions.
+The pybind version is recommended, as it demonstrates the preferred NRSS pybind workflow.</p>
+<p>Both tutorials describe a radial disk scattering object, a simple 2D structure with a radial
+orientation of the extraordinary component of a tensor uniaxial index of refraction.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/usnistgov/NRSS/blob/main/tutorials/coreshell_disk/CoreShell.ipynb">Commandline / slurm queue version.</a></p></li>
+</ul>
+<p>This tutorial describes how to create the radial disk morphology and serialize the model to hard drive,
+submit a CyRSoXS job via slurm, and examine the simulation result.
+* <a class="reference external" href="https://github.com/usnistgov/NRSS/blob/main/tutorials/pybind/MorphologyClass.ipynb">Pybind version.</a>
+This tutorial describes how to create the radial disk morphology, submit the simulation job within Python, and examine the simulation result.
+This tutorial relies on index of refraction information stored in the commandline / slurm queue version subdirectory,
+so it is recommended to copy both at the same time into the same parent directory.</p>
+</section>
+<section id="polymer-adsorption-on-sphere-in-the-nrss">
+<h3>Polymer Adsorption on Sphere in the NRSS<a class="headerlink" href="#polymer-adsorption-on-sphere-in-the-nrss" title="Link to this heading">#</a></h3>
+<p>An in-depth Jupyter notebook series describing the adsorption of a polymer on single sphere. Six notebooks guide new users through
+basic NRSS model construction, creating libraries for models, automating model parameter sweeps,
+and ultimately rendering animated visualizations of parameter sweep results. These tutorials feature poly(styrene) (PS) and
+poly(methyl methacrylate) (PMMA) adsorbed to an SiO2 particle. All tutorials within this series use the recommended NRSS
+pybind workflow.</p>
+<p>From a scientific perspective, the single-sphere nature of this tutorial series makes it more of a fundamental study into tensor
+index of refraction effects and their manifestation in pure core-shell form factor scattering. More realistic simulations
+might include multiple spheres, potential structure factor effects between them, dispersity in sphere and shell dimensions, etc.</p>
+<p>Tutorial notebooks in this series include:
+# <a class="reference external" href="https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/01_polymer_adsorption_model.ipynb">Basic model creation</a>:
+describes how to create composition fields and Euler angle fields for radial and tangential chain orientation,
+run simulation within Python, and examine the simulation result.
+# <a class="reference external" href="https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/02_polymer_adsorption_functions.ipynb">Models with functions</a>:
+Move model construction from Jupyter cells into functions with arguments for model creation and functions for running models.
+# <a class="reference external" href="https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/03_polymer_adsorption_sweeps.ipynb">Model variable sweeps</a>:
+Sweep model variables using Python loop structures, and save the results using pickle.
+# <a class="reference external" href="https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/04_polymer_adsorption_sweep_streamlined.ipynb">Model variable sweeps - streamlined</a>:
+Advanced sweep infrastructure in which most of the code to run variable sweeps are functions imported from a library.
+# <a class="reference external" href="https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/05_visualizing_simulation_results.ipynb">Visualizing simulation results</a>:
+Examining and plotting NRSS simulation results using the matplotlib library.
+# <a class="reference external" href="https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/06_visualizing_sweeps_of_sweeps.ipynb">Visualizing sweeps as animations</a>:
+Collate result visualization collections of variable sweep campaigns into mp4 video using ffmpeg.</p>
 </section>
 </section>
 </section>
@@ -661,8 +714,10 @@ mv<span class="w"> </span>CyRSoXS.so<span class="w"> </span>lib/
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#building-cyrsoxs-from-source">Building CyRSoXS from source</a></li>
 </ul>
 </li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#tutorials">Tutorials</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#core-shell-disk-tutorial">Core-Shell Disk Tutorial</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#nrss-tutorials">NRSS Tutorials</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#kkcalc-for-nrss">kkcalc for NRSS</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#core-shell-radial-disk-in-the-nrss">Core-Shell Radial Disk in the NRSS</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#polymer-adsorption-on-sphere-in-the-nrss">Polymer Adsorption on Sphere in the NRSS</a></li>
 </ul>
 </li>
 </ul>
