@@ -37,7 +37,7 @@
 <link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=e353d410970836974a52" />
 
     <script src="../_static/documentation_options.js?v=38b66d78"></script>
-    <script src="../_static/doctools.js?v=9a2dae69"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/design-tabs.js?v=f930bc37"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'api/NRSS.morphology';</script>
@@ -904,6 +904,100 @@ ex: exportParams = {‘dpi’:600, format=’svg’}</p></li>
 
 </dd></dl>
 
+<dl class="py class">
+<dt class="sig sig-object py" id="NRSS.morphology.ParamSpec">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">ParamSpec</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bound</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">covariant</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">contravariant</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.ParamSpec" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">_Final</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">_Immutable</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">_BoundVarianceMixin</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">_PickleUsingNameMixin</span></code></p>
+<p>Parameter specification variable.</p>
+<p>Usage:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">P</span> <span class="o">=</span> <span class="n">ParamSpec</span><span class="p">(</span><span class="s1">&#39;P&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Parameter specification variables exist primarily for the benefit of static
+type checkers.  They are used to forward the parameter types of one
+callable to another callable, a pattern commonly found in higher order
+functions and decorators.  They are only valid when used in <code class="docutils literal notranslate"><span class="pre">Concatenate</span></code>,
+or as the first argument to <code class="docutils literal notranslate"><span class="pre">Callable</span></code>, or as parameters for user-defined
+Generics.  See class Generic for more information on generic types.  An
+example for annotating a decorator:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">T</span> <span class="o">=</span> <span class="n">TypeVar</span><span class="p">(</span><span class="s1">&#39;T&#39;</span><span class="p">)</span>
+<span class="n">P</span> <span class="o">=</span> <span class="n">ParamSpec</span><span class="p">(</span><span class="s1">&#39;P&#39;</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">add_logging</span><span class="p">(</span><span class="n">f</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[</span><span class="n">P</span><span class="p">,</span> <span class="n">T</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Callable</span><span class="p">[</span><span class="n">P</span><span class="p">,</span> <span class="n">T</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&#39;&#39;&#39;A type-safe decorator to add logging to a function.&#39;&#39;&#39;</span>
+    <span class="k">def</span> <span class="nf">inner</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">:</span> <span class="n">P</span><span class="o">.</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">P</span><span class="o">.</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">T</span><span class="p">:</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s1"> was called&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">f</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">inner</span>
+
+<span class="nd">@add_logging</span>
+<span class="k">def</span> <span class="nf">add_two</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&#39;&#39;&#39;Add two numbers together.&#39;&#39;&#39;</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+</pre></div>
+</div>
+<p>Parameter specification variables can be introspected. e.g.:</p>
+<blockquote>
+<div><p>P.__name__ == ‘P’</p>
+</div></blockquote>
+<p>Note that only parameter specification variables defined in global scope can
+be pickled.</p>
+<dl class="py property">
+<dt class="sig sig-object py" id="NRSS.morphology.ParamSpec.args">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">args</span></span><a class="headerlink" href="#NRSS.morphology.ParamSpec.args" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="NRSS.morphology.ParamSpec.kwargs">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">kwargs</span></span><a class="headerlink" href="#NRSS.morphology.ParamSpec.kwargs" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="NRSS.morphology.TypeVar">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">TypeVar</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">constraints</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bound</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">covariant</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">contravariant</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.TypeVar" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">_Final</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">_Immutable</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">_BoundVarianceMixin</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">_PickleUsingNameMixin</span></code></p>
+<p>Type variable.</p>
+<p>Usage:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">T</span> <span class="o">=</span> <span class="n">TypeVar</span><span class="p">(</span><span class="s1">&#39;T&#39;</span><span class="p">)</span>  <span class="c1"># Can be anything</span>
+<span class="n">A</span> <span class="o">=</span> <span class="n">TypeVar</span><span class="p">(</span><span class="s1">&#39;A&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">)</span>  <span class="c1"># Must be str or bytes</span>
+</pre></div>
+</div>
+<p>Type variables exist primarily for the benefit of static type
+checkers.  They serve as the parameters for generic types as well
+as for generic function definitions.  See class Generic for more
+information on generic types.  Generic functions work as follows:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>def repeat(x: T, n: int) -&gt; List[T]:</dt><dd><p>‘’’Return a list containing n references to x.’’’
+return [x]*n</p>
+</dd>
+<dt>def longest(x: A, y: A) -&gt; A:</dt><dd><p>‘’’Return the longest of two strings.’’’
+return x if len(x) &gt;= len(y) else y</p>
+</dd>
+</dl>
+</div></blockquote>
+<p>The latter example’s signature is essentially the overloading
+of (str, str) -&gt; str and (bytes, bytes) -&gt; bytes.  Also note
+that if the arguments are instances of some subclass of str,
+the return type is still plain str.</p>
+<p>At runtime, isinstance(x, T) and issubclass(C, T) will raise TypeError.</p>
+<p>Type variables defined with covariant=True or contravariant=True
+can be used to declare covariant or contravariant generic types.
+See PEP 484 for more details. By default generic types are invariant
+in all type variables.</p>
+<p>Type variables can be introspected. e.g.:</p>
+<blockquote>
+<div><p>T.__name__ == ‘T’
+T.__constraints__ == ()
+T.__covariant__ == False
+T.__contravariant__ = False
+A.__constraints__ == (str, bytes)</p>
+</div></blockquote>
+<p>Note that only type variables defined in global scope can be pickled.</p>
+</dd></dl>
+
 <dl class="py function">
 <dt class="sig sig-object py" id="NRSS.morphology.check_NumMat">
 <span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">check_NumMat</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">f</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">morphology_type</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.check_NumMat" title="Link to this definition">#</a></dt>
@@ -970,6 +1064,20 @@ ex: exportParams = {‘dpi’:600, format=’svg’}</p></li>
 <dt class="sig sig-object py" id="NRSS.morphology.read_material">
 <span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">read_material</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.morphology.read_material" title="Link to this definition">#</a></dt>
 <dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.morphology.wraps">
+<span class="sig-prename descclassname"><span class="pre">NRSS.morphology.</span></span><span class="sig-name descname"><span class="pre">wraps</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">wrapper</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">T</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">T</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">P</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">T</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#NRSS.morphology.wraps" title="Link to this definition">#</a></dt>
+<dd><p>A decorator to preserve the original function’s docstring.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>wrapper</strong> – The wrapper function.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>A decorator that preserves the original function’s docstring.</p>
+</dd>
+</dl>
+</dd></dl>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="NRSS.morphology.write_hdf5">
@@ -1124,10 +1232,17 @@ Vector Ex. [[Mat_1_alignment, Mat_1_unaligned],[Mat_2_alignment, Mat_2_unaligned
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id13"><code class="docutils literal notranslate"><span class="pre">OpticalConstants.load_matfile()</span></code></a></li>
 </ul>
 </li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.ParamSpec"><code class="docutils literal notranslate"><span class="pre">ParamSpec</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.ParamSpec.args"><code class="docutils literal notranslate"><span class="pre">ParamSpec.args</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.ParamSpec.kwargs"><code class="docutils literal notranslate"><span class="pre">ParamSpec.kwargs</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.TypeVar"><code class="docutils literal notranslate"><span class="pre">TypeVar</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.check_NumMat"><code class="docutils literal notranslate"><span class="pre">check_NumMat()</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.morphology_visualizer"><code class="docutils literal notranslate"><span class="pre">morphology_visualizer()</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.read_config"><code class="docutils literal notranslate"><span class="pre">read_config()</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.read_material"><code class="docutils literal notranslate"><span class="pre">read_material()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.wraps"><code class="docutils literal notranslate"><span class="pre">wraps()</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.write_hdf5"><code class="docutils literal notranslate"><span class="pre">write_hdf5()</span></code></a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.morphology.write_opts"><code class="docutils literal notranslate"><span class="pre">write_opts()</span></code></a></li>
 </ul>
@@ -1175,7 +1290,7 @@ Vector Ex. [[Mat_1_alignment, Mat_1_unaligned],[Mat_2_alignment, Mat_2_unaligned
       
         <div class="footer-item">
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.0.2.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.1.3.
     <br/>
   </p>
 </div>
