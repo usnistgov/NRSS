@@ -16,6 +16,8 @@ setup(
                         'pandas',
                         'matplotlib',
                         'h5py'],
+    include_package_data=True,
+    package_data={'': ['cmap/*']},
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Intended Audience :: Science/Research',
