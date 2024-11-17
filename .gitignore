@@ -15,6 +15,7 @@ tests/validation/spheretest_*
 tests/validation/.ipynb_checkpoints/*
 tests/validation/lib/__pycache__
 tests/validation/*.log
+CyRSoXS.log
 .ipynb_checkpoints
 NRSS/.ipynb_checkpoints
 *.DS_store
