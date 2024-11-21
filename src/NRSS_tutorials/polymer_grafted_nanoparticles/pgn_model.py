@@ -720,14 +720,14 @@ def plot_sweep(swept_arg):
     num_viz = len(results)
     viz_col = np.ceil(num_viz / 3).astype(int)
 
-    font = {
-        "family": "sans-serif",
-        "sans-serif": "Arial",
-        "weight": "regular",
-        "size": 8,
-    }
+    # font = {
+    #     "family": "sans-serif",
+    #     "sans-serif": "Arial",
+    #     "weight": "regular",
+    #     "size": 8,
+    # }
 
-    rc("font", **font)
+    # rc("font", **font)
 
     # fig, _ = plt.subplots()
     fig, _ = plt.subplots(figsize=(7,8), dpi = 100)
