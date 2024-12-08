@@ -1,0 +1,72 @@
+ __________________________________________________________________________________________________
+|                                 Thanks for using CyRSoXS                                        |
+|--------------------------------------------------------------------------------------------------|
+|  Copyright          : Iowa State University                                                      |
+|  License            : NIST                                                                       |
+|  Acknowledgement    : ONR MURI                                                                   |
+|                                                                                                  |
+|  Developed at Iowa State University in collaboration with NIST                                   |
+|                                                                                                  |
+|  Please cite the following publication :                                                         |
+|  Comments/Questions :                                                                            |
+|          1. Dr. Baskar GanapathySubramanian (baskarg@iastate.edu)                                |
+|          2. Dr. Adarsh Krishnamurthy        (adarsh@iastate.edu)                                 |
+|          3. Dr. Dean DeLongchamp            (dean.delongchamp@nist.gov)                          |
+ -------------------------------------------------------------------------------------------------- 
+
+
+
+CyRSoXS: 
+=========================================================================================
+Version              : 1.1.7 0
+Git patch            : 8266cec
+Size of Real         : 4
+Number of material   : 3
+
+Scaling Information:
+=========================================================================================
+Number of pixel      :[512,512]
+Q range              :[-1.25664,1.25664]
+
+
+
+InputData : 
+=========================================================================================
+CaseType             : Default
+Morphology Type      : EulerAngles
+Morphology Order     : ZYX
+Reference Frame      : LAB(1)
+Dimensions [Z Y X]   : [32 512 512]
+PhysSize             : 2.5nm 
+E Rotation Angle     : 0 : 2 : 360
+Energies simulated   : [284.7 285.2 ]
+Windowing Type       : NONE
+Rotation Mask        : 0
+Interpolation Type   : Trilinear interpolation
+kVectors             : ([0,0,1])
+Scatter Approach     : Partial
+Algorithm            : CommunicationMinimizing
+
+
+
+Rotation Matrices : 
+=========================================================================================
+Detector Rotation Matrix
+-------------------------------
+1 0 0 
+0 1 0 
+0 0 1 
+-------------------------------
+K Rotation Matrix And Base Configuration 
+-----------------------------------------
+-----------------------------------------
+K = 0 0 1
+1 0 0 
+0 1 0 
+0 0 1 
+RotAngle = 0
+Base X   = 1 0 0
+Base Y   = 0 1 0
+Base Z   = 0 0 1
+-----------------------------------------
+-------------------------------

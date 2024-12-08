@@ -2,11 +2,13 @@ build/**
 *.egg-info
 docs/build/**
 *.pyc
-tutorials/__pycache__
-tutorials/coreshell_disk/.ipynb_checkpoints/*
-tutorials/coreshell_disk/HDF5
-tutorials/pybind/.ipynb_checkpoints/*
-tutorials/pybind/*.log
+src/NRSS_tutorials/__pycache__
+src/NRSS_tutorials/coreshell_disk/.ipynb_checkpoints/*
+src/NRSS_tutorials/coreshell_disk/HDF5
+src/NRSS_tutorials/pybind/.ipynb_checkpoints/*
+src/NRSS_tutorials/pybind/*.log
+src/NRSS_tutorials/MWCNTs/Data
+src/NRSS_tutorials/polymer_grafted_nanoparticles/.ipynb_checkpoints/*
 tests/validation/circle_lattice_test*
 tests/validation/3Dsphere_test*
 tests/validation/CoreShelltest*
@@ -15,6 +17,7 @@ tests/validation/spheretest_*
 tests/validation/.ipynb_checkpoints/*
 tests/validation/lib/__pycache__
 tests/validation/*.log
+*CyRSoXS.log
 .ipynb_checkpoints
 NRSS/.ipynb_checkpoints
 *.DS_store

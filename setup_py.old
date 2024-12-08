@@ -1,0 +1,39 @@
+from setuptools import setup, find_packages
+
+setup(
+    name="NRSS",
+    version="0.1.0",
+    description="NIST RSoXS Simulation Suite",
+    url="https://github.com/pdudenas/NRSS",
+    author="Peter Dudenas",
+    author_email="peter.dudenas@nist.gov",
+    license="NIST",
+    packages=["NRSS", "NRSS_tutorials", "NRSS_tutorials.polymer_grafted_nanoparticles"],
+    # packages=find_packages(),
+    install_requires=[
+        "PyHyperScattering>=0.1.7",
+        "numpy",
+        "scipy",
+        "scikit-image",
+        "pandas",
+        "matplotlib",pip 
+        "h5py",
+    ],
+    include_package_data=True,
+    package_dir={
+        "NRSS": "src/NRSS",
+        "NRSS_tutorials": "src/NRSS_tutorials",
+        "NRSS_tutorials.polymer_grafted_nanoparticles": "src/NRSS_tutorials/polymer_grafted_nanoparticles",
+    },
+    package_data={"": ["src/NRSS/cmap/*"]},
+    # package_data={'': ['cmap/*']},
+    classifiers=[
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: Science/Research",
+        "License :: NIST",
+        "Operating System :: POSIX :: Linux",
+        "Topic :; Scientific/Engineering :: Chemistry",
+        "Topic :: Scientific/Engineering :: Physics"
+        "Programming Language :: Python :: 3",
+    ],
+)
