@@ -4,7 +4,6 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "NRSS"
-version = "0.1.0"
 description = "NIST RSoXS Simulation Suite"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -29,9 +28,15 @@ dependencies = [
     "scikit-image",
     "scipy",
 ]
+dynamic = ["version"]
 
 [project.urls]
 Homepage = "https://github.com/usnistgov/NRSS/"
 
 [tools.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools_scm]
+write_to = "src/NRSS/_version.py"
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"

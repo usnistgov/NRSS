@@ -1,4 +1,5 @@
 build/**
+dist/**
 *.egg-info
 docs/build/**
 *.pyc
@@ -9,6 +10,7 @@ src/NRSS_tutorials/pybind/.ipynb_checkpoints/*
 src/NRSS_tutorials/pybind/*.log
 src/NRSS_tutorials/MWCNTs/Data
 src/NRSS_tutorials/polymer_grafted_nanoparticles/.ipynb_checkpoints/*
+src/NRSS/_version.py
 tests/validation/circle_lattice_test*
 tests/validation/3Dsphere_test*
 tests/validation/CoreShelltest*
