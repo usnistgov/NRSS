@@ -1,9 +1,9 @@
 name: "Automatic Versioning"
 
 on:
-  push:
-    branches:
-      - main  # Replace with your default branch if different
+  push: {}
+    # branches:
+    #   - main  # Replace with your default branch if different
 
 jobs:
   assign-version:
