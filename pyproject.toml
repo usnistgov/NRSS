@@ -38,5 +38,5 @@ where = ["src"]
 
 [tool.setuptools_scm]
 write_to = "src/NRSS/_version.py"
-version_scheme = "post-release"
+version_scheme = "no-guess-dev"
 local_scheme = "no-local-version"
