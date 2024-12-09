@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools >= 61.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "NRSS"
+version = "0.1.0"
+description = "NIST RSoXS Simulation Suite"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    { name = "Dean DeLongchamp", email = "dean.delongchamp@nist.gov" },
+    { name = "Peter Dudenas", email = "peter.dudenas@nist.gov" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: NIST",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering :: PhysicsProgramming Language :: Python :: 3",
+    "Topic :; Scientific/Engineering :: Chemistry",
+]
+dependencies = [
+    "h5py",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "PyHyperScattering>=0.1.7",
+    "scikit-image",
+    "scipy",
+]
+
+[project.urls]
+Homepage = "https://github.com/usnistgov/NRSS/"
+
+[tools.setuptools.packages.find]
+where = ["src"]

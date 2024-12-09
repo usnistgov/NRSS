@@ -1,0 +1,2000 @@
+EnergyData0:
+{
+Energy = 275.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData1:
+{
+Energy = 275.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData2:
+{
+Energy = 275.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData3:
+{
+Energy = 275.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData4:
+{
+Energy = 275.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData5:
+{
+Energy = 275.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData6:
+{
+Energy = 275.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData7:
+{
+Energy = 275.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData8:
+{
+Energy = 275.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData9:
+{
+Energy = 275.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData10:
+{
+Energy = 276.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData11:
+{
+Energy = 276.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData12:
+{
+Energy = 276.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData13:
+{
+Energy = 276.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData14:
+{
+Energy = 276.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData15:
+{
+Energy = 276.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData16:
+{
+Energy = 276.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData17:
+{
+Energy = 276.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData18:
+{
+Energy = 276.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData19:
+{
+Energy = 276.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData20:
+{
+Energy = 277.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData21:
+{
+Energy = 277.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData22:
+{
+Energy = 277.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData23:
+{
+Energy = 277.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData24:
+{
+Energy = 277.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData25:
+{
+Energy = 277.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData26:
+{
+Energy = 277.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData27:
+{
+Energy = 277.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData28:
+{
+Energy = 277.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData29:
+{
+Energy = 277.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData30:
+{
+Energy = 278.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData31:
+{
+Energy = 278.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData32:
+{
+Energy = 278.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData33:
+{
+Energy = 278.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData34:
+{
+Energy = 278.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData35:
+{
+Energy = 278.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData36:
+{
+Energy = 278.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData37:
+{
+Energy = 278.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData38:
+{
+Energy = 278.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData39:
+{
+Energy = 278.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData40:
+{
+Energy = 279.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData41:
+{
+Energy = 279.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData42:
+{
+Energy = 279.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData43:
+{
+Energy = 279.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData44:
+{
+Energy = 279.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData45:
+{
+Energy = 279.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData46:
+{
+Energy = 279.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData47:
+{
+Energy = 279.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData48:
+{
+Energy = 279.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData49:
+{
+Energy = 279.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData50:
+{
+Energy = 280.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData51:
+{
+Energy = 280.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData52:
+{
+Energy = 280.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData53:
+{
+Energy = 280.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData54:
+{
+Energy = 280.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData55:
+{
+Energy = 280.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData56:
+{
+Energy = 280.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData57:
+{
+Energy = 280.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData58:
+{
+Energy = 280.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData59:
+{
+Energy = 280.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData60:
+{
+Energy = 281.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData61:
+{
+Energy = 281.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData62:
+{
+Energy = 281.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData63:
+{
+Energy = 281.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData64:
+{
+Energy = 281.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData65:
+{
+Energy = 281.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData66:
+{
+Energy = 281.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData67:
+{
+Energy = 281.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData68:
+{
+Energy = 281.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData69:
+{
+Energy = 281.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData70:
+{
+Energy = 282.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData71:
+{
+Energy = 282.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData72:
+{
+Energy = 282.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData73:
+{
+Energy = 282.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData74:
+{
+Energy = 282.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData75:
+{
+Energy = 282.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData76:
+{
+Energy = 282.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData77:
+{
+Energy = 282.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData78:
+{
+Energy = 282.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData79:
+{
+Energy = 282.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData80:
+{
+Energy = 283.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData81:
+{
+Energy = 283.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData82:
+{
+Energy = 283.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData83:
+{
+Energy = 283.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData84:
+{
+Energy = 283.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData85:
+{
+Energy = 283.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData86:
+{
+Energy = 283.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData87:
+{
+Energy = 283.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData88:
+{
+Energy = 283.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData89:
+{
+Energy = 283.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData90:
+{
+Energy = 284.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData91:
+{
+Energy = 284.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData92:
+{
+Energy = 284.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData93:
+{
+Energy = 284.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData94:
+{
+Energy = 284.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData95:
+{
+Energy = 284.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData96:
+{
+Energy = 284.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData97:
+{
+Energy = 284.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData98:
+{
+Energy = 284.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData99:
+{
+Energy = 284.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData100:
+{
+Energy = 285.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData101:
+{
+Energy = 285.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData102:
+{
+Energy = 285.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData103:
+{
+Energy = 285.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData104:
+{
+Energy = 285.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData105:
+{
+Energy = 285.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData106:
+{
+Energy = 285.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData107:
+{
+Energy = 285.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData108:
+{
+Energy = 285.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData109:
+{
+Energy = 285.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData110:
+{
+Energy = 286.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData111:
+{
+Energy = 286.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData112:
+{
+Energy = 286.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData113:
+{
+Energy = 286.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData114:
+{
+Energy = 286.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData115:
+{
+Energy = 286.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData116:
+{
+Energy = 286.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData117:
+{
+Energy = 286.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData118:
+{
+Energy = 286.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData119:
+{
+Energy = 286.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData120:
+{
+Energy = 287.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData121:
+{
+Energy = 287.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData122:
+{
+Energy = 287.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData123:
+{
+Energy = 287.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData124:
+{
+Energy = 287.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData125:
+{
+Energy = 287.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData126:
+{
+Energy = 287.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData127:
+{
+Energy = 287.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData128:
+{
+Energy = 287.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData129:
+{
+Energy = 287.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData130:
+{
+Energy = 288.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData131:
+{
+Energy = 288.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData132:
+{
+Energy = 288.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData133:
+{
+Energy = 288.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData134:
+{
+Energy = 288.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData135:
+{
+Energy = 288.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData136:
+{
+Energy = 288.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData137:
+{
+Energy = 288.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData138:
+{
+Energy = 288.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData139:
+{
+Energy = 288.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData140:
+{
+Energy = 289.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData141:
+{
+Energy = 289.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData142:
+{
+Energy = 289.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData143:
+{
+Energy = 289.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData144:
+{
+Energy = 289.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData145:
+{
+Energy = 289.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData146:
+{
+Energy = 289.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData147:
+{
+Energy = 289.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData148:
+{
+Energy = 289.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData149:
+{
+Energy = 289.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData150:
+{
+Energy = 290.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData151:
+{
+Energy = 290.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData152:
+{
+Energy = 290.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData153:
+{
+Energy = 290.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData154:
+{
+Energy = 290.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData155:
+{
+Energy = 290.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData156:
+{
+Energy = 290.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData157:
+{
+Energy = 290.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData158:
+{
+Energy = 290.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData159:
+{
+Energy = 290.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData160:
+{
+Energy = 291.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData161:
+{
+Energy = 291.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData162:
+{
+Energy = 291.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData163:
+{
+Energy = 291.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData164:
+{
+Energy = 291.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData165:
+{
+Energy = 291.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData166:
+{
+Energy = 291.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData167:
+{
+Energy = 291.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData168:
+{
+Energy = 291.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData169:
+{
+Energy = 291.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData170:
+{
+Energy = 292.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData171:
+{
+Energy = 292.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData172:
+{
+Energy = 292.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData173:
+{
+Energy = 292.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData174:
+{
+Energy = 292.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData175:
+{
+Energy = 292.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData176:
+{
+Energy = 292.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData177:
+{
+Energy = 292.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData178:
+{
+Energy = 292.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData179:
+{
+Energy = 292.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData180:
+{
+Energy = 293.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData181:
+{
+Energy = 293.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData182:
+{
+Energy = 293.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData183:
+{
+Energy = 293.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData184:
+{
+Energy = 293.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData185:
+{
+Energy = 293.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData186:
+{
+Energy = 293.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData187:
+{
+Energy = 293.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData188:
+{
+Energy = 293.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData189:
+{
+Energy = 293.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData190:
+{
+Energy = 294.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData191:
+{
+Energy = 294.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData192:
+{
+Energy = 294.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData193:
+{
+Energy = 294.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData194:
+{
+Energy = 294.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData195:
+{
+Energy = 294.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData196:
+{
+Energy = 294.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData197:
+{
+Energy = 294.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData198:
+{
+Energy = 294.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData199:
+{
+Energy = 294.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData200:
+{
+Energy = 295.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData201:
+{
+Energy = 295.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData202:
+{
+Energy = 295.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData203:
+{
+Energy = 295.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData204:
+{
+Energy = 295.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData205:
+{
+Energy = 295.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData206:
+{
+Energy = 295.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData207:
+{
+Energy = 295.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData208:
+{
+Energy = 295.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData209:
+{
+Energy = 295.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData210:
+{
+Energy = 296.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData211:
+{
+Energy = 296.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData212:
+{
+Energy = 296.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData213:
+{
+Energy = 296.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData214:
+{
+Energy = 296.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData215:
+{
+Energy = 296.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData216:
+{
+Energy = 296.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData217:
+{
+Energy = 296.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData218:
+{
+Energy = 296.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData219:
+{
+Energy = 296.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData220:
+{
+Energy = 297.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData221:
+{
+Energy = 297.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData222:
+{
+Energy = 297.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData223:
+{
+Energy = 297.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData224:
+{
+Energy = 297.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData225:
+{
+Energy = 297.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData226:
+{
+Energy = 297.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData227:
+{
+Energy = 297.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData228:
+{
+Energy = 297.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData229:
+{
+Energy = 297.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData230:
+{
+Energy = 298.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData231:
+{
+Energy = 298.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData232:
+{
+Energy = 298.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData233:
+{
+Energy = 298.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData234:
+{
+Energy = 298.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData235:
+{
+Energy = 298.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData236:
+{
+Energy = 298.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData237:
+{
+Energy = 298.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData238:
+{
+Energy = 298.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData239:
+{
+Energy = 298.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData240:
+{
+Energy = 299.0;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData241:
+{
+Energy = 299.1;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData242:
+{
+Energy = 299.2;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData243:
+{
+Energy = 299.3;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData244:
+{
+Energy = 299.4;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData245:
+{
+Energy = 299.5;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData246:
+{
+Energy = 299.6;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData247:
+{
+Energy = 299.7;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData248:
+{
+Energy = 299.8;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
+EnergyData249:
+{
+Energy = 299.9;
+BetaPara = 0.0;
+BetaPerp = 0.0;
+DeltaPara = 0.0;
+DeltaPerp = 0.0;
+}
