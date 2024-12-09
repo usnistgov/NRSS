@@ -12,3 +12,8 @@
 # __version__ = "0.1.0"
 # __author__ = "Peter Dudenas"
 # __credits__ = "National Institute of Standards and Technology"
+
+try:
+    from ._version import version as __version__
+except ImportError:
+    __version__ = "0.0.0"  # Fallback version if the file is missing
