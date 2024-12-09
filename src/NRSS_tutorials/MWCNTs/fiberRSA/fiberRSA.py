@@ -202,7 +202,7 @@ def create_ball_coords(radius):
     for k in range(L.size):
         for j in range(L.size):
             for i in range(L.size):
-                if (L[k]**2 + L[j]**2 + L[i]**2 <= radius**2):
+                if (L[k]**2 + L[j]**2 + L[i]**2 < radius**2):
                     ball_coords.append((L[k], L[j], L[i]))
                 
     return ball_coords
@@ -337,7 +337,7 @@ def upscale_CNT(CNT,BoxXY, BoxZ):
     -------
     None
     '''
-    r = np.linspace(-CNT.length/2, CNT.length/2, int(CNT.length+1))
+    r = np.linspace(-CNT.length/2, CNT.length/2, int(CNTs[i].length+1))
     CNT.x = (CNT.x_center + r*np.sin(CNT.theta)*np.cos(CNT.psi))%BoxXY
     CNT.y = (CNT.y_center + r*np.sin(CNT.theta)*np.sin(CNT.psi))%BoxXY
     CNT.z = (CNT.z_center + r*np.cos(CNT.theta))%BoxZ
