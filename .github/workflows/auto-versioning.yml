@@ -2,8 +2,8 @@ name: Automatic Versioning and Release
 
 on:
   push: {}
-    # branches:
-    #   - main  # Replace with your target branch if different
+    branches:
+      - main  # Replace with your target branch if different
 
 jobs:
   auto-version:
