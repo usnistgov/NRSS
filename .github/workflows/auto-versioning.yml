@@ -1,7 +1,7 @@
 name: Automatic Versioning and Release
 
 on:
-  push: {}
+  push:
     branches:
       - main  # Replace with your target branch if different
 
