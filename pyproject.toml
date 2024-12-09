@@ -14,7 +14,7 @@ authors = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: NIST",
+    "License :: Public Domain",
     "Operating System :: POSIX :: Linux",
     "Topic :: Scientific/Engineering :: PhysicsProgramming Language :: Python :: 3",
     "Topic :; Scientific/Engineering :: Chemistry",
