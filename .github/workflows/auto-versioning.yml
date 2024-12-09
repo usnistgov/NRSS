@@ -1,4 +1,4 @@
-name: Automatic Versioning
+name: "Automatic Versioning"
 
 on:
   push:
