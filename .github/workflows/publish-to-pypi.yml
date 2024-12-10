@@ -2,9 +2,12 @@ name: Publish to PyPI
 
 on:
   workflow_run:
-    workflows: ["auto-versioning.yml"]  # Name of the workflow that triggers this one
+    workflows: ["Automatic Versioning and Release"]  # Name of the workflow that triggers this one
     types:
       - completed  # Trigger only when `auto-versioning.yml` finishes successfully
+
+permissions:
+  contents: write  # Allow fetching and modifying repository content
 
 jobs:
   build-and-publish:
