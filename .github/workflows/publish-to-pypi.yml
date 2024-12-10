@@ -1,11 +1,10 @@
 name: Publish to PyPI
 
 on:
-  push:
-    tags:
-      - 'v*'  # Trigger only on tags starting with 'v'
-    branches:
-      - main  # Ensure it only runs on the main branch
+  workflow_run:
+    workflows: ["auto-versioning.yml"]  # Name of the workflow that triggers this one
+    types:
+      - completed  # Trigger only when `auto-versioning.yml` finishes successfully
 
 jobs:
   build-and-publish:
@@ -15,7 +14,14 @@ jobs:
     - name: Check out the code
       uses: actions/checkout@v3
       with:
+        ref: main  # Fetch the latest state from the main branch      
         fetch-depth: 0  # Fetch full history with tags
+
+    - name: Debug version information
+      run: |
+        git log -1
+        git describe --tags --dirty
+        cat pyproject.toml  # Verify the correct version is in the file
 
     - name: Set up Python
       uses: actions/setup-python@v4
