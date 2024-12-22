@@ -202,7 +202,7 @@ def create_ball_coords(radius):
     for k in range(L.size):
         for j in range(L.size):
             for i in range(L.size):
-                if (L[k]**2 + L[j]**2 + L[i]**2 < radius**2):
+                if (L[k]**2 + L[j]**2 + L[i]**2 <= radius**2):
                     ball_coords.append((L[k], L[j], L[i]))
                 
     return ball_coords
