@@ -330,16 +330,14 @@ class Morphology:
 
             for i in range(numMat):
                 materialID = i + 1
-                Vfrac = f[f'Euler_Angles/Mat_{i+1}_Vfrac'][()]
-                S = f[f'Euler_Angles/Mat_{i+1}_S'][()]
-                theta = f[f'Euler_Angles/Mat_{i+1}_Theta'][()]
-                psi = f[f'Euler_Angles/Mat_{i+1}_Psi'][()]
-                materials[materialID] = Material(materialID=materialID, 
-                                                 Vfrac=Vfrac,
-                                                 S=S,
-                                                 theta=theta,
-                                                 psi=psi,
-                                                 NumZYX=Vfrac.shape)
+                # Load arrays directly without type conversion
+                materials[materialID] = Material(
+                    materialID=materialID,
+                    Vfrac=f[f'Euler_Angles/Mat_{i+1}_Vfrac'][()],
+                    S=f[f'Euler_Angles/Mat_{i+1}_S'][()],
+                    theta=f[f'Euler_Angles/Mat_{i+1}_Theta'][()],
+                    psi=f[f'Euler_Angles/Mat_{i+1}_Psi'][()],
+                    NumZYX=f[f'Euler_Angles/Mat_{i+1}_Vfrac'][()].shape)
 
         return cls(numMat, materials=materials, PhysSize=PhysSize, create_cy_object=create_cy_object)
 
@@ -387,11 +385,19 @@ class Morphology:
 
     def update_voxel_data(self):
         for ID in range(1, self.numMaterial+1):
-            self.voxelData.addVoxelData(S=self.materials[ID].S.astype(np.single),
-                                        Theta=self.materials[ID].theta.astype(np.single),
-                                        Psi=self.materials[ID].psi.astype(np.single),
-                                        Vfrac=self.materials[ID].Vfrac.astype(np.single),
-                                        MaterialID=ID)
+            mat = self.materials[ID]
+            # Check types and only convert if needed
+            s = mat.S if mat.S.dtype == np.float32 else mat.S.astype(np.float32)
+            theta = mat.theta if mat.theta.dtype == np.float32 else mat.theta.astype(np.float32)
+            psi = mat.psi if mat.psi.dtype == np.float32 else mat.psi.astype(np.float32)
+            vfrac = mat.Vfrac if mat.Vfrac.dtype == np.float32 else mat.Vfrac.astype(np.float32)
+            
+            self.voxelData.addVoxelData(
+                S=s,
+                Theta=theta,
+                Psi=psi,
+                Vfrac=vfrac,
+                MaterialID=ID)
 
     def config_to_inputData(self):
         for key in self.config:
@@ -620,6 +626,7 @@ class Material(OpticalConstants):
     def __init__(self, materialID=1, Vfrac=None, S=None, theta=None, psi=None,
                  NumZYX=None, energies=None, opt_constants=None, name=None):
         self.materialID = materialID
+        # Store arrays as-is, type conversion will happen when needed
         self.Vfrac = Vfrac
         self.S = S
         self.theta = theta
