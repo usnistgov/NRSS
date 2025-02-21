@@ -371,10 +371,12 @@ class Morphology:
             warnings.warn('Validation failed. Double check optical constant values')
 
     def update_optical_constants(self):
+        # Pre-allocate list to avoid repeated allocations
+        all_constants = [None] * self._numMaterial
         for energy in self.Energies:
-            all_constants = []
+            # Update list in-place
             for ID in range(1, self.numMaterial+1):
-                all_constants.append(self.materials[ID].opt_constants[energy])
+                all_constants[ID-1] = self.materials[ID].opt_constants[energy]
             self.OpticalConstants.addData(OpticalConstants=all_constants, Energy=energy)
 
     def create_voxel_data(self):
@@ -482,46 +484,66 @@ class Morphology:
                 f = open(os.devnull, 'w')
                 sys.stdout = f
 
-            # data will be returned in shape [energy, NumY, NumX]
-            scattering_data = self.scatteringPattern.writeAllToNumpy(kID=0)
-            qy = 2*np.pi*np.fft.fftshift(np.fft.fftfreq(self.NumZYX[1], d=self.PhysSize))
-            qx = 2*np.pi*np.fft.fftshift(np.fft.fftfreq(self.NumZYX[2], d=self.PhysSize))
-            scattering_data = xr.DataArray(scattering_data,
-                                           dims=['energy', 'qy', 'qx'],
-                                           coords={'qy': qy, 'qx': qx, 'energy': self.config['Energies']})
-
-            if not print_vec_info:
-                sys.stdout = old_stdout
-                f.close()
-
-            if return_xarray:
-                return scattering_data
-            else:
-                self.scattering_data = scattering_data
+            try:
+                # Get data in [energy, NumY, NumX] shape
+                scattering_data = self.scatteringPattern.writeAllToNumpy(kID=0)
+                
+                # Pre-compute FFT frequencies once
+                ny, nx = self.NumZYX[1:]
+                d = self.PhysSize
+                
+                # Calculate q-vectors
+                qy = 2*np.pi*np.fft.fftshift(np.fft.fftfreq(ny, d=d))
+                qx = 2*np.pi*np.fft.fftshift(np.fft.fftfreq(nx, d=d))
+                
+                # Create DataArray with pre-computed coordinates
+                scattering_data = xr.DataArray(
+                    scattering_data,
+                    dims=['energy', 'qy', 'qx'],
+                    coords={'qy': qy, 'qx': qx, 'energy': self.config['Energies']}
+                )
+                
+                if return_xarray:
+                    return scattering_data
+                else:
+                    self.scattering_data = scattering_data
+                    
+            finally:
+                if not print_vec_info:
+                    sys.stdout = old_stdout
+                    f.close()
         else:
             warnings.warn('You haven\'t run your simulation yet')
 
     # TODO : restructure to have a single checkH5 engine for both NRSS and
     # command line formats
     def check_materials(self, quiet=True):
-        Vfrac_test = np.zeros(self.materials[1].Vfrac.shape)
-        for i in range(1, self._numMaterial+1):
-            Vfrac_test += self.materials[i].Vfrac
-
-            # test that S and Vfrac lie between 0 and 1 for each material
-            assert np.all((self.materials[i].S >= 0) & (self.materials[i].S <= 1)), f'Material {i} S value(s) does not lie between 0 and 1'
-            assert np.all((self.materials[i].Vfrac >= 0) & (self.materials[i].Vfrac <= 1)), f'Material {i} Vfrac value(s) does not lie between 0 and 1'
-
-            # test for NaNs
-            for name in ['S', 'Vfrac', 'theta', 'psi']:
-                assert np.all(~np.isnan(getattr(self.materials[i], name))), f'NaNs are present in Material {i} {name}'
-                assert ('float' in getattr(self.materials[i], name).dtype.name), f'Material {i} {name} is not of type float' 
-
-        assert np.allclose(Vfrac_test, 1), 'Total material volume fractions do not sum to 1'
-
-        # delete Vfrac_test after validation
-        del Vfrac_test
-
+        # Vectorized sum of volume fractions
+        Vfrac_sum = sum(mat.Vfrac for mat in self.materials.values())
+        assert np.allclose(Vfrac_sum, 1), 'Total material volume fractions do not sum to 1'
+        del Vfrac_sum  # Free memory immediately
+        
+        # Check each material's properties
+        for i, mat in self.materials.items():
+            # Validate value ranges and types in one pass
+            for name, arr in {
+                'S': mat.S,
+                'Vfrac': mat.Vfrac,
+                'theta': mat.theta,
+                'psi': mat.psi
+            }.items():
+                # Check for NaNs and float type in one operation
+                if not np.issubdtype(arr.dtype, np.floating):
+                    raise AssertionError(f'Material {i} {name} is not of type float')
+                
+                if np.any(np.isnan(arr)):
+                    raise AssertionError(f'NaNs are present in Material {i} {name}')
+                
+                # Check bounds for S and Vfrac
+                if name in ('S', 'Vfrac'):
+                    if not np.all((arr >= 0) & (arr <= 1)):
+                        raise AssertionError(f'Material {i} {name} value(s) does not lie between 0 and 1')
+        
         if not quiet:
             print('All material checks have passed')
 
