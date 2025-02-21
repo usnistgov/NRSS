@@ -6,7 +6,7 @@ channels:
 dependencies:
   - python
   - cyrsoxs
-  - sphinx
+  - sphinx < 7.3.0
   - pydata-sphinx-theme==0.13.3
   - sphinx-design
   - xarray
