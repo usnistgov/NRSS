@@ -262,11 +262,45 @@ This Jupyter notebook series describes how to convert Near Edge X-ray Absorption
 Both notebooks additionally include calculation code to predict binary contrast from pairs of complex 
 indices in real materials.
 
-The tutorial series has two notebooks:
-1. `Scalar complex index of refraction. <https://github.com/usnistgov/NRSS/blob/main/tutorials/kkcalc_for_NRSS/kkcalc_ps_pmma_xr.ipynb>`_ determination from NEXAFS of poly(styrene) (PS) and poly(methyl methacrylate) (PMMA)
+Tutorial Series Overview
+^^^^^^^^^^^^^^^^^^^^^
 
-2. `Tensor (uniaxial) complex index of refraction. <https://github.com/usnistgov/NRSS/blob/main/tutorials/kkcalc_for_NRSS/kkcalc_orientation_Y6_PM6.ipynb>`_ determination from NEXAFS of PM6 and Y6, common materials used in organic photovoltaic devices.
-It is recommended to master the scalar notebook before attempting the tensor notebook.
+NRSS provides several tutorial series to help you get started with different aspects of the software:
+
+3D Polymer Adsorption
+--------------------
+A series of tutorials demonstrating NRSS modeling and simulation capabilities:
+
+1. `Basic Model Setup <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/3D_polymer_adsorption/01_polymer_adsorption_model.ipynb>`_: Introduction to setting up NRSS simulations, including environment configuration, defining model parameters, and working with optical constants for materials like polystyrene (PS) and silicon dioxide (SiO2).
+
+2. `Function Framework <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/3D_polymer_adsorption/02_polymer_adsorption_functions.ipynb>`_: Creates a code framework around the basic model for rapid exploration, organizing model construction into functions with arguments.
+
+3. `Parameter Sweeps <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/3D_polymer_adsorption/03_polymer_adsorption_sweeps.ipynb>`_: Demonstrates automated parameter sweeps using Python loop structures, with results saved using pickle.
+
+4. `Streamlined Sweeps <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/3D_polymer_adsorption/04_polymer_adsorption_sweep_streamlined.ipynb>`_: A more efficient implementation of parameter sweeps using imported library functions, demonstrated with PMMA as the example material.
+
+5. `Basic Visualization <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/3D_polymer_adsorption/05_visualizing_simulation_results.ipynb>`_: Examining and plotting NRSS simulation results using matplotlib.
+
+6. `Advanced Visualization <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/3D_polymer_adsorption/06_visualizing_sweeps_of_sweeps.ipynb>`_: Creating animations from parameter sweep results using ffmpeg.
+
+
+Multi-Walled Carbon Nanotubes (MWCNTs)
+------------------------------------
+This series focuses on applying NRSS to study the structure and properties of multi-walled carbon nanotubes using various experimental techniques and modeling approaches.
+
+1. `RSoXS Analysis <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/MWCNTs/nb1_rsoxs.ipynb>`_: A detailed walkthrough of resonant soft X-ray scattering data processing for MWCNT samples. Learn how to import, process, and analyze RSoXS data, including background subtraction, normalization, and initial interpretation.
+
+2. `NEXAFS Analysis <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/MWCNTs/nb2_nexafs.ipynb>`_: Covers the analysis of Near Edge X-ray Absorption Fine Structure spectroscopy data from MWCNTs. Understand how to extract chemical and structural information from NEXAFS spectra and prepare this information for use in NRSS modeling.
+
+3. `NRSS Modeling <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/MWCNTs/nb3_nrss.ipynb>`_: Demonstrates how to build and apply NRSS models to MWCNT systems. Learn to combine RSoXS and NEXAFS data with NRSS modeling to extract detailed structural information about MWCNT organization and properties.
+
+KKcalc Integration
+----------------
+These tutorials show how to determine optical constants from experimental data using the Kramers-Kronig calculator (KKcalc) and integrate them into NRSS simulations.
+
+1. `PS-PMMA Analysis <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/kkcalc_for_NRSS/kkcalc_ps_pmma_xr.ipynb>`_: A step-by-step guide to determining scalar complex refractive indices from NEXAFS data of PS and PMMA. Learn the complete workflow from raw data processing to final optical constant determination, including data validation and error analysis.
+
+2. `Y6-PM6 Orientation <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/kkcalc_for_NRSS/kkcalc_orientation_Y6_PM6.ipynb>`_: Advanced tutorial on calculating tensor (uniaxial) optical constants for oriented organic semiconductor materials. Understand how to handle orientation effects in NEXAFS spectra and determine direction-dependent optical properties.
 
 
 Core-Shell Radial Disk in the NRSS
@@ -286,36 +320,11 @@ This tutorial describes how to create the radial disk morphology, submit the sim
 This tutorial relies on index of refraction information stored in the commandline / slurm queue version subdirectory,
 so it is recommended to copy both at the same time into the same parent directory.
 
-Polymer Adsorption on Sphere in the NRSS
+Polymer Grafted Nanoparticles (PGNs)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
-An in-depth Jupyter notebook series describing the adsorption of a polymer on single sphere. Six notebooks guide new users through 
-basic NRSS model construction, creating libraries for models, automating model parameter sweeps,
-and ultimately rendering animated visualizations of parameter sweep results. These tutorials feature poly(styrene) (PS) and 
-poly(methyl methacrylate) (PMMA) adsorbed to an SiO2 particle. All tutorials within this series use the recommended NRSS 
-pybind workflow.
-
-From a scientific perspective, the single-sphere nature of this tutorial series makes it more of a fundamental study into tensor 
-index of refraction effects and their manifestation in pure core-shell form factor scattering. More realistic simulations 
-might include multiple spheres, potential structure factor effects between them, dispersity in sphere and shell dimensions, etc.
-
-Tutorial notebooks in this series include:
-1. `Basic model creation <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/01_polymer_adsorption_model.ipynb>`_:
-describes how to create composition fields and Euler angle fields for radial and tangential chain orientation,
-run simulation within Python, and examine the simulation result.
-
-2. `Models with functions <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/02_polymer_adsorption_functions.ipynb>`_:
-Move model construction from Jupyter cells into functions with arguments for model creation and functions for running models.
-
-3. `Model variable sweeps <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/03_polymer_adsorption_sweeps.ipynb>`_:
-Sweep model variables using Python loop structures, and save the results using pickle.
-
-4. `Model variable sweeps - streamlined <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/04_polymer_adsorption_sweep_streamlined.ipynb>`_:
-Advanced sweep infrastructure in which most of the code to run variable sweeps are functions imported from a library.
-
-5. `Visualizing simulation results <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/05_visualizing_simulation_results.ipynb>`_:
-Examining and plotting NRSS simulation results using the matplotlib library.
-
-6. `Visualizing sweeps as animations <https://github.com/usnistgov/NRSS/blob/main/tutorials/3D_polymer_adsorption/06_visualizing_sweeps_of_sweeps.ipynb>`_:
-Collate result visualization collections of variable sweep campaigns into mp4 video using ffmpeg.
-
+* `Polymer Grafted Nanoparticles <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/polymer_grafted_nanoparticles/parametric_pgn_model.ipynb>`_
+This tutorial demonstrates how to simulate resonant soft X-ray scattering from polymer-grafted nanoparticles using a parametric model. 
+The model is based on published work examining polystyrene-grafted gold nanoparticles, and allows exploration of orientation decay 
+away from particle surfaces. The tutorial includes both morphology generation and NRSS simulation, with a focus on the carbon K-edge 
+energies relevant to polystyrene orientation.
 
