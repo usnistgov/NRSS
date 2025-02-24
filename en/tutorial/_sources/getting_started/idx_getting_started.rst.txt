@@ -320,15 +320,11 @@ This tutorial describes how to create the radial disk morphology, submit the sim
 This tutorial relies on index of refraction information stored in the commandline / slurm queue version subdirectory,
 so it is recommended to copy both at the same time into the same parent directory.
 
-Polymer Adsorption on Sphere in the NRSS
+Polymer Grafted Nanoparticles (PGNs)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
-An in-depth Jupyter notebook series describing the adsorption of a polymer on single sphere. Six notebooks guide new users through 
-basic NRSS model construction, creating libraries for models, automating model parameter sweeps,
-and ultimately rendering animated visualizations of parameter sweep results. These tutorials feature poly(styrene) (PS) and 
-poly(methyl methacrylate) (PMMA) adsorbed to an SiO2 particle. All tutorials within this series use the recommended NRSS 
-pybind workflow.
-
-From a scientific perspective, the single-sphere nature of this tutorial series makes it more of a fundamental study into tensor 
-index of refraction effects and their manifestation in pure core-shell form factor scattering. More realistic simulations 
-might include multiple spheres, potential structure factor effects between them, dispersity in sphere and shell dimensions, etc.
+* `Polymer Grafted Nanoparticles <https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/polymer_grafted_nanoparticles/parametric_pgn_model.ipynb>`_
+This tutorial demonstrates how to simulate resonant soft X-ray scattering from polymer-grafted nanoparticles using a parametric model. 
+The model is based on published work examining polystyrene-grafted gold nanoparticles, and allows exploration of orientation decay 
+away from particle surfaces. The tutorial includes both morphology generation and NRSS simulation, with a focus on the carbon K-edge 
+energies relevant to polystyrene orientation.
 
