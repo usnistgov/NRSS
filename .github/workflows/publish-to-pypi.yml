@@ -1,0 +1,46 @@
+name: Publish to PyPI
+
+on:
+  workflow_run:
+    workflows: ["Automatic Versioning and Release"]  # Name of the workflow that triggers this one
+    types:
+      - completed  # Trigger only when `auto-versioning.yml` finishes successfully
+
+permissions:
+  contents: write  # Allow fetching and modifying repository content
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out the code
+      uses: actions/checkout@v3
+      with:
+        ref: main  # Fetch the latest state from the main branch      
+        fetch-depth: 0  # Fetch full history with tags
+
+    - name: Debug version information
+      run: |
+        git log -1
+        git describe --tags --dirty
+        cat pyproject.toml  # Verify the correct version is in the file
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Build the package
+      run: python -m build
+
+    - name: Publish to PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+      run: twine upload dist/*

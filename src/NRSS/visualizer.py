@@ -592,7 +592,7 @@ def morphology_visualizer(
 
             if outputmat and (i in outputmat):
                 fig.canvas.draw()
-                rgb_return = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
+                rgb_return = np.array(fig.canvas.buffer_rgba(), dtype=np.uint8)
                 rgb_return = rgb_return.reshape(fig.canvas.get_width_height()[::-1] + (4,))
                 if outputplot and ("vfrac" in outputplot):
                     if outputaxes:

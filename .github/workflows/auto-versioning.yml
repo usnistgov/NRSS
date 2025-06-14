@@ -1,0 +1,62 @@
+name: Automatic Versioning and Release
+
+on:
+  push:
+    branches:
+      - main  # Replace with your target branch if different
+
+jobs:
+  auto-version:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Fetch All Tags
+      run: |
+        git fetch --tags
+
+    - name: Determine Version Tag
+      id: versioning
+      run: |
+        DATE=$(date -u +"%Y.%m.%d")
+        BASE_TAG="$DATE"
+        # Fetch all existing tags matching the current date
+        EXISTING_TAGS=$(git tag -l "${BASE_TAG}.*" | sort -V)
+        if [ -z "$EXISTING_TAGS" ]; then
+          NEW_TAG="${BASE_TAG}.01"
+        else
+          LAST_TAG=$(echo "$EXISTING_TAGS" | tail -n 1)
+          LAST_INCREMENT=$(echo "$LAST_TAG" | awk -F. '{print $NF}')
+          NEW_INCREMENT=$(printf "%02d" $((10#$LAST_INCREMENT + 1)))
+          NEW_TAG="${BASE_TAG}.${NEW_INCREMENT}"
+        fi
+        echo "Existing Tags: $EXISTING_TAGS"
+        echo "Last Tag: $LAST_TAG"
+        echo "New Tag: $NEW_TAG"
+        echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
+
+    - name: Create and Push Tag
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag $NEW_TAG
+        git push origin $NEW_TAG
+
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ env.NEW_TAG }}
+        release_name: "Release ${{ env.NEW_TAG }}"
+        body: |
+          ## Release Notes
+          - Automatically generated release for version ${{ env.NEW_TAG }}.
+          - Commit: ${{ github.sha }}
+          - Created by GitHub Actions workflow.
+        draft: false
+        prerelease: false
