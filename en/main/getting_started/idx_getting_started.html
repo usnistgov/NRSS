@@ -36,9 +36,9 @@
   <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=e353d410970836974a52" />
 <link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=e353d410970836974a52" />
 
-    <script src="../_static/documentation_options.js?v=38b66d78"></script>
-    <script src="../_static/doctools.js?v=9bcbadda"></script>
-    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js?v=40769cce"></script>
+    <script src="../_static/doctools.js?v=888ff710"></script>
+    <script src="../_static/sphinx_highlight.js?v=4825356b"></script>
     <script src="../_static/design-tabs.js?v=f930bc37"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'getting_started/idx_getting_started';</script>
     <link rel="index" title="Index" href="../genindex.html" />
@@ -404,16 +404,16 @@ document.write(`
                 <article class="bd-article" role="main">
                   
   <section id="getting-started">
-<span id="id1"></span><h1>Getting Started<a class="headerlink" href="#getting-started" title="Link to this heading">#</a></h1>
+<span id="id1"></span><h1>Getting Started<a class="headerlink" href="#getting-started" title="Permalink to this heading">#</a></h1>
 <section id="hardware-requirements">
-<h2>Hardware Requirements<a class="headerlink" href="#hardware-requirements" title="Link to this heading">#</a></h2>
+<h2>Hardware Requirements<a class="headerlink" href="#hardware-requirements" title="Permalink to this heading">#</a></h2>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
 <p>CyRSoXS requires an NVIDIA GPU.</p>
 </div>
 </section>
 <section id="installation-on-linux">
-<h2>Installation on Linux<a class="headerlink" href="#installation-on-linux" title="Link to this heading">#</a></h2>
+<h2>Installation on Linux<a class="headerlink" href="#installation-on-linux" title="Permalink to this heading">#</a></h2>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>This installation guide uses the Anaconda Python distribution. Any Python
@@ -425,7 +425,7 @@ working installations of all three.</p>
 source. If you need to compile from source (to enable double-precision, for example)
 the instructions are provided below.</p>
 <section id="conda-installation">
-<h3>Conda Installation<a class="headerlink" href="#conda-installation" title="Link to this heading">#</a></h3>
+<h3>Conda Installation<a class="headerlink" href="#conda-installation" title="Permalink to this heading">#</a></h3>
 <p>Clone NRSS from the github repository:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/usnistgov/NRSS.git
 </pre></div>
@@ -475,7 +475,7 @@ You can use the CyRSoXS executable from the shell:</p>
 </div>
 </section>
 <section id="building-cyrsoxs-from-source">
-<h3>Building CyRSoXS from source<a class="headerlink" href="#building-cyrsoxs-from-source" title="Link to this heading">#</a></h3>
+<h3>Building CyRSoXS from source<a class="headerlink" href="#building-cyrsoxs-from-source" title="Permalink to this heading">#</a></h3>
 <p><strong>NOTE:</strong> These installation instructions use Conda to install the required dependencies.
 If you prefer to manually install and manage these dependencies, please see the
 installation instructions at <a class="github reference external" href="https://github.com/usnistgov/cyrsoxs/blob/main/docs/INSTALL.md">usnistgov/cyrsoxs</a></p>
@@ -600,13 +600,13 @@ mv<span class="w"> </span>CyRSoXS.so<span class="w"> </span>lib/
 </section>
 </section>
 <section id="nrss-tutorials">
-<h2>NRSS Tutorials<a class="headerlink" href="#nrss-tutorials" title="Link to this heading">#</a></h2>
+<h2>NRSS Tutorials<a class="headerlink" href="#nrss-tutorials" title="Permalink to this heading">#</a></h2>
 <p>Several tutorials are available in the <a class="reference external" href="https://github.com/usnistgov/NRSS/tree/main/tutorials">tutorials</a>
 folder. Most of these tutorials include Jupyter notebooks with explanatory prose, example code, and code use strategies.</p>
 <p>For all tutorials, it is recommended to copy the entire tutorial folder out of the installed repository location before
 running, because some tutorials will generate file changes and new serialized objects within repository directories.</p>
 <section id="kkcalc-for-nrss">
-<h3>kkcalc for NRSS<a class="headerlink" href="#kkcalc-for-nrss" title="Link to this heading">#</a></h3>
+<h3>kkcalc for NRSS<a class="headerlink" href="#kkcalc-for-nrss" title="Permalink to this heading">#</a></h3>
 <p>This Jupyter notebook series describes how to convert Near Edge X-ray Absorption Fine Structure
 (NEXAFS) data into a complex index of refraction for use in NRSS computations. Conditioning of the NEXAFS and the use of the
 <a class="reference external" href="https://github.com/benajamin/kkcalc">kkcalc library</a> to develop this complex index are demonstrated.
@@ -614,10 +614,10 @@ Both notebooks additionally include calculation code to predict binary contrast 
 indices in real materials.</p>
 </section>
 <section id="tutorial-series-overview">
-<h3>Tutorial Series Overview<a class="headerlink" href="#tutorial-series-overview" title="Link to this heading">#</a></h3>
+<h3>Tutorial Series Overview<a class="headerlink" href="#tutorial-series-overview" title="Permalink to this heading">#</a></h3>
 <p>NRSS provides several tutorial series to help you get started with different aspects of the software:</p>
 <section id="d-polymer-adsorption">
-<h4>3D Polymer Adsorption<a class="headerlink" href="#d-polymer-adsorption" title="Link to this heading">#</a></h4>
+<h4>3D Polymer Adsorption<a class="headerlink" href="#d-polymer-adsorption" title="Permalink to this heading">#</a></h4>
 <p>A series of tutorials demonstrating NRSS modeling and simulation capabilities:</p>
 <ol class="arabic simple">
 <li><p><a class="reference external" href="https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/3D_polymer_adsorption/01_polymer_adsorption_model.ipynb">Basic Model Setup</a>: Introduction to setting up NRSS simulations, including environment configuration, defining model parameters, and working with optical constants for materials like polystyrene (PS) and silicon dioxide (SiO2).</p></li>
@@ -629,7 +629,7 @@ indices in real materials.</p>
 </ol>
 </section>
 <section id="multi-walled-carbon-nanotubes-mwcnts">
-<h4>Multi-Walled Carbon Nanotubes (MWCNTs)<a class="headerlink" href="#multi-walled-carbon-nanotubes-mwcnts" title="Link to this heading">#</a></h4>
+<h4>Multi-Walled Carbon Nanotubes (MWCNTs)<a class="headerlink" href="#multi-walled-carbon-nanotubes-mwcnts" title="Permalink to this heading">#</a></h4>
 <p>This series focuses on applying NRSS to study the structure and properties of multi-walled carbon nanotubes using various experimental techniques and modeling approaches.</p>
 <ol class="arabic simple">
 <li><p><a class="reference external" href="https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/MWCNTs/nb1_rsoxs.ipynb">RSoXS Analysis</a>: A detailed walkthrough of resonant soft X-ray scattering data processing for MWCNT samples. Learn how to import, process, and analyze RSoXS data, including background subtraction, normalization, and initial interpretation.</p></li>
@@ -638,7 +638,7 @@ indices in real materials.</p>
 </ol>
 </section>
 <section id="kkcalc-integration">
-<h4>KKcalc Integration<a class="headerlink" href="#kkcalc-integration" title="Link to this heading">#</a></h4>
+<h4>KKcalc Integration<a class="headerlink" href="#kkcalc-integration" title="Permalink to this heading">#</a></h4>
 <p>These tutorials show how to determine optical constants from experimental data using the Kramers-Kronig calculator (KKcalc) and integrate them into NRSS simulations.</p>
 <ol class="arabic simple">
 <li><p><a class="reference external" href="https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/kkcalc_for_NRSS/kkcalc_ps_pmma_xr.ipynb">PS-PMMA Analysis</a>: A step-by-step guide to determining scalar complex refractive indices from NEXAFS data of PS and PMMA. Learn the complete workflow from raw data processing to final optical constant determination, including data validation and error analysis.</p></li>
@@ -647,7 +647,7 @@ indices in real materials.</p>
 </section>
 </section>
 <section id="core-shell-radial-disk-in-the-nrss">
-<h3>Core-Shell Radial Disk in the NRSS<a class="headerlink" href="#core-shell-radial-disk-in-the-nrss" title="Link to this heading">#</a></h3>
+<h3>Core-Shell Radial Disk in the NRSS<a class="headerlink" href="#core-shell-radial-disk-in-the-nrss" title="Permalink to this heading">#</a></h3>
 <p>This Jupyter notebook is a basic introduction to the NRSS. It has two different versions.
 The pybind version is recommended, as it demonstrates the preferred NRSS pybind workflow.</p>
 <p>Both tutorials describe a radial disk scattering object, a simple 2D structure with a radial
@@ -665,7 +665,7 @@ This tutorial relies on index of refraction information stored in the commandlin
 so it is recommended to copy both at the same time into the same parent directory.</p>
 </section>
 <section id="polymer-grafted-nanoparticles-pgns">
-<h3>Polymer Grafted Nanoparticles (PGNs)<a class="headerlink" href="#polymer-grafted-nanoparticles-pgns" title="Link to this heading">#</a></h3>
+<h3>Polymer Grafted Nanoparticles (PGNs)<a class="headerlink" href="#polymer-grafted-nanoparticles-pgns" title="Permalink to this heading">#</a></h3>
 <ul class="simple">
 <li><p><a class="reference external" href="https://github.com/usnistgov/NRSS/blob/main/src/NRSS_tutorials/polymer_grafted_nanoparticles/parametric_pgn_model.ipynb">Polymer Grafted Nanoparticles</a></p></li>
 </ul>
@@ -787,7 +787,7 @@ energies relevant to polystyrene orientation.</p>
       
         <div class="footer-item">
   <p class="sphinx-version">
-    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.2.3.
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 7.1.2.
     <br/>
   </p>
 </div>
