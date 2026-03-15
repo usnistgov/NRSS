@@ -1,399 +1,226 @@
-# NRSS Major Upgrade: Python GPU Simulation Engine
+# NRSS Backend Modernization Spec (Superseding)
 
-## Overview
-This upgrade will create pure Python GPU-accelerated simulation engines within NRSS as alternatives to the C++ CyRSoXS library. The key goals are:
-1. Replicate full CyRSoXS functionality in Python using CuPy and PyTorch backends
-2. Maintain compatibility with existing NRSS Material and Morphology classes
-3. Enable direct GPU computation without CPU-GPU transfers
-4. Improve overall simulation performance
+This document supersedes prior roadmap content in this file.
 
-## Phase 1: Core Infrastructure (2-3 weeks)
+## 1. Goal
 
-### 1.1 GPU-Aware Base Classes
+Build a new NRSS backend architecture that:
 
-#### 1.1.1 Type Management
-```python
-from enum import Enum, auto
-from typing import Union, Dict, Any, Optional
-import numpy as np
-import cupy as cp
+1. Preserves current trusted physics behavior (CyRSoXS parity first).
+2. Enables a CuPy-native simulation backend to avoid unnecessary GPU/CPU/GPU transfers.
+3. Supports optional future backends (PyTorch, JAX) without hard dependencies.
+4. Improves robustness via deterministic, reproducible regression testing.
+5. Delivers durable value even if alternate backend implementation is paused or never completed.
 
-class BackendType(Enum):
-    CYRSOXS = auto()  # Original CyRSoXS backend
-    CUPY = auto()     # CuPy GPU backend
-    TORCH = auto()    # PyTorch GPU backend
+## 2. Guiding Principles
 
-class ArraySpec:
-    """Specification for array type and precision requirements"""
-    def __init__(self, dtype: np.dtype, shape: tuple, required_backend: Optional[BackendType] = None):
-        self.dtype = dtype
-        self.shape = shape
-        self.required_backend = required_backend
+1. Test-first: improve validation harness before backend rewrites.
+2. One unknown at a time: first CuPy backend should mimic existing CyRSoXS logic as closely as possible.
+3. Preserve backward compatibility by default.
+4. Keep scientific workflows practical (notebook-friendly), but ensure reproducibility through scripted pipelines.
+5. Treat test-harness modernization as a standalone product-quality objective, not only as a dependency for backend work.
 
-class TypeValidator:
-    """Validates and manages array types across backends"""
-    BACKEND_DTYPES = {
-        BackendType.CYRSOXS: {
-            'float32': np.float32,
-            'complex64': np.complex64
-        },
-        BackendType.CUPY: {
-            'float32': cp.float32,
-            'complex64': cp.complex64
-        }
-    }
+## 3. Phase 0 (Immediate): Validation Harness Overhaul
 
-    @staticmethod
-    def validate_array(array: Any, spec: ArraySpec) -> bool:
-        """Validate array matches specification"""
-        pass
+The existing validation scripts in `tests/validation/` are useful source material but are not robust pytest regression tests. They must be converted into a deterministic test suite.
 
-    @staticmethod
-    def get_optimal_type(array: Any, target_backend: BackendType) -> np.dtype:
-        """Determine optimal type for array in target backend"""
-        pass
-```
+### 3.1 Baseline Strategy
 
-#### 1.1.2 Array Container
-```python
-class GPUArrayContainer:
-    """Base class for GPU-aware array management with type preservation"""
-    def __init__(self, backend: BackendType = BackendType.CYRSOXS):
-        self.backend = backend
-        self._arrays: Dict[str, Any] = {}  # Lazy-loaded arrays
-        self._specs: Dict[str, ArraySpec] = {}  # Type specifications
-        self._validator = TypeValidator()
+Use current CyRSoXS **pybind workflow** as reference backend for ground truth generation.
 
-    def register_array(self, name: str, spec: ArraySpec) -> None:
-        """Register array specification for type checking"""
-        self._specs[name] = spec
+1. Pin trusted environment and versions.
+2. Generate curated golden reference artifacts for canonical morphologies.
+3. Store compact reference data + metadata (versions, parameters, shapes, dtype).
+4. Compare all future backend results against these references.
 
-    def set_array(self, name: str, array: Any) -> None:
-        """Set array with type validation
-        
-        - Preserves existing np.float32 arrays for CyRSoXS compatibility
-        - Allows direct use of cp.float32 arrays for GPU backends
-        - Validates type compatibility with backend
-        """
-        if name not in self._specs:
-            raise ValueError(f"Array {name} not registered")
+### 3.2 Canonical Cases
 
-        spec = self._specs[name]
-        if not self._validator.validate_array(array, spec):
-            if self.backend == BackendType.CYRSOXS:
-                # Ensure CyRSoXS gets numpy arrays
-                array = self._to_numpy(array, spec.dtype)
-            else:
-                # For GPU backends, convert only if necessary
-                optimal_type = self._validator.get_optimal_type(array, self.backend)
-                if array.dtype != optimal_type:
-                    array = self._convert_type(array, optimal_type)
+Minimum initial set:
 
-        self._arrays[name] = array
+1. Projected sphere case (analytical-informed behavior).
+2. Core-shell case (energy-dependent anisotropy behavior).
+3. Circle lattice case (peak-position behavior).
 
-    def get_array(self, name: str) -> Any:
-        """Get array in the correct type for current backend"""
-        if name not in self._arrays:
-            raise KeyError(f"Array {name} not found")
+### 3.2.1 Analytical Guardrail
 
-        array = self._arrays[name]
-        if self.backend == BackendType.CYRSOXS and not isinstance(array, np.ndarray):
-            return self._to_numpy(array, self._specs[name].dtype)
-        return array
+In addition to pybind golden references, maintain an analytical comparison track for the projected sphere form factor.
 
-    def _to_numpy(self, array: Any, dtype: np.dtype) -> np.ndarray:
-        """Convert array to numpy with minimal copying"""
-        if isinstance(array, np.ndarray) and array.dtype == dtype:
-            return array
-        if hasattr(array, 'get'):
-            return array.get().astype(dtype)
-        return np.asarray(array, dtype=dtype)
+Notes:
 
-    def _convert_type(self, array: Any, dtype: Any) -> Any:
-        """Convert array type with minimal copying"""
-        if array.dtype == dtype:
-            return array
-        return array.astype(dtype)
-```
+1. This is an approximate guardrail because discretization and voxel resolution affect agreement.
+2. Use high-resolution runs for stronger agreement checks.
+3. Initial implementation can be lightweight and expanded later as notebook-derived methodology is formalized.
 
-### 1.2 Extended Material/Morphology Classes
-- Extend existing Material class to inherit from GPUArrayContainer
-- Add GPU-specific properties for optical constants
-- Implement lazy loading for large arrays
-- Add backend selection (CuPy/PyTorch)
+### 3.3 Parity Metrics (not one global rule)
 
-### 1.3 Common Interface
-```python
-class GPUSimulationEngine(ABC):
-    @abstractmethod
-    def initialize(self, material: Material, morphology: Morphology) -> None:
-        """Initialize simulation with given material and morphology"""
-        pass
-    
-    @abstractmethod
-    def compute_scattering(self, energy_points: np.ndarray) -> np.ndarray:
-        """Compute scattering pattern for given energy points"""
-        pass
-```
+Do **not** use one global `%` tolerance across all pixels.
 
-## Phase 2: CuPy Implementation (4-5 weeks)
+Use layered acceptance:
 
-### 2.1 Core Components
+1. Objective scalar parity (if used in fitting): target <= 1% relative error.
+2. Radial `I(q)` parity with q-window masks and `rtol+atol`.
+3. Peak-position parity (absolute q tolerance).
+4. Optional image-level checks on masked finite support.
 
-#### 2.1.1 Data Flow Analysis
-Tracing the path from NRSS through CyRSoXS:
+High-q tails should be treated with separate tolerances because relative error is unstable there.
 
-1. NRSS Entry Point (`/homes/deand/dev/NRSS/src/NRSS/morphology.py`):
-   - Material class holds voxel-level data and optical constants
-   - Morphology class manages multiple materials and simulation config
-   - Data is passed to CyRSoXS via pybind11 interfaces
+Exact threshold tables are intentionally deferred until the test interview/specification pass.
 
-2. CyRSoXS Data Ingestion:
-   - `VoxelData.h`: Handles morphology data transfer
-   - `RefractiveIndex.h`: Manages optical constants
-   - `InputData.h`: Processes simulation parameters
+## 4. Phase 1: CuPy Backend (CyRSoXS-Mimic)
 
-3. GPU Computation Flow:
-   - `cudaMain.h`: Orchestrates GPU operations
-   - `cudaUtils.h`: Provides core GPU utilities
+Implement CuPy backend with algorithmic flow matching current CyRSoXS stages:
 
-4. Results Return:
-   - `ScatteringPattern.h`: Manages computed patterns
-   - Data returned to NRSS via numpy arrays
+1. Morphology ingestion.
+2. Polarization field computation.
+3. FFT/shift/DC handling.
+4. Scatter + Ewald projection.
+5. Rotation/accumulation.
+6. Result export.
 
-#### 2.1.2 Core Components Implementation
+Scope priority:
 
-1. Material Data Management:
-```python
-class CuPyMaterial:
-    def __init__(self, backend='cupy'):
-        self.backend = backend
-        self._gpu_arrays = {}
-        
-    def load_material_data(self, material: Material):
-        """Load NRSS Material data to GPU"""
-        # Reference: cyrsoxs/include/PyClass/VoxelData.h
-        pass
-        
-    def load_optical_constants(self, material: Material):
-        """Load optical constants to GPU"""
-        # Reference: cyrsoxs/include/PyClass/RefractiveIndex.h
-        pass
-```
+1. Calculation parity first.
+2. Performance second.
+3. Clean mathematical refactors later.
 
-2. FFT Operations:
-```python
-class CuPyFFTEngine:
-    def __init__(self):
-        self.fft_cache = {}
-        
-    def perform_fft(self, polarization):
-        """3D FFT implementation
-        Reference: cyrsoxs/include/cudaMain.h:performFFT"""
-        pass
-        
-    def perform_fft_shift(self, data, dims):
-        """FFT shift operation
-        Reference: cyrsoxs/include/cudaMain.h:performFFTShift"""
-        pass
-```
+### 4.1 Initial Feature Scope
 
-3. Polarization Computation:
-```python
-class PolarizationEngine:
-    def compute_polarization(self, material_constants, voxel_data):
-        """Compute polarization vectors
-        Reference: cyrsoxs/include/cudaMain.h:computePolarization"""
-        pass
-        
-    def compute_nt(self, material_constants, voxel_data):
-        """Compute Nt tensor
-        Reference: cyrsoxs/include/cudaMain.h:computeNt"""
-        pass
-```
+1. Euler workflows are the primary target (dominant real-world usage).
+2. Vector morphology input should remain accepted for backward compatibility.
+3. Phase 1 does not require immediate canonical tensor-internal conversion; that is a refactor phase concern.
+4. Phase 2 may unify internal representation (tensor/tensor-like) once parity is established.
 
-4. Scattering Computation:
-```python
-class ScatteringEngine:
-    def compute_scatter_3d(self, polarization_xyz, k_vector):
-        """Compute 3D scattering pattern
-        Reference: cyrsoxs/include/cudaMain.h:performScatter3DComputation"""
-        pass
-        
-    def perform_ewald_projection(self, scatter_data, k_magnitude):
-        """Project onto Ewald sphere
-        Reference: cyrsoxs/include/cudaMain.h:peformEwaldProjectionGPU"""
-        pass
-```
+### 4.2 Constitutive Scaffolding for Future Biaxial Support
 
-5. Complex Matrix Operations:
-```python
-class ComplexMatrixOps:
-    def compute_3x3_complex_multiplication(self, matrix):
-        """Complex matrix multiplication
-        Reference: cyrsoxs/include/cudaUtils.h:compute3X3ComplexMultiplication"""
-        pass
-        
-    def compute_matrix_vector(self, matrix, vector):
-        """Matrix-vector operations
-        Reference: cyrsoxs/include/cudaUtils.h:computeMatrixTimesVector"""
-        pass
-```
+Even before implementing biaxial physics, Phase 1 should introduce a constitutive interface boundary so future biaxial support can be implemented in alternate backends without redesigning the full pipeline.
 
-#### 2.1.3 Memory Management
+## 5. Input/Output Contract and Backward Compatibility
 
-1. GPU Memory Allocation:
-```python
-class GPUMemoryManager:
-    def __init__(self):
-        self.memory_pool = None  # CuPy memory pool
-        
-    def allocate_for_computation(self, voxel_dims, num_materials):
-        """Smart memory allocation based on problem size"""
-        pass
-        
-    def release_computation_memory(self):
-        """Clean up GPU memory"""
-        pass
-```
+Default behavior remains compatible with current NRSS usage.
 
-2. Stream Management:
-```python
-class StreamManager:
-    def __init__(self):
-        self.streams = {}
-        
-    def get_stream(self, operation_type):
-        """Get appropriate CUDA stream for operation"""
-        pass
-```
+Planned explicit controls:
 
-### 2.2 Memory Management
-1. Implement smart caching:
-   - Cache frequently used arrays
-   - Use pinned memory for faster transfers
-   - Implement memory pool for intermediate results
+1. `backend`: backend selector.
+2. `input_policy`: host/device handling policy.
+3. `output_policy`: `numpy`, backend-native device arrays, or objective-only.
 
-2. Stream Processing:
-   - Add CUDA stream support via CuPy
-   - Enable concurrent kernel execution
-   - Implement batch processing
+Result API should support conversion methods (`as_numpy`, backend-native access) and avoid implicit copies where possible.
 
-## Phase 3: PyTorch Implementation (4-5 weeks)
+## 6. Optional Dependency Model
 
-### 3.1 Core Implementation
-1. Tensor Operations:
-   - Implement complex tensor operations
-   - Port matrix calculations to PyTorch
-   - Use PyTorch's FFT modules
+Backend libraries must be optional, not mandatory.
 
-2. Automatic Differentiation:
-   - Leverage PyTorch's autograd
-   - Enable gradient computation for future extensions
-   - Implement custom backward passes
+1. Base install should not force all backend stacks.
+2. Use backend-specific optional extras (for example, `cupy`, `torch`, `jax`).
+3. Backend imports should be lazy and fail with actionable error messages.
 
-### 3.2 Optimization Features
-1. JIT Compilation:
-   - Use TorchScript for core computations
-   - Implement kernel fusion
-   - Optimize memory access patterns
+### 6.1 Packaging Considerations
 
-2. Multi-GPU Support:
-   - Add DistributedDataParallel support
-   - Implement model parallelism
-   - Add GPU selection logic
+1. Keep pip extras and conda packaging concerns decoupled in design docs.
+2. Anticipate CUDA-version fragility in conda-forge builds and avoid coupling core NRSS installability to any single GPU backend package.
+3. Ensure CPU-only/base usage remains installable and testable without GPU backend packages.
 
-## Phase 4: Integration and Validation (3-4 weeks)
+## 7. Multi-GPU Execution Model
 
-### 4.1 Engine Selection System
-```python
-class EngineSelector:
-    def __init__(self):
-        self.available_backends = self._detect_backends()
-        
-    def get_optimal_engine(self, problem_size, memory_requirement):
-        """Select best engine based on hardware and problem"""
-        pass
+Primary target workload is model comparison/fitting with expensive objective evaluation.
 
-    def fallback_strategy(self):
-        """Define fallback behavior if preferred engine fails"""
-        pass
-```
+Preferred pattern:
 
-### 4.2 Validation Suite
-1. Numerical Validation:
-   - Compare against CyRSoXS results
-   - Validate across different GPU architectures
-   - Test numerical stability
+1. Model-parallel scheduling (one model per GPU worker).
+2. Persistent worker processes (for allocation/plan reuse).
+3. Avoid dependence on CyRSoXS internal multi-GPU-energy splitting.
 
-2. Performance Benchmarks:
-   - Memory transfer benchmarks
-   - Computation time comparisons
-   - Memory usage analysis
+## 8. Memory and Precision Policy
 
-## Phase 5: Documentation and Testing (2-3 weeks)
+### 8.1 Memory policy
 
-### 5.1 Documentation
-1. API Documentation:
-   - Document new GPU interfaces
-   - Add migration guides
-   - Include performance optimization tips
+Optimize for **peak memory**, not just per-step slimness.
 
-2. Examples:
-   - Add Jupyter notebooks
-   - Create benchmark scripts
-   - Document common workflows
+1. Aggressively release/reuse transient buffers (especially polarization fields).
+2. Support chunked/streamed output to avoid large resident result tensors.
+3. Prefer objective-only output mode for fitting workflows.
+4. Use configurable memory guardrails; high utilization (including up to ~95% of 48 GB) is allowed when explicitly configured.
+5. Define chunking order defaults: chunk `energy` first, then `angle`, then `k`.
 
-### 5.2 Testing Infrastructure
-1. Unit Tests:
-   - Test GPU operations
-   - Validate numerical accuracy
-   - Test memory management
+### 8.2 Precision policy
 
-2. Integration Tests:
-   - End-to-end workflow tests
-   - Cross-backend validation
-   - Performance regression tests
+1. Core compute target: `float32` / `complex64`.
+2. 16-bit is acceptable for storage/compression of morphology fields.
+3. Do not run FFT/q-space pipeline in 16-bit for parity-sensitive runs.
+4. If using 16-bit storage, decode/cast inside consuming kernels.
 
-## Success Criteria
-1. Functionality:
-   - 100% feature parity with CyRSoXS
-   - Numerical accuracy within 1e-6
-   - Successful validation with experimental data
+## 9. Input Matrix and Determinism Requirements
 
-2. Performance:
-   - Equal or better performance than CyRSoXS
-   - 90% reduction in CPU-GPU transfers
-   - Efficient memory usage (<80% peak GPU memory)
+### 9.1 Input/Backend Parity Matrix
 
-## Timeline
-Total Duration: 15-20 weeks
-- Phase 1: 2-3 weeks
-- Phase 2: 4-5 weeks
-- Phase 3: 4-5 weeks
-- Phase 4: 3-4 weeks
-- Phase 5: 2-3 weeks
+Phase 0/1 tests must explicitly cover:
 
-## Dependencies
-- CuPy >= 12.0.0
-- PyTorch >= 2.0.0
-- NumPy >= 1.24.0
-- Python >= 3.8
-- CUDA Toolkit >= 11.0
+1. `numpy` inputs -> CyRSoXS reference backend.
+2. `cupy` inputs -> CyRSoXS reference backend (where applicable via conversion path).
+3. `numpy` inputs -> CuPy backend.
+4. `cupy` inputs -> CuPy backend.
 
-## Risk Mitigation
-1. Technical Risks:
-   - Memory limitations
-   - Numerical precision differences
-   - Performance bottlenecks
+### 9.2 Determinism
 
-2. Mitigation Strategies:
-   - Implement progressive loading
-   - Add extensive validation
-   - Profile-driven optimization
+1. If any test generation path uses randomness, all RNG seeds must be fixed and recorded.
+2. Test fixtures must include metadata sufficient to reproduce arrays and simulation settings.
+3. Determinism checks are required for golden generation pipelines.
 
-## Future Extensions
-1. Potential Features:
-   - Multi-GPU processing
-   - Distributed computing
-   - Additional backends (JAX)
+## 10. Development Workflow
+
+### 10.1 Source control
+
+1. Develop on feature branches in main repo.
+2. Keep commits small and frequent.
+3. Merge in milestone-sized PRs.
+
+### 10.2 Environments
+
+1. Keep stable scientific env untouched.
+2. Use dedicated dev env(s), install NRSS editable.
+3. Pin versions for parity work.
+
+### 10.3 Notebook + staging workflow
+
+Use notebooks for exploration/visualization in a staging workspace, but require script-based reproducibility for official baselines and regression assets.
+
+## 11. Runtime Observability
+
+Provide best-effort transfer/memory observability:
+
+1. Log explicit host<->device transfers in backend code paths.
+2. Add strict/diagnostic mode to warn when conversions are triggered by policy (`input_policy`, `output_policy`).
+3. Record peak memory and stage timings for parity/benchmark runs.
+
+Note: complete detection of all implicit third-party transfers may not be possible in every backend/runtime, but instrumentation should cover NRSS-controlled boundaries.
+
+## 12. Phased Plan
+
+1. Phase 0: robust pybind-based regression suite + golden datasets.
+2. Phase 1: CuPy mimic backend with parity gates.
+3. Phase 2: CuPy math cleanup/refactor (vector/tensor formulation) with unchanged tests.
+4. Phase 3: Additional backends (PyTorch/JAX) via shared backend contract.
+
+### 12.1 Independent Success Path
+
+If backend phases are delayed, halted, or descoped, completion of Phase 0 is still considered a successful modernization milestone for NRSS quality and release safety.
+
+## 13. Explicit Non-Goals (Initial Phases)
+
+1. Immediate biaxial implementation.
+2. Immediate full feature parity across every legacy mode before core parity path is stable.
+3. Optimization-first changes before parity harness exists.
+
+## 14. Golden Data Governance
+
+1. Golden data is generated now from trusted pybind reference runs.
+2. Golden datasets are regenerated only when a known scientific/physics bug is confirmed and corrected (or when intentionally changing physical behavior).
+3. Golden updates require explicit changelog notes and reviewer signoff.
+
+## 15. Open Items to Decide During Implementation
+
+1. Exact parity thresholds by metric and q-region.
+2. Initial feature subset for CuPy mimic backend.
+3. Golden dataset size/retention policy in repository.
+4. Automation strategy for GPU-required tests vs CPU-only smoke checks.
+5. Minimal acceptable performance tracking thresholds for release gating.
