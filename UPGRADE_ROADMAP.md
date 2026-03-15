@@ -18,23 +18,23 @@ These equations define the numerical target. Phase 1 (CuPy mimic) follows curren
 
 1. Far-field scattering intensity (detector projection of Fourier-space polarization):
 
-   `dσ/dΩ ∝ | k^2 (I - r_hat r_hat) · p(q) |^2`
+   dσ/dΩ is proportional to |k² (I - r_hat r_hat) · p(q)|².
 
 2. Fourier transform of induced polarization:
 
-   `p(q) = ∫ exp(i q·r) p(r) d^3r`
+   p(q) = ∫ exp(i q·r) p(r) d³r.
 
 3. Scattering vector magnitude from wavelength and scattering angle:
 
-   `|q| = (4π/λ) sin(θ/2)`
+   The magnitude of q is |q| = (4π/λ) sin(θ/2).
 
 4. Local induced polarization from susceptibility tensor and incident field:
 
-   `p(r) = ε0 χ(r) · Ê`
+   p(r) = ε₀ χ(r) · Ê.
 
 5. Uniaxial constitutive model (principal frame view):
 
-   `χ_local = diag(χ_ord, χ_ord, χ_ext)`
+   The local susceptibility is χ_local = diag(χ_ord, χ_ord, χ_ext).
 
 6. Lab-frame tensor is obtained by rotating local-frame tensor with morphology orientation (Euler in current workflows), then applying composition/volume-fraction weighting per material and energy.
 
@@ -65,7 +65,7 @@ GPU tuning opportunities:
 
 ### 3.2 Stage B: Orientation decode
 
-1. Convert Euler representation to orientation direction field `n(r)` using CyRSoXS-consistent convention.
+1. Convert Euler representation to orientation direction field n(r) using CyRSoXS-consistent convention.
 2. If vector input is supplied, skip decode and validate normalization/shape.
 
 Memory slimming:
@@ -85,7 +85,7 @@ GPU tuning opportunities:
 
 Memory slimming:
 
-1. Stream by energy/angle chunks; avoid materializing full `[energy, angle, xyz, components]` tensor at once.
+1. Stream by energy/angle chunks; avoid materializing a full [energy, angle, xyz, components] tensor at once.
 2. Free/recycle polarization component buffers immediately after FFT contribution is consumed.
 
 GPU tuning opportunities:
@@ -95,7 +95,7 @@ GPU tuning opportunities:
 
 ### 3.4 Stage D: FFT and reciprocal-space conversion
 
-1. Transform spatial polarization fields to `p(q)` via cuFFT-backed operations.
+1. Transform spatial polarization fields to p(q) via cuFFT-backed operations.
 2. Apply required shift/DC handling consistent with CyRSoXS.
 
 Memory slimming:
@@ -112,7 +112,7 @@ GPU tuning opportunities:
 
 ### 3.5 Stage E: Detector projection / Ewald handling
 
-1. Apply projection operator `(I - r_hat r_hat)` to `p(q)`.
+1. Apply the projection operator (I - r_hat r_hat) to p(q).
 2. Compute detector intensity contribution for each required geometry.
 
 Memory slimming:
@@ -132,7 +132,7 @@ GPU tuning opportunities:
 
 Memory slimming:
 
-1. Drop intermediate `p`-fields before final result tensor growth.
+1. Drop intermediate polarization fields before final result tensor growth.
 2. Prefer objective-only mode for fitting loops to minimize resident memory.
 3. Allow streaming writes/checkpointing for large result tensors.
 
@@ -145,21 +145,21 @@ GPU tuning opportunities:
 
 Define:
 
-1. `N = Nx * Ny * Nz` voxels.
-2. `M = detector_nx * detector_ny` detector pixels.
-3. `E = n_energies`, `A = n_angles`, `P = n_polarizations`.
+1. N = Nx * Ny * Nz voxels.
+2. M = detector_nx * detector_ny detector pixels.
+3. E = n_energies, A = n_angles, and P = n_polarizations.
 
 Approximate resident memory terms:
 
-1. Morphology storage: `B_morph ~ N * C_morph * b_morph` where `C_morph=5` for (`vfrac`, `S`, `theta`, `psi`, optional mask/material index representation).
-2. Polarization working set (worst-case): `B_p ~ N * C_p * b_p` with `C_p=3` vector components (real/complex by stage).
-3. FFT workspace: `B_fft ~ α * B_p` where `α` depends on cuFFT plan/shape.
-4. Result tensor (dominant in many workflows): `B_res ~ M * E * A * P * b_res`.
+1. Morphology storage: B_morph ~ N * C_morph * b_morph, where C_morph = 5 for (`vfrac`, `S`, `theta`, `psi`, plus optional mask/material-index representation).
+2. Polarization working set (worst-case): B_p ~ N * C_p * b_p, with C_p = 3 vector components (real/complex by stage).
+3. FFT workspace: B_fft ~ α * B_p, where α depends on cuFFT plan and shape.
+4. Result tensor (dominant in many workflows): B_res ~ M * E * A * P * b_res.
 
 Operational policy:
 
-1. Optimize for peak `(B_morph + B_p + B_fft + B_res)`.
-2. Release `B_p`/`B_fft` aggressively before `B_res` expansion.
+1. Optimize for the peak footprint, B_morph + B_p + B_fft + B_res.
+2. Release B_p and B_fft aggressively before B_res expansion.
 3. Introduce chunk order default: energy -> angle -> detector/q when needed.
 4. Permit high utilization (up to ~95% of 48 GB) only under explicit guardrail configuration.
 
@@ -189,16 +189,16 @@ Note on cast cost:
 1. Move to cleaner tensor-character internals after parity lock.
 2. Candidate uniaxial order tensor form:
 
-   `Q = S (n ⊗ n - I/3)`
+   Q = S (n ⊗ n - I/3).
 
 3. Candidate susceptibility decomposition:
 
-   `χ = χ_iso I + Δχ Q` (or equivalent project-specific parameterization).
+   χ = χ_iso I + Δχ Q (or equivalent project-specific parameterization).
 
 ### 6.3 Symmetric tensor storage compression
 
 1. Full 3x3 tensor has 9 entries, 6 unique for symmetric form.
-2. Store symmetric tensors in packed 6-component form (`xx, yy, zz, xy, xz, yz`) to reduce memory.
+2. Store symmetric tensors in packed 6-component form (xx, yy, zz, xy, xz, yz) to reduce memory.
 3. Reconstruct needed matrix elements in fused kernels instead of materializing dense 3x3 arrays globally.
 
 ### 6.4 Biaxial scaffold
@@ -237,7 +237,7 @@ Convert `tests/validation/` legacy scripts into robust pytest suites using pybin
 ### 8.4 Parity metrics (layered)
 
 1. Objective scalar parity (for fitting-style workflows): target <= 1% relative error.
-2. Radial `I(q)` parity with q-window-specific `rtol/atol`.
+2. Radial I(q) parity with q-window-specific rtol/atol.
 3. Peak-position parity with absolute q tolerance.
 4. Optional image-space checks on masked finite support.
 
