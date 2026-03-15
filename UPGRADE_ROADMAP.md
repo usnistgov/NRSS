@@ -1,226 +1,343 @@
-# NRSS Backend Modernization Spec (Superseding)
+# NRSS Backend Modernization Spec (Superseding + Handoff)
 
-This document supersedes prior roadmap content in this file.
+This document supersedes prior roadmap content in this file and is written to be resumable in a fresh context.
 
 ## 1. Goal
 
 Build a new NRSS backend architecture that:
 
-1. Preserves current trusted physics behavior (CyRSoXS parity first).
-2. Enables a CuPy-native simulation backend to avoid unnecessary GPU/CPU/GPU transfers.
+1. Preserves trusted physics behavior (CyRSoXS parity first).
+2. Enables a CuPy-native simulation path to avoid avoidable GPU->CPU->GPU transfers.
 3. Supports optional future backends (PyTorch, JAX) without hard dependencies.
-4. Improves robustness via deterministic, reproducible regression testing.
-5. Delivers durable value even if alternate backend implementation is paused or never completed.
+4. Improves robustness with deterministic, reproducible regression testing.
+5. Provides durable value even if alternate backend implementation is delayed (test hardening alone is a success milestone).
 
-## 2. Guiding Principles
+## 2. Physics Reference (Ground Truth Equations)
 
-1. Test-first: improve validation harness before backend rewrites.
-2. One unknown at a time: first CuPy backend should mimic existing CyRSoXS logic as closely as possible.
-3. Preserve backward compatibility by default.
-4. Keep scientific workflows practical (notebook-friendly), but ensure reproducibility through scripted pipelines.
-5. Treat test-harness modernization as a standalone product-quality objective, not only as a dependency for backend work.
+These equations define the numerical target. Phase 1 (CuPy mimic) follows current CyRSoXS implementation details and conventions.
 
-## 3. Phase 0 (Immediate): Validation Harness Overhaul
+1. Far-field scattering intensity (detector projection of Fourier-space polarization):
 
-The existing validation scripts in `tests/validation/` are useful source material but are not robust pytest regression tests. They must be converted into a deterministic test suite.
+   `dσ/dΩ ∝ | k^2 (I - r_hat r_hat) · p(q) |^2`
 
-### 3.1 Baseline Strategy
+2. Fourier transform of induced polarization:
 
-Use current CyRSoXS **pybind workflow** as reference backend for ground truth generation.
+   `p(q) = ∫ exp(i q·r) p(r) d^3r`
 
-1. Pin trusted environment and versions.
-2. Generate curated golden reference artifacts for canonical morphologies.
-3. Store compact reference data + metadata (versions, parameters, shapes, dtype).
-4. Compare all future backend results against these references.
+3. Scattering vector magnitude from wavelength and scattering angle:
 
-### 3.2 Canonical Cases
+   `|q| = (4π/λ) sin(θ/2)`
 
-Minimum initial set:
+4. Local induced polarization from susceptibility tensor and incident field:
 
-1. Projected sphere case (analytical-informed behavior).
-2. Core-shell case (energy-dependent anisotropy behavior).
-3. Circle lattice case (peak-position behavior).
+   `p(r) = ε0 χ(r) · Ê`
 
-### 3.2.1 Analytical Guardrail
+5. Uniaxial constitutive model (principal frame view):
 
-In addition to pybind golden references, maintain an analytical comparison track for the projected sphere form factor.
+   `χ_local = diag(χ_ord, χ_ord, χ_ext)`
+
+6. Lab-frame tensor is obtained by rotating local-frame tensor with morphology orientation (Euler in current workflows), then applying composition/volume-fraction weighting per material and energy.
 
 Notes:
 
-1. This is an approximate guardrail because discretization and voxel resolution affect agreement.
-2. Use high-resolution runs for stronger agreement checks.
-3. Initial implementation can be lightweight and expanded later as notebook-derived methodology is formalized.
+1. Exact Euler convention and rotation order must match CyRSoXS for parity.
+2. The CuPy mimic backend is required to copy CyRSoXS math order, not "improve" it initially.
 
-### 3.3 Parity Metrics (not one global rule)
+## 3. CyRSoXS-Mimic Computational Pipeline (Required Mapping)
 
-Do **not** use one global `%` tolerance across all pixels.
+This section is the implementation handoff for Phase 1.
 
-Use layered acceptance:
+### 3.1 Stage A: Input normalization and policy resolution
 
-1. Objective scalar parity (if used in fitting): target <= 1% relative error.
-2. Radial `I(q)` parity with q-window masks and `rtol+atol`.
-3. Peak-position parity (absolute q tolerance).
-4. Optional image-level checks on masked finite support.
+1. Accept morphology fields (`vfrac`, `S`, `theta`, `psi`; optionally vector inputs).
+2. Resolve backend (`cyrsoxs`, `cupy`, future backends), `input_policy`, `output_policy`.
+3. Normalize dtypes and device placement.
 
-High-q tails should be treated with separate tolerances because relative error is unstable there.
+Memory slimming:
 
-Exact threshold tables are intentionally deferred until the test interview/specification pass.
+1. Do not duplicate morphology arrays unless policy requires copy.
+2. Keep one authoritative device-resident view for each field.
 
-## 4. Phase 1: CuPy Backend (CyRSoXS-Mimic)
+GPU tuning opportunities:
 
-Implement CuPy backend with algorithmic flow matching current CyRSoXS stages:
+1. Use zero-copy where possible (`__cuda_array_interface__`, DLPack boundaries).
+2. Fuse trivial cast/scale ops into downstream kernels.
 
-1. Morphology ingestion.
-2. Polarization field computation.
-3. FFT/shift/DC handling.
-4. Scatter + Ewald projection.
-5. Rotation/accumulation.
-6. Result export.
+### 3.2 Stage B: Orientation decode
 
-Scope priority:
+1. Convert Euler representation to orientation direction field `n(r)` using CyRSoXS-consistent convention.
+2. If vector input is supplied, skip decode and validate normalization/shape.
 
-1. Calculation parity first.
-2. Performance second.
-3. Clean mathematical refactors later.
+Memory slimming:
 
-### 4.1 Initial Feature Scope
+1. Avoid persisting both Euler-derived vectors and equivalent expanded tensors unless needed.
+2. Reuse scratch buffers across energies/angles.
 
-1. Euler workflows are the primary target (dominant real-world usage).
-2. Vector morphology input should remain accepted for backward compatibility.
-3. Phase 1 does not require immediate canonical tensor-internal conversion; that is a refactor phase concern.
-4. Phase 2 may unify internal representation (tensor/tensor-like) once parity is established.
+GPU tuning opportunities:
 
-### 4.2 Constitutive Scaffolding for Future Biaxial Support
+1. Use fused elementwise kernels for trig + normalization.
+2. Keep decode on device; avoid host round-trips for validation.
 
-Even before implementing biaxial physics, Phase 1 should introduce a constitutive interface boundary so future biaxial support can be implemented in alternate backends without redesigning the full pipeline.
+### 3.3 Stage C: Local polarization field composition
 
-## 5. Input/Output Contract and Backward Compatibility
+1. Build local susceptibility/polarization components from morphology + optical constants + incident polarization.
+2. Produce component fields consumed by FFT stage (current logic mimic first).
 
-Default behavior remains compatible with current NRSS usage.
+Memory slimming:
 
-Planned explicit controls:
+1. Stream by energy/angle chunks; avoid materializing full `[energy, angle, xyz, components]` tensor at once.
+2. Free/recycle polarization component buffers immediately after FFT contribution is consumed.
 
-1. `backend`: backend selector.
-2. `input_policy`: host/device handling policy.
-3. `output_policy`: `numpy`, backend-native device arrays, or objective-only.
+GPU tuning opportunities:
 
-Result API should support conversion methods (`as_numpy`, backend-native access) and avoid implicit copies where possible.
+1. Fuse composition math in custom kernels to reduce global-memory traffic.
+2. Prefer SoA-style component layout when it improves coalesced reads in subsequent FFT prep.
 
-## 6. Optional Dependency Model
+### 3.4 Stage D: FFT and reciprocal-space conversion
 
-Backend libraries must be optional, not mandatory.
+1. Transform spatial polarization fields to `p(q)` via cuFFT-backed operations.
+2. Apply required shift/DC handling consistent with CyRSoXS.
 
-1. Base install should not force all backend stacks.
-2. Use backend-specific optional extras (for example, `cupy`, `torch`, `jax`).
-3. Backend imports should be lazy and fail with actionable error messages.
+Memory slimming:
 
-### 6.1 Packaging Considerations
+1. Reuse cuFFT work buffers and plans.
+2. Perform in-place transforms where safe.
+3. Do not retain pre-FFT buffers once transformed data is consumed.
 
-1. Keep pip extras and conda packaging concerns decoupled in design docs.
-2. Anticipate CUDA-version fragility in conda-forge builds and avoid coupling core NRSS installability to any single GPU backend package.
-3. Ensure CPU-only/base usage remains installable and testable without GPU backend packages.
+GPU tuning opportunities:
 
-## 7. Multi-GPU Execution Model
+1. Plan caching and batched FFT shapes.
+2. Keep FFT input/working tensors in `float32/complex64` for parity-sensitive runs.
+3. Optimize layout/strides to avoid internal transposes.
 
-Primary target workload is model comparison/fitting with expensive objective evaluation.
+### 3.5 Stage E: Detector projection / Ewald handling
 
-Preferred pattern:
+1. Apply projection operator `(I - r_hat r_hat)` to `p(q)`.
+2. Compute detector intensity contribution for each required geometry.
 
-1. Model-parallel scheduling (one model per GPU worker).
-2. Persistent worker processes (for allocation/plan reuse).
-3. Avoid dependence on CyRSoXS internal multi-GPU-energy splitting.
+Memory slimming:
 
-## 8. Memory and Precision Policy
+1. Accumulate directly into output/objective buffers; avoid temporary full-size detector stacks when not required.
+2. Chunk detector or q-regions if peak memory is dominated by result tensors.
 
-### 8.1 Memory policy
+GPU tuning opportunities:
 
-Optimize for **peak memory**, not just per-step slimness.
+1. Kernel fusion for projection + norm-squared accumulation.
+2. Use read-only cached loads for geometry tables reused across voxels.
 
-1. Aggressively release/reuse transient buffers (especially polarization fields).
-2. Support chunked/streamed output to avoid large resident result tensors.
-3. Prefer objective-only output mode for fitting workflows.
-4. Use configurable memory guardrails; high utilization (including up to ~95% of 48 GB) is allowed when explicitly configured.
-5. Define chunking order defaults: chunk `energy` first, then `angle`, then `k`.
+### 3.6 Stage F: Rotation, angle accumulation, and export
 
-### 8.2 Precision policy
+1. Rotate/accumulate across sample angles and energies per current semantics.
+2. Emit output by policy (`numpy`, backend-native, objective-only).
 
-1. Core compute target: `float32` / `complex64`.
-2. 16-bit is acceptable for storage/compression of morphology fields.
-3. Do not run FFT/q-space pipeline in 16-bit for parity-sensitive runs.
-4. If using 16-bit storage, decode/cast inside consuming kernels.
+Memory slimming:
 
-## 9. Input Matrix and Determinism Requirements
+1. Drop intermediate `p`-fields before final result tensor growth.
+2. Prefer objective-only mode for fitting loops to minimize resident memory.
+3. Allow streaming writes/checkpointing for large result tensors.
 
-### 9.1 Input/Backend Parity Matrix
+GPU tuning opportunities:
 
-Phase 0/1 tests must explicitly cover:
+1. Keep reduction operations on device.
+2. Use backend-native reductions and avoid host synchronization inside hot loops.
 
-1. `numpy` inputs -> CyRSoXS reference backend.
-2. `cupy` inputs -> CyRSoXS reference backend (where applicable via conversion path).
-3. `numpy` inputs -> CuPy backend.
-4. `cupy` inputs -> CuPy backend.
+## 4. Peak Memory Model (Planning Equations)
 
-### 9.2 Determinism
+Define:
 
-1. If any test generation path uses randomness, all RNG seeds must be fixed and recorded.
-2. Test fixtures must include metadata sufficient to reproduce arrays and simulation settings.
-3. Determinism checks are required for golden generation pipelines.
+1. `N = Nx * Ny * Nz` voxels.
+2. `M = detector_nx * detector_ny` detector pixels.
+3. `E = n_energies`, `A = n_angles`, `P = n_polarizations`.
 
-## 10. Development Workflow
+Approximate resident memory terms:
 
-### 10.1 Source control
+1. Morphology storage: `B_morph ~ N * C_morph * b_morph` where `C_morph=5` for (`vfrac`, `S`, `theta`, `psi`, optional mask/material index representation).
+2. Polarization working set (worst-case): `B_p ~ N * C_p * b_p` with `C_p=3` vector components (real/complex by stage).
+3. FFT workspace: `B_fft ~ α * B_p` where `α` depends on cuFFT plan/shape.
+4. Result tensor (dominant in many workflows): `B_res ~ M * E * A * P * b_res`.
 
-1. Develop on feature branches in main repo.
+Operational policy:
+
+1. Optimize for peak `(B_morph + B_p + B_fft + B_res)`.
+2. Release `B_p`/`B_fft` aggressively before `B_res` expansion.
+3. Introduce chunk order default: energy -> angle -> detector/q when needed.
+4. Permit high utilization (up to ~95% of 48 GB) only under explicit guardrail configuration.
+
+## 5. Precision Policy
+
+1. Default compute precision: `float32` / `complex64`.
+2. Morphology storage in `float16`/`bfloat16` is allowed as a compression path.
+3. Decode/cast should occur in device kernels near use sites.
+4. FFT/q-space and projection math remain `float32/complex64` for parity-sensitive runs.
+5. Avoid full pipeline compute in 16-bit when parity is required (high-q deviations known risk).
+
+Note on cast cost:
+
+1. GPU decode/cast is typically memory-bandwidth-bound and usually cheap relative to 3D FFT cost.
+2. Cast overhead still needs profiling in end-to-end runs, but it is generally not the dominant term.
+
+## 6. Representation Roadmap (Euler, Vector, Tensor)
+
+### 6.1 Phase 1 behavior
+
+1. Keep Euler-first compatibility (dominant workflows).
+2. Accept vector input for backward compatibility.
+3. Internals mimic CyRSoXS logic first.
+
+### 6.2 Phase 2 refactor target
+
+1. Move to cleaner tensor-character internals after parity lock.
+2. Candidate uniaxial order tensor form:
+
+   `Q = S (n ⊗ n - I/3)`
+
+3. Candidate susceptibility decomposition:
+
+   `χ = χ_iso I + Δχ Q` (or equivalent project-specific parameterization).
+
+### 6.3 Symmetric tensor storage compression
+
+1. Full 3x3 tensor has 9 entries, 6 unique for symmetric form.
+2. Store symmetric tensors in packed 6-component form (`xx, yy, zz, xy, xz, yz`) to reduce memory.
+3. Reconstruct needed matrix elements in fused kernels instead of materializing dense 3x3 arrays globally.
+
+### 6.4 Biaxial scaffold
+
+1. Add constitutive interface now so biaxial models can be added without backend redesign.
+2. Biaxial may initially exist only in alternate backends if CyRSoXS parity path remains uniaxial.
+
+## 7. Backend Strategy and Ranking
+
+Recommended implementation order:
+
+1. CuPy: best parity path with current CUDA/cuFFT workflow and minimal conceptual translation.
+2. PyTorch: good GPU kernel ecosystem and deployment maturity for later integration.
+3. JAX: strong for compiled/fused workflows, but higher complexity for this parity-first migration.
+
+TensorFlow is deprioritized for this project.
+
+## 8. Test-First Program (Highest Priority)
+
+### 8.1 Immediate objective
+
+Convert `tests/validation/` legacy scripts into robust pytest suites using pybind CyRSoXS execution where applicable (no CLI serialization bottleneck).
+
+### 8.2 Canonical initial cases
+
+1. Projected sphere.
+2. Core-shell.
+3. Circle lattice.
+
+### 8.3 Required test qualities
+
+1. Deterministic fixtures and fixed RNG seeds if randomness appears anywhere.
+2. Explicit metadata capture (versions, geometry, dtype, parameter hashes, backend flags).
+3. Machine-readable golden references generated from trusted pybind runs.
+
+### 8.4 Parity metrics (layered)
+
+1. Objective scalar parity (for fitting-style workflows): target <= 1% relative error.
+2. Radial `I(q)` parity with q-window-specific `rtol/atol`.
+3. Peak-position parity with absolute q tolerance.
+4. Optional image-space checks on masked finite support.
+
+Initial threshold table is intentionally provisional; calibrate from empirical baseline variance before final gating.
+
+### 8.5 Golden data governance
+
+1. Generate now from trusted current reference.
+2. Regenerate only when confirmed physics/scientific bug fixes intentionally change expected output.
+3. Require changelog note + reviewer signoff for any golden update.
+
+### 8.6 Analytical guardrail track (projected sphere)
+
+1. Maintain a separate analytical comparison track for sphere form factor behavior.
+2. Treat this as a guardrail rather than strict equality because voxel discretization and finite resolution perturb high-q behavior.
+3. Use higher-resolution runs to tighten agreement when generating/validating this track.
+4. Capture notebook methodology and then codify it into scriptable test artifacts.
+
+## 9. Input/Output Contract and Compatibility
+
+1. `backend`: selects execution backend.
+2. `input_policy`: governs host/device acceptance and conversion behavior.
+3. `output_policy`: `numpy`, backend-native arrays, or objective-only.
+
+Contract requirements:
+
+1. Preserve current default behavior for existing users.
+2. Provide explicit conversion methods (`as_numpy`, backend-native accessors).
+3. Support GPU-resident objective returns for fitting workflows to avoid forced host copies.
+4. Avoid implicit copies; when unavoidable, emit diagnostics in strict mode.
+
+## 10. Optional Dependency and Packaging Plan
+
+1. Base NRSS install must not force GPU backend stacks.
+2. Use extras for backend deps (for example `nrss[cupy]`, `nrss[torch]`, `nrss[jax]`).
+3. Implement lazy backend imports with actionable error messages.
+4. Keep CPU-only/base path installable and testable independently.
+5. Treat conda CUDA compatibility fragility as an external risk; do not tie core installability to one GPU package line.
+
+## 11. Multi-GPU Execution Model
+
+Primary production pattern for this project:
+
+1. Model-parallel execution (one model per GPU worker), typically via Ray.
+2. Persistent workers for memory/plan reuse and lower startup overhead.
+3. Keep internal energy-parallel multi-GPU optional and non-default.
+
+Rationale:
+
+1. Matches current objective-evaluation workload.
+2. Avoids known instability concerns in CyRSoXS internal multi-GPU energy splitting.
+
+## 12. Runtime Observability and Safety Rails
+
+1. Log explicit host<->device transfers at NRSS-controlled boundaries.
+2. Add strict mode warnings for policy-driven conversions.
+3. Record per-stage timings and peak memory for benchmark/parity runs.
+4. Best-effort only for third-party implicit copies; complete interception may not be possible.
+
+## 13. Development Workflow
+
+### 13.1 Source control
+
+1. Use feature branches.
 2. Keep commits small and frequent.
-3. Merge in milestone-sized PRs.
+3. Merge milestone-sized PRs.
 
-### 10.2 Environments
+### 13.2 Environment practice
 
-1. Keep stable scientific env untouched.
-2. Use dedicated dev env(s), install NRSS editable.
-3. Pin versions for parity work.
+1. Keep stable scientific environment untouched.
+2. Use dedicated dev environment(s) with editable NRSS install.
+3. Pin versions during parity development.
 
-### 10.3 Notebook + staging workflow
+### 13.3 Notebook and staging workflow
 
-Use notebooks for exploration/visualization in a staging workspace, but require script-based reproducibility for official baselines and regression assets.
+1. Use notebooks for exploratory visualization and diagnostics.
+2. Keep an external staging workspace for baseline generation and comparison artifacts.
+3. Require script-based reproducibility for official golden generation and CI-bound regression assets.
 
-## 11. Runtime Observability
+## 14. Phased Delivery Plan
 
-Provide best-effort transfer/memory observability:
+1. Phase 0: Test hardening + pybind golden baselines + deterministic harness.
+2. Phase 1: CuPy backend that mimics CyRSoXS algorithmic flow.
+3. Phase 2: Internal math cleanup (tensor-character refactor) while preserving parity tests.
+4. Phase 3: Additional backends behind shared backend contract.
 
-1. Log explicit host<->device transfers in backend code paths.
-2. Add strict/diagnostic mode to warn when conversions are triggered by policy (`input_policy`, `output_policy`).
-3. Record peak memory and stage timings for parity/benchmark runs.
+Independent success criterion:
 
-Note: complete detection of all implicit third-party transfers may not be possible in every backend/runtime, but instrumentation should cover NRSS-controlled boundaries.
+1. Completion of Phase 0 is a meaningful modernization outcome even if backend phases are delayed.
 
-## 12. Phased Plan
+## 15. Explicit Non-Goals (Initial Phases)
 
-1. Phase 0: robust pybind-based regression suite + golden datasets.
-2. Phase 1: CuPy mimic backend with parity gates.
-3. Phase 2: CuPy math cleanup/refactor (vector/tensor formulation) with unchanged tests.
-4. Phase 3: Additional backends (PyTorch/JAX) via shared backend contract.
+1. Immediate production biaxial feature release.
+2. Optimization-first changes before parity harness exists.
+3. Simultaneous full parity for every legacy execution mode on day one.
 
-### 12.1 Independent Success Path
+## 16. Open Decisions for Follow-Up Interview
 
-If backend phases are delayed, halted, or descoped, completion of Phase 0 is still considered a successful modernization milestone for NRSS quality and release safety.
-
-## 13. Explicit Non-Goals (Initial Phases)
-
-1. Immediate biaxial implementation.
-2. Immediate full feature parity across every legacy mode before core parity path is stable.
-3. Optimization-first changes before parity harness exists.
-
-## 14. Golden Data Governance
-
-1. Golden data is generated now from trusted pybind reference runs.
-2. Golden datasets are regenerated only when a known scientific/physics bug is confirmed and corrected (or when intentionally changing physical behavior).
-3. Golden updates require explicit changelog notes and reviewer signoff.
-
-## 15. Open Items to Decide During Implementation
-
-1. Exact parity thresholds by metric and q-region.
-2. Initial feature subset for CuPy mimic backend.
-3. Golden dataset size/retention policy in repository.
-4. Automation strategy for GPU-required tests vs CPU-only smoke checks.
-5. Minimal acceptable performance tracking thresholds for release gating.
+1. Final parity threshold table by metric and q-region.
+2. Golden dataset size/retention strategy in repository vs external artifacts.
+3. GPU CI strategy and minimum gating matrix.
+4. Release performance gates (what is measured and acceptable drift).
+5. Detailed objective-function API and on-device return contract for fitting pipelines.
