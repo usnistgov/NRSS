@@ -1,0 +1,88 @@
+name: NRSS CI Smoke
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "environment.yml"
+      - ".github/workflows/ci-smoke.yml"
+  push:
+    branches:
+      - main
+      - "test/**"
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "environment.yml"
+      - ".github/workflows/ci-smoke.yml"
+  workflow_dispatch:
+    inputs: {}
+
+concurrency:
+  group: smoke-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-cpu:
+    name: Smoke (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Conda Environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: nrss
+          auto-activate-base: false
+          environment-file: environment.yml
+          miniforge-variant: Miniforge3
+
+      - name: Install NRSS + Test Dependencies
+        shell: bash -el {0}
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+
+      - name: Run CPU Smoke Tests
+        shell: bash -el {0}
+        run: python -m pytest tests/smoke -m "not gpu" -v
+
+  # smoke-gpu:
+  #   name: Smoke (GPU)
+  #   # For GitHub-hosted GPU, use the larger-runner default label (runner name).
+  #   # Set repository/org variable NRSS_GPU_RUNNER to that runner label.
+  #   if: ${{ vars.NRSS_GPU_RUNNER != '' }}
+  #   runs-on: ${{ vars.NRSS_GPU_RUNNER }}
+  #   timeout-minutes: 45
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Setup Conda Environment
+  #       uses: conda-incubator/setup-miniconda@v3
+  #       with:
+  #         activate-environment: nrss
+  #         auto-activate-base: false
+  #         environment-file: environment.yml
+  #         miniforge-variant: Miniforge3
+  #
+  #     - name: Install NRSS + Test Dependencies
+  #       shell: bash -el {0}
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         python -m pip install -e . pytest
+  #
+  #     - name: Verify GPU Visibility
+  #       shell: bash -el {0}
+  #       run: nvidia-smi -L
+  #
+  #     - name: Run GPU Smoke Tests
+  #       shell: bash -el {0}
+  #       run: python -m pytest tests/smoke -m "gpu" -v
