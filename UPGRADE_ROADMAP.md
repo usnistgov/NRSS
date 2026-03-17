@@ -256,6 +256,26 @@ Initial threshold table is intentionally provisional; calibrate from empirical b
 3. Use higher-resolution runs to tighten agreement when generating/validating this track.
 4. Capture notebook methodology and then codify it into scriptable test artifacts.
 
+### 8.7 Implemented smoke harness (March 17, 2026)
+
+1. Added `tests/smoke/test_smoke.py` for deterministic environment/import checks, morphology validation checks, pybind runtime coverage, PyHyperScattering integration, CLI-vs-pybind parity smoke, and GPU config/E-angle semantics smoke.
+2. Added `scripts/run_local_test_report.sh` to standardize local execution and emit timestamped metadata/log/summary artifacts under `test-reports/`.
+3. Added pytest marker declarations in `pyproject.toml` for `smoke`, `cpu`, `gpu`, `slow`, and `phase0`.
+
+Latest run evidence:
+
+1. Command: `scripts/run_local_test_report.sh`
+2. Timestamp (UTC): `20260317T170618Z`
+3. Result: `3/3` steps passed
+4. CPU smoke: `12 passed, 10 deselected`
+5. GPU smoke: `10 passed, 12 deselected` (with one non-failing upstream `PyHyperScattering` deprecation warning)
+
+### 8.8 Remaining Phase 0 test-hardening gaps
+
+1. Complete migration of legacy `tests/validation/` workflows to fixture-driven pytest modules.
+2. Establish golden/analytical parity artifacts with explicitly versioned tolerances.
+3. Add CI gating policy for CPU smoke and GPU smoke/parity lanes.
+
 ## 9. Input/Output Contract and Compatibility
 
 1. `backend`: selects execution backend.

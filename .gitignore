@@ -25,3 +25,4 @@ NRSS/.ipynb_checkpoints
 *.DS_store
 *pickles*
 *videos*
+test-reports/

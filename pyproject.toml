@@ -40,3 +40,12 @@ where = ["src"]
 write_to = "src/NRSS/_version.py"
 version_scheme = "no-guess-dev"
 local_scheme = "no-local-version"
+
+[tool.pytest.ini_options]
+markers = [
+    "smoke: fast smoke tests for environment and basic runtime sanity",
+    "cpu: CPU-only tests",
+    "gpu: tests that require GPU hardware or GPU-only dependencies",
+    "slow: long-running tests",
+    "phase0: phase-0 hardening tests",
+]
