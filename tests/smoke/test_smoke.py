@@ -40,7 +40,7 @@ def _import_cyrsoxs_required():
         except Exception as exc:  # pragma: no cover - exercised when import fails
             errors.append(f"{name}: {exc.__class__.__name__}({exc})")
     raise AssertionError(
-        "CyRSoXS import failed for both 'CyRSoXS' and 'cyrsoxs'. "
+        "CyRSoXS import failed for listed attempts below. "
         f"Attempts: {'; '.join(errors)}"
     )
 
