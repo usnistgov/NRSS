@@ -8,19 +8,33 @@ Usage:
   scripts/run_local_test_report.sh [options]
 
 Options:
-  -e, --env NAME            Conda environment name (default: $NRSS_TEST_ENV or mar2025)
+  -e, --env NAME            Conda environment name (default: $NRSS_TEST_ENV or nrss-dev)
   -r, --report-root PATH    Report root directory (default: test-reports)
   --cyrsoxs-cli-dir PATH    Prepend PATH to CLI lookup inside each conda-run step.
   --cyrsoxs-pybind-dir PATH Prepend PATH to PYTHONPATH inside each conda-run step.
   --cmd "COMMAND"           Add a test command to run in conda env.
-                            Can be passed multiple times.
-                            If not provided, default smoke tests (CPU+GPU) are executed.
+                            Can be passed multiple times. Custom commands run after the
+                            default suite unless --skip-defaults is set.
+  --skip-defaults           Skip the standard report suite and run only explicitly
+                            provided --cmd commands.
+  --repeat N                Repeat each explicit --cmd command N times (default: 1).
   --stop-on-fail            Stop after first failing step.
   -h, --help                Show this help.
 
 Environment overrides:
   NRSS_TEST_CYRSOXS_CLI_DIR     Same as --cyrsoxs-cli-dir.
   NRSS_TEST_CYRSOXS_PYBIND_DIR  Same as --cyrsoxs-pybind-dir.
+  NRSS_TEST_ENV                 Same as --env.
+
+Behavior:
+  By default, the standard local report runs four steps:
+    1. Environment Snapshot
+    2. Smoke Tests (CPU Fast)
+    3. Smoke Tests (GPU)
+    4. Physics Validation Tests
+  Any explicit --cmd commands are appended afterward.
+  Use --skip-defaults to run only the explicit commands.
+  Use --repeat N to repeat each explicit command N times.
 
 Examples:
   scripts/run_local_test_report.sh
@@ -32,14 +46,18 @@ Examples:
     NRSS_TEST_CYRSOXS_PYBIND_DIR=/path/to/cyrsoxs/build-pybind \\
     scripts/run_local_test_report.sh -e nrss-dev
   scripts/run_local_test_report.sh --cmd "python -m pytest -m 'not slow' -q"
+  scripts/run_local_test_report.sh --skip-defaults --repeat 10 \\
+    --cmd "python -m pytest tests/validation/test_analytical_2d_disk_form_factor.py -q"
   scripts/run_local_test_report.sh --cmd "python -m pytest tests/smoke -m gpu -q"
   scripts/run_local_test_report.sh -e mar2025 --cmd "python -m pytest tests/validation -q"
 EOF
 }
 
-ENV_NAME="${NRSS_TEST_ENV:-mar2025}"
+ENV_NAME="${NRSS_TEST_ENV:-nrss-dev}"
 REPORT_ROOT="test-reports"
 STOP_ON_FAIL=0
+SKIP_DEFAULTS=0
+CUSTOM_REPEAT_COUNT=1
 CYRSOXS_CLI_DIR="${NRSS_TEST_CYRSOXS_CLI_DIR:-${NRSS_TEST_PATH_PREPEND:-}}"
 CYRSOXS_PYBIND_DIR="${NRSS_TEST_CYRSOXS_PYBIND_DIR:-${NRSS_TEST_PYTHONPATH_PREPEND:-}}"
 declare -a TEST_CMDS=()
@@ -66,6 +84,14 @@ while [[ $# -gt 0 ]]; do
       TEST_CMDS+=("${2:-}")
       shift 2
       ;;
+    --skip-defaults)
+      SKIP_DEFAULTS=1
+      shift
+      ;;
+    --repeat)
+      CUSTOM_REPEAT_COUNT="${2:-}"
+      shift 2
+      ;;
     --stop-on-fail)
       STOP_ON_FAIL=1
       shift
@@ -81,6 +107,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if ! [[ "$CUSTOM_REPEAT_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "--repeat expects a positive integer, got: ${CUSTOM_REPEAT_COUNT}" >&2
+  exit 2
+fi
 
 if ! command -v conda >/dev/null 2>&1; then
   echo "conda is required but not found in PATH." >&2
@@ -153,6 +184,8 @@ write_metadata() {
     echo "git_worktree=$git_dirty"
     echo "conda_env=$ENV_NAME"
     echo "cuda_visible_devices=$visible_gpus"
+    echo "skip_defaults=$SKIP_DEFAULTS"
+    echo "custom_repeat_count=$CUSTOM_REPEAT_COUNT"
     echo "cyrsoxs_cli_dir=$CYRSOXS_CLI_DIR"
     echo "cyrsoxs_pybind_dir=$CYRSOXS_PYBIND_DIR"
     echo "cyrsoxs_resolution_tsv=$CYRSOXS_RESOLUTION_TSV"
@@ -348,6 +381,8 @@ generate_summary() {
     echo "- Commit: $git_sha"
     echo "- Conda env: $ENV_NAME"
     echo "- Report dir: $REPORT_DIR"
+    echo "- Skip defaults: $SKIP_DEFAULTS"
+    echo "- Custom repeat count: $CUSTOM_REPEAT_COUNT"
     echo "- CyRSoXS CLI override: ${CYRSOXS_CLI_DIR:-"(env default)"}"
     echo "- CyRSoXS pybind override: ${CYRSOXS_PYBIND_DIR:-"(env default)"}"
     echo "- Steps passed: $pass_count/$total"
@@ -516,46 +551,56 @@ ANY_FAIL=0
 
 ENV_SNAPSHOT_CMD=$'python - <<\'PY\'\nimport importlib\nimport platform\nimport sys\n\nmodules = [\n    "NRSS", "pytest", "numpy", "scipy", "pandas", "h5py", "xarray", "cupy", "CyRSoXS", "cyrsoxs"\n]\n\nprint("python:", sys.version.replace("\\n", " "))\nprint("platform:", platform.platform())\nfor name in modules:\n    try:\n        mod = importlib.import_module(name)\n        ver = getattr(mod, "__version__", "unknown")\n        print(f"{name}: {ver}")\n    except Exception as exc:\n        print(f"{name}: NOT_AVAILABLE ({exc.__class__.__name__})")\nPY'
 
-run_conda_step "Environment Snapshot" "$ENV_SNAPSHOT_CMD" "$STEP" || ANY_FAIL=1
-if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
-  generate_summary
-  cat "$SUMMARY_MD"
-  exit 1
-fi
-STEP=$((STEP + 1))
+if [[ $SKIP_DEFAULTS -eq 0 ]]; then
+  run_conda_step "Environment Snapshot" "$ENV_SNAPSHOT_CMD" "$STEP" || ANY_FAIL=1
+  if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
+    generate_summary
+    cat "$SUMMARY_MD"
+    exit 1
+  fi
+  STEP=$((STEP + 1))
 
-run_conda_step "Smoke Tests (CPU Fast)" "python -m pytest tests/smoke -m 'not gpu' -v" "$STEP" || ANY_FAIL=1
-if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
-  generate_summary
-  cat "$SUMMARY_MD"
-  exit 1
-fi
-STEP=$((STEP + 1))
+  run_conda_step "Smoke Tests (CPU Fast)" "python -m pytest tests/smoke -m 'not gpu' -v" "$STEP" || ANY_FAIL=1
+  if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
+    generate_summary
+    cat "$SUMMARY_MD"
+    exit 1
+  fi
+  STEP=$((STEP + 1))
 
-run_conda_step "Smoke Tests (GPU)" "python -m pytest tests/smoke -m gpu -v" "$STEP" || ANY_FAIL=1
-if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
-  generate_summary
-  cat "$SUMMARY_MD"
-  exit 1
-fi
-STEP=$((STEP + 1))
+  run_conda_step "Smoke Tests (GPU)" "python -m pytest tests/smoke -m gpu -v" "$STEP" || ANY_FAIL=1
+  if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
+    generate_summary
+    cat "$SUMMARY_MD"
+    exit 1
+  fi
+  STEP=$((STEP + 1))
 
-run_conda_step "Physics Validation Tests" "python -m pytest tests/validation -m physics_validation -v" "$STEP" || ANY_FAIL=1
-if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
-  generate_summary
-  cat "$SUMMARY_MD"
-  exit 1
+  run_conda_step "Physics Validation Tests" "python -m pytest tests/validation -m physics_validation -v" "$STEP" || ANY_FAIL=1
+  if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
+    generate_summary
+    cat "$SUMMARY_MD"
+    exit 1
+  fi
+  STEP=$((STEP + 1))
 fi
-STEP=$((STEP + 1))
 
 STEP_NAME_INDEX=1
 for cmd in "${TEST_CMDS[@]}"; do
-  run_conda_step "Test Command ${STEP_NAME_INDEX}" "$cmd" "$STEP" || ANY_FAIL=1
-  if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
-    break
-  fi
+  repeat_index=1
+  while [[ $repeat_index -le $CUSTOM_REPEAT_COUNT ]]; do
+    step_name="Test Command ${STEP_NAME_INDEX}"
+    if [[ $CUSTOM_REPEAT_COUNT -gt 1 ]]; then
+      step_name="${step_name} (run ${repeat_index}/${CUSTOM_REPEAT_COUNT})"
+    fi
+    run_conda_step "$step_name" "$cmd" "$STEP" || ANY_FAIL=1
+    if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
+      break 2
+    fi
+    repeat_index=$((repeat_index + 1))
+    STEP=$((STEP + 1))
+  done
   STEP_NAME_INDEX=$((STEP_NAME_INDEX + 1))
-  STEP=$((STEP + 1))
 done
 
 generate_summary

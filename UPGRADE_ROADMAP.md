@@ -261,17 +261,20 @@ Initial threshold table is intentionally provisional; calibrate from empirical b
 
 1. Added `tests/smoke/test_smoke.py` for deterministic environment/import checks, morphology validation checks, pybind runtime coverage, PyHyperScattering integration, CLI-vs-pybind parity smoke, and GPU config/E-angle semantics smoke.
 2. Added `scripts/run_local_test_report.sh` to standardize local execution and emit timestamped metadata/log/summary artifacts under `test-reports/`.
+   - Default conda env is now `nrss-dev` unless overridden with `-e/--env` or `NRSS_TEST_ENV`.
+   - Standard lanes can be skipped with `--skip-defaults`.
+   - Explicit `--cmd` entries can be repeated with `--repeat N` for brittleness sweeps and injected-build validation.
 3. Added pytest marker declarations in `pyproject.toml` for `smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `toolchain_validation`, and `phase0`.
 4. Added `tests/conftest.py` to default tests to a single visible GPU when the environment is otherwise unset, improving reproducibility and avoiding known CyRSoXS multi-GPU instability during energy fan-out.
 
 Latest run evidence:
 
-1. Command: `bash scripts/run_local_test_report.sh -e nrss-dev --stop-on-fail`
+1. Command: `bash scripts/run_local_test_report.sh --stop-on-fail`
 2. Timestamp (UTC): `20260320T134227Z`
 3. Result: `4/4` steps passed
 4. CPU smoke: `12 passed, 10 deselected`
 5. GPU smoke: `10 passed, 12 deselected`
-6. Physics validation: `3 passed, 2 deselected`
+6. Physics validation: `6 passed, 2 deselected`
 
 ### 8.8 Implemented physics validation layer (March 20, 2026)
 
@@ -284,8 +287,24 @@ Latest run evidence:
    - one-morph, multi-energy contrast-scaling validation,
    - 24 close-energy scenarios covering beta-only, delta-only, mixed, and split-material families,
    - integrated-intensity checks over a fixed q window with fixed empirical thresholds.
-3. Archived one-off exploratory validation code under `scripts/validation_diagnostics/` so it remains available for future archaeology without polluting pytest collection.
-4. Extended `scripts/run_local_test_report.sh` to include the `physics_validation` lane in the standard local report.
+3. Added `tests/validation/test_analytical_2d_disk_form_factor.py`:
+   - direct analytical 2D disk comparison through the pybind-to-PyHyper workflow,
+   - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`, diameters `70 nm` and `128 nm`,
+   - pointwise and minima-alignment metrics with fixed empirical thresholds,
+   - explicit disk-versus-vacuum morphology,
+   - fixed `sr=1` only, mirroring the sphere test’s assertion anchor while avoiding extra 2D-path variability,
+   - optional plot writing gated by `NRSS_WRITE_VALIDATION_PLOTS=1`.
+4. Added `tests/validation/test_2d_disk_contrast_scaling.py`:
+   - one-morph, multi-energy contrast-scaling validation for the 2D pathway,
+   - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
+   - 24 close-energy scenarios covering beta-only, delta-only, mixed, and split-material families,
+   - integrated-intensity checks over a fixed q window with fixed empirical thresholds.
+5. Archived one-off exploratory validation code under `scripts/validation_diagnostics/` so it remains available for future archaeology without polluting pytest collection.
+6. Extended `scripts/run_local_test_report.sh` to include the `physics_validation` lane in the standard local report, while also supporting `--skip-defaults` plus repeated explicit `--cmd` runs for targeted validation and stochastic-failure checks.
+7. Targeted local validation against an injected fixed CyRSoXS pybind build removed the prior same-process 2D analytical disk stochastic failure in local testing:
+   - one-process back-to-back `70 nm` then `128 nm` analytical 2D disk validation passed `20/20` repeated runs on a single visible GPU,
+   - the shipped pytest module also passed cleanly against the injected build,
+   - interpret this as local evidence that the 2D-path failure was upstream to NRSS rather than a remaining deterministic NRSS harness issue.
 
 ### 8.9 Remaining Phase 0 test-hardening gaps
 

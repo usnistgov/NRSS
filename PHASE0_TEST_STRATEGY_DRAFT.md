@@ -1,6 +1,6 @@
 # NRSS Phase 0 Test Strategy (Draft)
 
-Status: In progress (smoke harness landed; initial physics-validation layer landed; latest local report green)  
+Status: In progress (smoke harness landed; initial 3D+2D physics-validation layer landed; latest local report green)  
 Branch: `test/phase0-pytest-hardening`
 
 ## 1. Why this exists
@@ -24,21 +24,24 @@ Current implemented Phase 0 assets:
 
 1. `tests/smoke/test_smoke.py` (22 tests total: 12 CPU/non-GPU, 10 GPU-marked).
 2. `tests/conftest.py` (default single-GPU pinning for reproducibility and to avoid known CyRSoXS multi-GPU instability during energy fan-out).
-3. `scripts/run_local_test_report.sh` (environment snapshot + CPU smoke + GPU smoke + physics validation + markdown summary).
+3. `scripts/run_local_test_report.sh` (default `nrss-dev` environment, environment snapshot + CPU smoke + GPU smoke + physics validation + markdown summary, plus `--skip-defaults` and `--repeat N` for targeted command sweeps).
 4. `tests/validation/test_analytical_sphere_form_factor.py` (flat-detector analytical sphere guardrail through the pybind-to-PyHyper workflow).
 5. `tests/validation/test_sphere_contrast_scaling.py` (quadratic contrast-scaling validation across beta/delta/mixed/split families).
-6. `scripts/validation_diagnostics/` (archived one-off development diagnostics kept out of pytest collection).
-7. `pyproject.toml` pytest markers (`smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `toolchain_validation`, `phase0`).
+6. `tests/validation/test_analytical_2d_disk_form_factor.py` (direct analytical 2D disk guardrail through the pybind-to-PyHyper workflow).
+7. `tests/validation/test_2d_disk_contrast_scaling.py` (quadratic contrast-scaling validation for the 2D disk pathway).
+8. `scripts/validation_diagnostics/` (archived one-off development diagnostics kept out of pytest collection).
+9. `pyproject.toml` pytest markers (`smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `toolchain_validation`, `phase0`).
 
 Latest local evidence (GPU-enabled host):
 
-1. Command: `bash scripts/run_local_test_report.sh -e nrss-dev --stop-on-fail`
+1. Command: `bash scripts/run_local_test_report.sh --stop-on-fail`
 2. Timestamp (UTC): `20260320T134227Z`
 3. Report directory: `test-reports/20260320T134227Z`
 4. Result: `4/4` steps passed
 5. CPU smoke: `12 passed, 10 deselected`
 6. GPU smoke: `10 passed, 12 deselected`
-7. Physics validation: `3 passed, 2 deselected`
+7. Physics validation: `6 passed, 2 deselected`
+8. Targeted injected-build check: repeated same-process analytical 2D disk validation passed `20/20` runs with the fixed local CyRSoXS pybind build, eliminating the prior stochastic failure in local testing.
 
 Observed caveats:
 
@@ -89,7 +92,7 @@ Targets:
 
 Purpose: compare simulation outputs against trusted analytical/golden references.
 
-Status: Initial layer implemented; further case migration still pending.
+Status: Initial 3D+2D layer implemented; further case migration still pending.
 
 Implemented:
 
@@ -106,6 +109,22 @@ Implemented:
    - one `70 nm` sphere morphology reused across energies,
    - 24 close-energy contrast scenarios,
    - beta-only, positive-delta-only, negative-delta-only, mixed, and split-material families,
+   - integrated intensity metrics over `q in [0.06, 1.0] nm^-1`,
+   - fixed thresholds for weighted/unweighted contrast scaling and family pairing consistency.
+3. Analytical 2D disk form-factor comparison:
+   - pybind execution only,
+   - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
+   - diameters `70 nm` and `128 nm`,
+   - explicit disk plus explicit vacuum matrix,
+   - PyHyperScattering radial reduction,
+   - direct analytical disk comparison on the PyHyper q bins,
+   - separate pointwise and minima-alignment metrics with fixed thresholds,
+   - fixed `sr=1` to match the established sphere-harness assertion mode while exercising the distinct 2D compute path.
+4. 2D disk contrast-scaling guardrail:
+   - one `70 nm` 2D disk morphology reused across energies,
+   - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
+   - 24 close-energy contrast scenarios,
+   - beta-only, delta-only, mixed, and split-material families,
    - integrated intensity metrics over `q in [0.06, 1.0] nm^-1`,
    - fixed thresholds for weighted/unweighted contrast scaling and family pairing consistency.
 
@@ -170,7 +189,9 @@ Default local run can skip slow/GPU unless explicitly requested.
 From repository root:
 
 ```bash
-bash scripts/run_local_test_report.sh -e nrss-dev --stop-on-fail
+bash scripts/run_local_test_report.sh --stop-on-fail
+bash scripts/run_local_test_report.sh --skip-defaults --repeat 20 \
+  --cmd "python -m pytest tests/validation/test_analytical_2d_disk_form_factor.py -q"
 conda run -n nrss-dev python -m pytest tests/smoke -m "not gpu" -v
 conda run -n nrss-dev python -m pytest tests/smoke -m "gpu" -v
 conda run -n nrss-dev python -m pytest tests/validation -m "physics_validation" -v

@@ -17,6 +17,7 @@ Use these archived scripts only when re-opening one of the specific investigatio
 - `analytical_disk_form_factor_diagnostic.py`
   - Purpose: tested whether a 2D disk/circle could be a cheaper analytical comparison surrogate when the 3D sphere showed persistent high-q disagreement.
   - Historical question: whether smaller `PhysSize` in 2D would expose a discretization trend more clearly than the 3D sphere.
+  - Status: superseded by stable pytest-native coverage in `tests/validation/test_analytical_2d_disk_form_factor.py` and `tests/validation/test_2d_disk_contrast_scaling.py`.
 
 - `sphere_centering_diagnostic.py`
   - Purpose: compared half-voxel centering to exact voxel-centered placement.
