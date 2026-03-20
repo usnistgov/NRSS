@@ -105,6 +105,7 @@ METADATA_TXT="$REPORT_DIR/metadata.txt"
 STEPS_TSV="$REPORT_DIR/steps.tsv"
 SMOKE_CATALOG_TSV="$REPORT_DIR/smoke_catalog.tsv"
 PHYSICS_CATALOG_TSV="$REPORT_DIR/physics_catalog.tsv"
+CYRSOXS_RESOLUTION_TSV="$REPORT_DIR/cyrsoxs_resolution.tsv"
 
 : > "$RUN_LOG"
 : > "$STEPS_TSV"
@@ -116,6 +117,21 @@ log() {
 
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '_' | sed 's/^_//;s/_$//'
+}
+
+build_inner_cmd() {
+  local cmd="$1"
+  local inner_cmd
+
+  inner_cmd="$cmd"
+  if [[ -n "$CYRSOXS_PYBIND_DIR" ]]; then
+    inner_cmd="export PYTHONPATH=\"${CYRSOXS_PYBIND_DIR}\${PYTHONPATH:+:\$PYTHONPATH}\""$'\n'"$inner_cmd"
+  fi
+  if [[ -n "$CYRSOXS_CLI_DIR" ]]; then
+    inner_cmd="export PATH=\"${CYRSOXS_CLI_DIR}:\$PATH\""$'\n'"$inner_cmd"
+  fi
+
+  printf '%s' "$inner_cmd"
 }
 
 write_metadata() {
@@ -139,6 +155,7 @@ write_metadata() {
     echo "cuda_visible_devices=$visible_gpus"
     echo "cyrsoxs_cli_dir=$CYRSOXS_CLI_DIR"
     echo "cyrsoxs_pybind_dir=$CYRSOXS_PYBIND_DIR"
+    echo "cyrsoxs_resolution_tsv=$CYRSOXS_RESOLUTION_TSV"
     if command -v nvidia-smi >/dev/null 2>&1; then
       echo "nvidia_smi=present"
       nvidia-smi -L || true
@@ -146,6 +163,22 @@ write_metadata() {
       echo "nvidia_smi=not_found"
     fi
   } > "$METADATA_TXT"
+}
+
+capture_cyrsoxs_resolution() {
+  local probe_cmd inner_cmd
+
+  probe_cmd=$'python - <<\'PY\'\nimport contextlib\nimport importlib\nimport io\nimport re\nimport shutil\nimport subprocess\nfrom pathlib import Path\n\n\ndef safe(value):\n    if value is None:\n        return \"\"\n    return str(value).replace(\"\\t\", \" \").replace(\"\\n\", \" \").strip()\n\n\ndef git_provenance(path_str):\n    if not path_str:\n        return \"\", \"\", \"\"\n    try:\n        path = Path(path_str).resolve()\n    except Exception:\n        return \"\", \"\", \"\"\n\n    start = path if path.is_dir() else path.parent\n    for candidate in (start, *start.parents):\n        try:\n            root = subprocess.run(\n                [\"git\", \"-C\", str(candidate), \"rev-parse\", \"--show-toplevel\"],\n                check=False,\n                stdout=subprocess.PIPE,\n                stderr=subprocess.PIPE,\n                text=True,\n                timeout=2,\n            )\n        except Exception:\n            continue\n        if root.returncode != 0:\n            continue\n        root_path = root.stdout.strip()\n        branch = subprocess.run(\n            [\"git\", \"-C\", root_path, \"rev-parse\", \"--abbrev-ref\", \"HEAD\"],\n            check=False,\n            stdout=subprocess.PIPE,\n            stderr=subprocess.PIPE,\n            text=True,\n            timeout=2,\n        )\n        sha = subprocess.run(\n            [\"git\", \"-C\", root_path, \"rev-parse\", \"HEAD\"],\n            check=False,\n            stdout=subprocess.PIPE,\n            stderr=subprocess.PIPE,\n            text=True,\n            timeout=2,\n        )\n        return root_path, branch.stdout.strip(), sha.stdout.strip()\n    return \"\", \"\", \"\"\n\n\ndef version_from_repo_root(root_path):\n    if not root_path:\n        return \"\"\n    cmake_path = Path(root_path) / \"CMakeLists.txt\"\n    if not cmake_path.exists():\n        return \"\"\n    try:\n        text = cmake_path.read_text(encoding=\"utf-8\", errors=\"replace\")\n    except Exception:\n        return \"\"\n    match = re.search(r\"project\\s*\\(\\s*CyRSoXS\\s+VERSION\\s+([0-9.]+)\", text, re.IGNORECASE)\n    return match.group(1) if match else \"\"\n\n\ndef version_from_banner(text):\n    for line in text.splitlines():\n        match = re.search(r\"Version\\s*:\\s*([0-9\\s.]+)\", line)\n        if match:\n            return re.sub(r\"\\s+\", \"\", match.group(1))\n    return \"\"\n\n\ndef cli_record():\n    path = safe(shutil.which(\"CyRSoXS\") or \"\")\n    if not path:\n        return (\"cli\", \"CyRSoXS\", \"\", \"\", \"\", \"\", \"NOT_FOUND\")\n\n    version = \"\"\n    try:\n        proc = subprocess.run(\n            [path, \"--version\"],\n            check=False,\n            stdout=subprocess.PIPE,\n            stderr=subprocess.PIPE,\n            text=True,\n            timeout=5,\n        )\n    except Exception:\n        proc = None\n    if proc is not None:\n        version = version_from_banner((proc.stdout or \"\") + \"\\n\" + (proc.stderr or \"\"))\n\n    root_path, branch, sha = git_provenance(path)\n    if not version:\n        version = version_from_repo_root(root_path)\n    return (\"cli\", \"CyRSoXS\", path, version, branch, sha, \"OK\")\n\n\ndef pybind_record():\n    errors = []\n    for import_name in (\"cyrsoxs\", \"CyRSoXS\"):\n        try:\n            buf_out = io.StringIO()\n            buf_err = io.StringIO()\n            with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):\n                mod = importlib.import_module(import_name)\n        except Exception as exc:\n            errors.append(f\"{import_name}:{exc.__class__.__name__}\")\n            continue\n        path = safe(getattr(mod, \"__file__\", \"\"))\n        banner_text = buf_out.getvalue() + \"\\n\" + buf_err.getvalue()\n        version = safe(getattr(mod, \"__version__\", \"\")) or version_from_banner(banner_text)\n        root_path, branch, sha = git_provenance(path)\n        if not version:\n            version = version_from_repo_root(root_path)\n        return (\"pybind\", import_name, path, version, branch, sha, \"OK\")\n    return (\"pybind\", \"\", \"\", \"\", \"\", \"\", \";\".join(errors) or \"IMPORT_FAILED\")\n\n\nprint(\"component\\tresolved_name\\tresolved_path\\tversion\\tgit_branch\\tgit_sha\\tstatus\")\nfor row in (cli_record(), pybind_record()):\n    print(\"\\t\".join(safe(value) for value in row))\nPY'
+  inner_cmd="$(build_inner_cmd "$probe_cmd")"
+
+  if ! CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" conda run -n "$ENV_NAME" bash -lc "$inner_cmd" > "$CYRSOXS_RESOLUTION_TSV" 2>> "$RUN_LOG"; then
+    cat > "$CYRSOXS_RESOLUTION_TSV" <<'EOF'
+component	resolved_name	resolved_path	version	git_branch	git_sha	status
+cli	CyRSoXS					PROBE_FAILED
+pybind						PROBE_FAILED
+EOF
+    log "CyRSoXS resolution probe failed; see $RUN_LOG for details."
+  fi
 }
 
 build_smoke_catalog() {
@@ -244,14 +277,7 @@ run_conda_step() {
   log "    Command: $cmd"
   start_ts="$(date +%s)"
 
-  inner_cmd="$cmd"
-  if [[ -n "$CYRSOXS_PYBIND_DIR" ]]; then
-    inner_cmd="export PYTHONPATH=\"${CYRSOXS_PYBIND_DIR}\${PYTHONPATH:+:\$PYTHONPATH}\""$'\n'"$inner_cmd"
-  fi
-  if [[ -n "$CYRSOXS_CLI_DIR" ]]; then
-    inner_cmd="export PATH=\"${CYRSOXS_CLI_DIR}:\$PATH\""$'\n'"$inner_cmd"
-  fi
-
+  inner_cmd="$(build_inner_cmd "$cmd")"
   CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" conda run -n "$ENV_NAME" bash -lc "$inner_cmd" > "$log_file" 2>&1
   rc=$?
 
@@ -322,6 +348,8 @@ generate_summary() {
     echo "- Commit: $git_sha"
     echo "- Conda env: $ENV_NAME"
     echo "- Report dir: $REPORT_DIR"
+    echo "- CyRSoXS CLI override: ${CYRSOXS_CLI_DIR:-"(env default)"}"
+    echo "- CyRSoXS pybind override: ${CYRSOXS_PYBIND_DIR:-"(env default)"}"
     echo "- Steps passed: $pass_count/$total"
     echo "- Steps failed: $fail_count/$total"
     echo ""
@@ -331,7 +359,52 @@ generate_summary() {
     echo ""
     echo "### Log Files"
     awk -F'\t' '{printf "- %s. %s: `%s`\n", $1, $2, $5}' "$STEPS_TSV"
+    echo "- CyRSoXS resolution: \`$CYRSOXS_RESOLUTION_TSV\`"
   } > "$SUMMARY_MD"
+
+  if [[ -s "$CYRSOXS_RESOLUTION_TSV" ]]; then
+    python - "$CYRSOXS_RESOLUTION_TSV" "$CYRSOXS_CLI_DIR" "$CYRSOXS_PYBIND_DIR" >> "$SUMMARY_MD" <<'PY'
+import csv
+import pathlib
+import sys
+
+resolution_path = pathlib.Path(sys.argv[1])
+cli_override = sys.argv[2] or "(env default)"
+pybind_override = sys.argv[3] or "(env default)"
+
+print("")
+print("### CyRSoXS Resolution")
+print("| Component | Requested Override | Resolved Name | Resolved Path | Version | Source | Status |")
+print("|---|---|---|---|---|---|---|")
+
+with resolution_path.open(encoding="utf-8", errors="replace") as f:
+    reader = csv.DictReader(f, delimiter="\t")
+    for row in reader:
+        if not row:
+            continue
+        component = (row.get("component") or "").strip()
+        if not component:
+            continue
+        requested = cli_override if component == "cli" else pybind_override
+        resolved_name = (row.get("resolved_name") or "").strip() or "-"
+        resolved_path = (row.get("resolved_path") or "").strip() or "-"
+        version = (row.get("version") or "").strip() or "-"
+        git_branch = (row.get("git_branch") or "").strip()
+        git_sha = (row.get("git_sha") or "").strip()
+        status = (row.get("status") or "").strip() or "-"
+        source = "-"
+        if git_sha:
+            source = f"{git_branch}@{git_sha[:7]}" if git_branch else git_sha[:7]
+
+        def esc(value: str) -> str:
+            return value.replace("|", "\\|")
+
+        print(
+            f"| `{esc(component)}` | `{esc(requested)}` | `{esc(resolved_name)}` | "
+            f"`{esc(resolved_path)}` | `{esc(version)}` | `{esc(source)}` | `{esc(status)}` |"
+        )
+PY
+  fi
 
   if [[ -s "$SMOKE_CATALOG_TSV" ]]; then
     python - "$SMOKE_CATALOG_TSV" "$STEPS_TSV" >> "$SUMMARY_MD" <<'PY'
@@ -429,6 +502,7 @@ PY
 }
 
 write_metadata
+capture_cyrsoxs_resolution
 build_smoke_catalog
 build_physics_catalog
 
