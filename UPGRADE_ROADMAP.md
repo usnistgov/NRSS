@@ -220,13 +220,14 @@ TensorFlow is deprioritized for this project.
 
 ### 8.1 Immediate objective
 
-Convert `tests/validation/` legacy scripts into robust pytest suites using pybind CyRSoXS execution where applicable (no CLI serialization bottleneck).
+Convert `tests/validation/` legacy scripts into robust pytest suites using pybind CyRSoXS execution where applicable (no CLI serialization bottleneck), while establishing a first stable physics-validation lane before backend refactors.
 
 ### 8.2 Canonical initial cases
 
-1. Projected sphere.
-2. Core-shell.
-3. Circle lattice.
+1. Analytical sphere form factor.
+2. Sphere contrast scaling.
+3. Core-shell.
+4. Circle lattice.
 
 ### 8.3 Required test qualities
 
@@ -251,30 +252,47 @@ Initial threshold table is intentionally provisional; calibrate from empirical b
 
 ### 8.6 Analytical guardrail track (projected sphere)
 
-1. Maintain a separate analytical comparison track for sphere form factor behavior.
-2. Treat this as a guardrail rather than strict equality because voxel discretization and finite resolution perturb high-q behavior.
-3. Use higher-resolution runs to tighten agreement when generating/validating this track.
-4. Capture notebook methodology and then codify it into scriptable test artifacts.
+1. This track is now implemented as `tests/validation/test_analytical_sphere_form_factor.py`.
+2. Current implementation uses pybind execution plus PyHyperScattering reduction, compares against a flat-detector analytical reference, and evaluates both pointwise agreement and all-minima alignment.
+3. Geometry is currently fixed at `512^3`, `PhysSize = 1.0 nm`, diameters `70 nm` and `128 nm`, with optional superresolution support retained for future follow-up.
+4. Treat this as a guardrail rather than strict equality because discretization and finite resolution still perturb high-q behavior.
 
 ### 8.7 Implemented smoke harness (March 17, 2026)
 
 1. Added `tests/smoke/test_smoke.py` for deterministic environment/import checks, morphology validation checks, pybind runtime coverage, PyHyperScattering integration, CLI-vs-pybind parity smoke, and GPU config/E-angle semantics smoke.
 2. Added `scripts/run_local_test_report.sh` to standardize local execution and emit timestamped metadata/log/summary artifacts under `test-reports/`.
-3. Added pytest marker declarations in `pyproject.toml` for `smoke`, `cpu`, `gpu`, `slow`, and `phase0`.
+3. Added pytest marker declarations in `pyproject.toml` for `smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `toolchain_validation`, and `phase0`.
+4. Added `tests/conftest.py` to default tests to a single visible GPU when the environment is otherwise unset, improving reproducibility and avoiding known CyRSoXS multi-GPU instability during energy fan-out.
 
 Latest run evidence:
 
-1. Command: `scripts/run_local_test_report.sh`
-2. Timestamp (UTC): `20260317T170618Z`
-3. Result: `3/3` steps passed
+1. Command: `bash scripts/run_local_test_report.sh -e nrss-dev --stop-on-fail`
+2. Timestamp (UTC): `20260320T134227Z`
+3. Result: `4/4` steps passed
 4. CPU smoke: `12 passed, 10 deselected`
-5. GPU smoke: `10 passed, 12 deselected` (with one non-failing upstream `PyHyperScattering` deprecation warning)
+5. GPU smoke: `10 passed, 12 deselected`
+6. Physics validation: `3 passed, 2 deselected`
 
-### 8.8 Remaining Phase 0 test-hardening gaps
+### 8.8 Implemented physics validation layer (March 20, 2026)
 
-1. Complete migration of legacy `tests/validation/` workflows to fixture-driven pytest modules.
-2. Establish golden/analytical parity artifacts with explicitly versioned tolerances.
-3. Add CI gating policy for CPU smoke and GPU smoke/parity lanes.
+1. Added `tests/validation/test_analytical_sphere_form_factor.py`:
+   - flat-detector analytical sphere comparison through the pybind-to-PyHyper workflow,
+   - pointwise and minima-alignment metrics with fixed empirical thresholds,
+   - explicit sphere-versus-vacuum morphology,
+   - optional plot writing gated by `NRSS_WRITE_VALIDATION_PLOTS=1`.
+2. Added `tests/validation/test_sphere_contrast_scaling.py`:
+   - one-morph, multi-energy contrast-scaling validation,
+   - 24 close-energy scenarios covering beta-only, delta-only, mixed, and split-material families,
+   - integrated-intensity checks over a fixed q window with fixed empirical thresholds.
+3. Archived one-off exploratory validation code under `scripts/validation_diagnostics/` so it remains available for future archaeology without polluting pytest collection.
+4. Extended `scripts/run_local_test_report.sh` to include the `physics_validation` lane in the standard local report.
+
+### 8.9 Remaining Phase 0 test-hardening gaps
+
+1. Complete migration of remaining legacy validation workflows to pytest-native modules (especially core-shell and circle lattice).
+2. Decide which remaining cases should use analytical references, golden references, or both.
+3. Add CI gating policy for CPU smoke and GPU smoke/parity/physics lanes.
+4. Revisit follow-on physics coverage such as additional two-material mixed beta/delta equivalence cases if needed.
 
 ## 9. Input/Output Contract and Compatibility
 

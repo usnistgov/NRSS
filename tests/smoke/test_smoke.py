@@ -702,11 +702,11 @@ def _assert_scattering_parity(
     cli_vals: np.ndarray,
     *,
     min_finite_ratio: float = 0.99,
-    rtol_scalar: float = 1e-2,
-    p95_abs_max: float = 1e-6,
-    max_abs_max: float = 5e-5,
-    p95_log_max: float = 0.1,
-    max_log_max: float = 1.0,
+    rtol_scalar: float = 1e-3,
+    p95_abs_max: float = 8e-7,
+    max_abs_max: float = 3e-5,
+    p95_log_max: float = 8e-2,
+    max_log_max: float = 1e-1,
 ) -> None:
     assert pybind_vals.shape == cli_vals.shape
     assert float(np.isfinite(pybind_vals).mean()) >= min_finite_ratio
@@ -811,13 +811,6 @@ def _build_two_material_asymmetric_lobed_morphology(
     return morph
 
 
-def _relative_l1_difference(a: np.ndarray, b: np.ndarray) -> float:
-    a_safe = _sanitize_scattering(a)
-    b_safe = _sanitize_scattering(b)
-    denom = max(float(np.abs(a_safe).sum()), float(np.abs(b_safe).sum()), 1e-20)
-    return float(np.abs(a_safe - b_safe).sum()) / denom
-
-
 def _radial_asymmetry_score(arr: np.ndarray) -> float:
     """Compute ring-wise azimuthal CV; lower score means more radial symmetry."""
     img = _sanitize_scattering(arr)[0].astype(np.float64)
@@ -864,18 +857,18 @@ def test_pybind_runtime_tiny_deterministic_pattern():
     assert arr_2.shape == (1, 32, 32)
     assert finite_ratio_1 >= 0.99
     assert finite_ratio_2 >= 0.99
-    # Smoke goal here is execution-path health (pybind + CyRSoXS launch) with tolerant numerics.
+    # Pinned single-GPU repeat runs are bitwise-stable here; keep a small fixed margin.
     assert np.isfinite(arr_1_safe).all()
     assert np.isfinite(arr_2_safe).all()
-    assert np.isclose(float(arr_1_safe.sum()), float(arr_2_safe.sum()), rtol=5e-2, atol=1e-12)
-    assert np.isclose(float(arr_1_safe.max()), float(arr_2_safe.max()), rtol=5e-2, atol=1e-12)
+    assert np.isclose(float(arr_1_safe.sum()), float(arr_2_safe.sum()), rtol=1e-4, atol=1e-12)
+    assert np.isclose(float(arr_1_safe.max()), float(arr_2_safe.max()), rtol=1e-4, atol=1e-12)
     signal_mask = np.logical_and(arr_1_safe > 1e-12, arr_2_safe > 1e-12)
     assert signal_mask.any()
     log_1 = np.log10(arr_1_safe[signal_mask])
     log_2 = np.log10(arr_2_safe[signal_mask])
     log_abs = np.abs(log_1 - log_2)
-    assert float(np.percentile(log_abs, 95)) <= 0.1
-    assert float(log_abs.max()) <= 1.0
+    assert float(np.percentile(log_abs, 95)) <= 1e-4
+    assert float(log_abs.max()) <= 1e-3
 
 
 @pytest.mark.gpu
@@ -902,6 +895,7 @@ def test_pyhyperscattering_integrator_to_xarray_smoke():
     assert remeshed.sizes["energy"] == len(energies)
     assert "chi" in remeshed.dims
     assert any(dim.startswith("q") or dim == "q" for dim in remeshed.dims)
+    # The tiny remesh path shows host/run variability, but repeat runs stayed well above 0.95.
     assert float(np.isfinite(remeshed_vals).mean()) >= 0.95
 
 
@@ -922,8 +916,8 @@ def test_pybind_runtime_2d_disk_smoke():
 
     assert arr.shape == (1, 32, 32)
     assert float(np.isfinite(arr).mean()) >= 0.99
-    assert float(arr_safe.max()) > 0.0
-    assert float(arr_safe.sum()) > 0.0
+    assert float(arr_safe.max()) > 1e-5
+    assert float(arr_safe.sum()) > 1e-4
 
 
 @pytest.mark.gpu
@@ -995,11 +989,11 @@ def test_cli_serialized_2d_disk_matches_pybind_smoke(tmp_path: Path):
     _assert_scattering_parity(
         pybind_vals,
         cli_vals,
-        rtol_scalar=2e-2,
-        p95_abs_max=2e-6,
-        max_abs_max=1e-4,
-        p95_log_max=0.2,
-        max_log_max=1.5,
+        rtol_scalar=1e-3,
+        p95_abs_max=1e-7,
+        max_abs_max=5e-7,
+        p95_log_max=8e-2,
+        max_log_max=1e-1,
     )
 
 
@@ -1027,8 +1021,8 @@ def test_gpu_config_switch_matrix_smoke(config_overrides: dict):
 
     assert arr.shape == (1, 32, 32)
     assert float(np.isfinite(arr).mean()) >= 0.99
-    assert float(arr_safe.max()) > 0.0
-    assert float(arr_safe.sum()) > 0.0
+    assert float(arr_safe.max()) > 1e-3
+    assert float(arr_safe.sum()) > 1e-2
 
 
 @pytest.mark.gpu
@@ -1051,13 +1045,6 @@ def test_eangle_rotation_endpoint_behavior_smoke():
     eangle_180 = _build_two_material_asymmetric_lobed_morphology(
         energies=[285.0], eangle_rotation=[0.0, 15.0, 180.0]
     ).run(stdout=False, stderr=False, return_xarray=True).values.copy()
-    eangle_180_repeat = _build_two_material_asymmetric_lobed_morphology(
-        energies=[285.0], eangle_rotation=[0.0, 15.0, 180.0]
-    ).run(stdout=False, stderr=False, return_xarray=True).values.copy()
-
-    d_165_1799 = _relative_l1_difference(eangle_165, eangle_1799)
-    d_165_180 = _relative_l1_difference(eangle_165, eangle_180)
-    d_180_repeat = _relative_l1_difference(eangle_180, eangle_180_repeat)
     asym_0 = _radial_asymmetry_score(eangle_0)
     asym_165 = _radial_asymmetry_score(eangle_165)
     asym_1799 = _radial_asymmetry_score(eangle_1799)
@@ -1067,11 +1054,15 @@ def test_eangle_rotation_endpoint_behavior_smoke():
     # numAnglesRotation = round((end-start)/increment + 1)
     # sampled angle_i = start + i*increment
     # so [0,15,165] -> 0..165 and [0,15,179.9]/[0,15,180] -> 0..180.
-    noise_floor = max(d_180_repeat, 1e-6)
-    assert d_165_1799 >= max(1e-3, 20.0 * noise_floor)
-    assert d_165_180 >= max(1e-3, 20.0 * noise_floor)
-    # 179.9 and 180 should have effectively the same radial symmetry trend.
-    assert abs(asym_1799 - asym_180) <= 0.05
+    # Fixed thresholds were chosen from repeat-run inspection on pinned single-GPU runs.
+    # The image-level L1 differences are noisy, but the ring-asymmetry trend is stable and
+    # directly encodes the endpoint-semantics behavior we care about.
+    #
+    # 179.9 and 180 both round to the same 0..180 sampling and should therefore agree.
+    assert abs(asym_1799 - asym_180) <= 0.01
+    # 180 includes the endpoint-equivalent orientation while 165 does not, which measurably
+    # changes the averaged anisotropy.
+    assert (asym_180 - asym_165) >= 0.005
     # Rotation averaging should be substantially more radially symmetric than no rotation.
-    assert asym_0 > (1.2 * asym_165)
-    assert asym_0 > (1.2 * asym_180)
+    assert asym_0 > (1.5 * asym_165)
+    assert asym_0 > (1.5 * asym_180)

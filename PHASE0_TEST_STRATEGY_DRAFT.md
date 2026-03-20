@@ -1,6 +1,6 @@
 # NRSS Phase 0 Test Strategy (Draft)
 
-Status: In progress (smoke harness landed; GPU-smoke verified)  
+Status: In progress (smoke harness landed; initial physics-validation layer landed; latest local report green)  
 Branch: `test/phase0-pytest-hardening`
 
 ## 1. Why this exists
@@ -12,34 +12,40 @@ The goal is to make scientific behavior verifiable and stable so later changes c
 
 A good Phase 0 test program should:
 
-1. Run reliably in `mar2025` with one command.
+1. Run reliably in the maintained development environment with one command.
 2. Separate fast checks from expensive GPU checks.
 3. Be deterministic (same inputs -> same pass/fail outcome).
 4. Compare against trusted references with documented tolerances.
 5. Fail with clear messages when physics changes.
 
-## 3. Current state (as of March 17, 2026)
+## 3. Current state (as of March 20, 2026)
 
-Current smoke assets:
+Current implemented Phase 0 assets:
 
 1. `tests/smoke/test_smoke.py` (22 tests total: 12 CPU/non-GPU, 10 GPU-marked).
-2. `scripts/run_local_test_report.sh` (environment snapshot + CPU smoke + GPU smoke + markdown summary).
-3. `pyproject.toml` pytest markers (`smoke`, `cpu`, `gpu`, `slow`, `phase0`).
+2. `tests/conftest.py` (default single-GPU pinning for reproducibility and to avoid known CyRSoXS multi-GPU instability during energy fan-out).
+3. `scripts/run_local_test_report.sh` (environment snapshot + CPU smoke + GPU smoke + physics validation + markdown summary).
+4. `tests/validation/test_analytical_sphere_form_factor.py` (flat-detector analytical sphere guardrail through the pybind-to-PyHyper workflow).
+5. `tests/validation/test_sphere_contrast_scaling.py` (quadratic contrast-scaling validation across beta/delta/mixed/split families).
+6. `scripts/validation_diagnostics/` (archived one-off development diagnostics kept out of pytest collection).
+7. `pyproject.toml` pytest markers (`smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `toolchain_validation`, `phase0`).
 
 Latest local evidence (GPU-enabled host):
 
-1. Command: `scripts/run_local_test_report.sh`
-2. Timestamp (UTC): `20260317T170618Z`
-3. Report directory: `test-reports/20260317T170618Z`
-4. Result: `3/3` steps passed
+1. Command: `bash scripts/run_local_test_report.sh -e nrss-dev --stop-on-fail`
+2. Timestamp (UTC): `20260320T134227Z`
+3. Report directory: `test-reports/20260320T134227Z`
+4. Result: `4/4` steps passed
 5. CPU smoke: `12 passed, 10 deselected`
 6. GPU smoke: `10 passed, 12 deselected`
+7. Physics validation: `3 passed, 2 deselected`
 
 Observed caveats:
 
 1. GPU tests are hardware-dependent and still require a visible NVIDIA GPU.
 2. GPU smoke emitted one upstream `PendingDeprecationWarning` from `PyHyperScattering` (`GroupBy.apply`).
-3. Legacy validation scripts in `tests/validation/` are not yet fully migrated into robust pytest fixtures/parity gates.
+3. The first two physics-validation modules are now pytest-native, but core-shell and circle-lattice validation migration remain open.
+4. Validation plot writing is opt-in via `NRSS_WRITE_VALIDATION_PLOTS=1`; routine runs should stay plot-free.
 
 ## 4. Proposed test layers
 
@@ -83,13 +89,31 @@ Targets:
 
 Purpose: compare simulation outputs against trusted analytical/golden references.
 
-Status: Pending as strict golden/analytical gating; smoke parity currently acts as early guardrail.
+Status: Initial layer implemented; further case migration still pending.
 
-Targets:
+Implemented:
 
-1. Sphere analytical guardrail (radial I(q) trend and tolerance table).
-2. Core-shell parity against `CS_reference.nc`.
-3. Circle-lattice peak-position parity.
+1. Analytical sphere form-factor comparison:
+   - pybind execution only (no CLI serialization path),
+   - `512 x 512 x 512`, `PhysSize = 1.0 nm`,
+   - diameters `70 nm` and `128 nm`,
+   - explicit sphere plus explicit vacuum matrix,
+   - PyHyperScattering radial reduction,
+   - flat-detector analytical comparison,
+   - separate pointwise and minima-alignment metrics with fixed thresholds,
+   - superresolution machinery retained (`1x/2x/3x/4x`) with assertions anchored on `sr=1`.
+2. Sphere contrast-scaling guardrail:
+   - one `70 nm` sphere morphology reused across energies,
+   - 24 close-energy contrast scenarios,
+   - beta-only, positive-delta-only, negative-delta-only, mixed, and split-material families,
+   - integrated intensity metrics over `q in [0.06, 1.0] nm^-1`,
+   - fixed thresholds for weighted/unweighted contrast scaling and family pairing consistency.
+
+Next targets:
+
+1. Core-shell parity against `CS_reference.nc` or an updated pybind-native trusted reference.
+2. Circle-lattice peak-position parity.
+3. Two-material mixed beta/delta equivalence cases beyond the current split-family contrast checks.
 
 ## 5. Pytest architecture
 
@@ -102,13 +126,18 @@ Use pytest-discoverable names:
 
 ### 5.2 Shared fixtures
 
-Create `tests/validation/conftest.py` with fixtures for:
+Current shared infrastructure:
+
+1. `tests/conftest.py` pins to a single visible GPU by default unless the environment already specifies `CUDA_VISIBLE_DEVICES`.
+
+Still worth adding in `tests/validation/conftest.py` or equivalent helpers:
 
 1. `work_dir` (temporary deterministic workspace).
-2. `generated_sphere_case`.
-3. `generated_coreshell_case`.
-4. `generated_circle_lattice_case`.
-5. `gpu_available` probe (`nvidia-smi` or CuPy runtime query).
+2. `generated_coreshell_case`.
+3. `generated_circle_lattice_case`.
+4. shared PyHyper reduction helpers.
+5. shared analytical/golden metric helpers.
+6. `gpu_available` probe (`nvidia-smi` or CuPy runtime query) if more granular skipping is needed.
 
 ### 5.3 Markers
 
@@ -117,7 +146,9 @@ Define and use:
 1. `@pytest.mark.cpu`
 2. `@pytest.mark.gpu`
 3. `@pytest.mark.slow`
-4. `@pytest.mark.phase0`
+4. `@pytest.mark.physics_validation`
+5. `@pytest.mark.toolchain_validation`
+6. `@pytest.mark.phase0`
 
 Default local run can skip slow/GPU unless explicitly requested.
 
@@ -139,12 +170,13 @@ Default local run can skip slow/GPU unless explicitly requested.
 From repository root:
 
 ```bash
-scripts/run_local_test_report.sh
-conda run -n mar2025 python -m pytest tests/smoke -m "not gpu" -v
-conda run -n mar2025 python -m pytest tests/smoke -m "gpu" -v
-conda run -n mar2025 python -m pytest -m "not slow" -q
-conda run -n mar2025 python -m pytest -m "phase0" -q
-conda run -n mar2025 python -m pytest -m "gpu and phase0" -q
+bash scripts/run_local_test_report.sh -e nrss-dev --stop-on-fail
+conda run -n nrss-dev python -m pytest tests/smoke -m "not gpu" -v
+conda run -n nrss-dev python -m pytest tests/smoke -m "gpu" -v
+conda run -n nrss-dev python -m pytest tests/validation -m "physics_validation" -v
+conda run -n nrss-dev python -m pytest -m "not slow" -q
+conda run -n nrss-dev python -m pytest -m "phase0" -q
+conda run -n nrss-dev python -m pytest -m "gpu and phase0" -q
 ```
 
 ## 9. Initial acceptance criteria for Phase 0
@@ -157,15 +189,16 @@ conda run -n mar2025 python -m pytest -m "gpu and phase0" -q
 
 Current status snapshot:
 
-1. Criteria 2-3 are satisfied for the smoke layer on `2026-03-17`.
-2. Criteria 1/4/5 remain open for full Phase 0 coverage (especially legacy validation migration + CI gating).
+1. Criteria 1/3/4 are satisfied locally on a GPU-enabled host as of `2026-03-20`.
+2. Criterion 2 is likely satisfied by marker separation, but it has not yet been re-confirmed on a true CPU-only host in this workstream.
+3. Criterion 5 remains open (CI/nightly policy still needs to be established).
 
 ## 10. Proposed implementation order
 
-1. Harness conversion: fixtures + naming + markers.
-2. Path hardening: remove hardcoded external paths.
-3. Fix known circle-lattice generation bug.
-4. Re-enable parity assertions under pytest flow.
+1. Finish migration of remaining legacy validation cases (core-shell, circle lattice) into pytest-native modules.
+2. Add shared validation fixtures/helpers for PyHyper reduction and reference-metric computation.
+3. Decide whether core-shell/circle-lattice should use analytical references, golden references, or both.
+4. Add any missing two-material contrast-family follow-ons if physics coverage warrants it.
 5. Add smoke/unit tests around helper utilities.
 6. Add basic performance/memory logging (non-gating initially).
 

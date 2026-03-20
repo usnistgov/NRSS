@@ -82,6 +82,7 @@ SUMMARY_MD="$REPORT_DIR/summary.md"
 METADATA_TXT="$REPORT_DIR/metadata.txt"
 STEPS_TSV="$REPORT_DIR/steps.tsv"
 SMOKE_CATALOG_TSV="$REPORT_DIR/smoke_catalog.tsv"
+PHYSICS_CATALOG_TSV="$REPORT_DIR/physics_catalog.tsv"
 
 : > "$RUN_LOG"
 : > "$STEPS_TSV"
@@ -96,7 +97,7 @@ slugify() {
 }
 
 write_metadata() {
-  local git_sha git_branch git_dirty
+  local git_sha git_branch git_dirty visible_gpus
   git_sha="$(git rev-parse HEAD)"
   git_branch="$(git rev-parse --abbrev-ref HEAD)"
   if git diff --quiet && git diff --cached --quiet; then
@@ -104,6 +105,7 @@ write_metadata() {
   else
     git_dirty="dirty"
   fi
+  visible_gpus="${CUDA_VISIBLE_DEVICES:-0}"
 
   {
     echo "timestamp_utc=$TIMESTAMP_UTC"
@@ -112,6 +114,7 @@ write_metadata() {
     echo "git_sha=$git_sha"
     echo "git_worktree=$git_dirty"
     echo "conda_env=$ENV_NAME"
+    echo "cuda_visible_devices=$visible_gpus"
     if command -v nvidia-smi >/dev/null 2>&1; then
       echo "nvidia_smi=present"
       nvidia-smi -L || true
@@ -160,6 +163,48 @@ with out.open("w", encoding="utf-8") as f:
 PY
 }
 
+build_physics_catalog() {
+  python - "$PHYSICS_CATALOG_TSV" <<'PY'
+import ast
+import pathlib
+import sys
+
+out = pathlib.Path(sys.argv[1])
+validation_dir = pathlib.Path("tests/validation")
+
+if not validation_dir.exists():
+    out.write_text("", encoding="utf-8")
+    raise SystemExit(0)
+
+rows = []
+for test_file in sorted(validation_dir.glob("test_*.py")):
+    tree = ast.parse(test_file.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef) or not node.name.startswith("test_"):
+            continue
+        markers = []
+        for dec in node.decorator_list:
+            if (
+                isinstance(dec, ast.Attribute)
+                and isinstance(dec.value, ast.Attribute)
+                and isinstance(dec.value.value, ast.Name)
+                and dec.value.value.id == "pytest"
+                and dec.value.attr == "mark"
+            ):
+                markers.append(dec.attr)
+        if "physics_validation" not in markers:
+            continue
+        doc = (ast.get_docstring(node) or "").strip().splitlines()
+        summary = doc[0] if doc else ""
+        rows.append((str(test_file), node.lineno, node.name, ",".join(markers), summary))
+
+rows.sort(key=lambda r: (r[0], r[1]))
+with out.open("w", encoding="utf-8") as f:
+    for test_file, _, name, marker_csv, summary in rows:
+        f.write(f"{test_file}\t{name}\t{marker_csv}\t{summary}\n")
+PY
+}
+
 run_conda_step() {
   local step_name="$1"
   local cmd="$2"
@@ -175,7 +220,7 @@ run_conda_step() {
   log "    Command: $cmd"
   start_ts="$(date +%s)"
 
-  conda run -n "$ENV_NAME" bash -lc "$cmd" > "$log_file" 2>&1
+  CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" conda run -n "$ENV_NAME" bash -lc "$cmd" > "$log_file" 2>&1
   rc=$?
 
   end_ts="$(date +%s)"
@@ -304,10 +349,56 @@ for row in catalog_path.read_text(encoding="utf-8", errors="replace").splitlines
     print(f"| `{name}` | `{markers}` | {summary} | {cpu} | {gpu} |")
 PY
   fi
+
+  if [[ -s "$PHYSICS_CATALOG_TSV" ]]; then
+    python - "$PHYSICS_CATALOG_TSV" "$STEPS_TSV" >> "$SUMMARY_MD" <<'PY'
+import pathlib
+import sys
+
+catalog_path = pathlib.Path(sys.argv[1])
+steps_path = pathlib.Path(sys.argv[2])
+
+def load_cases(path):
+    statuses = {}
+    if not path or not path.exists():
+        return statuses
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            statuses[parts[0]] = parts[1]
+    return statuses
+
+physics_cases = {}
+for line in steps_path.read_text(encoding="utf-8", errors="replace").splitlines():
+    parts = line.split("\t")
+    if len(parts) < 8:
+        continue
+    if parts[1] == "Physics Validation Tests":
+        physics_cases = load_cases(pathlib.Path(parts[7]))
+        break
+
+print("")
+print("### Physics Validation Meanings")
+print("| Test | File | Markers | Summary | Status |")
+print("|---|---|---|---|---|")
+for row in catalog_path.read_text(encoding="utf-8", errors="replace").splitlines():
+    if not row.strip():
+        continue
+    parts = row.split("\t")
+    test_file = parts[0]
+    name = parts[1]
+    markers = parts[2] if len(parts) > 2 and parts[2] else "-"
+    summary = parts[3] if len(parts) > 3 and parts[3] else "-"
+    summary = summary.replace("|", "\\|")
+    status = physics_cases.get(name, "DESELECTED")
+    print(f"| `{name}` | `{test_file}` | `{markers}` | {summary} | {status} |")
+PY
+  fi
 }
 
 write_metadata
 build_smoke_catalog
+build_physics_catalog
 
 log "NRSS test report run started: $TIMESTAMP_UTC"
 log "Repository: $REPO_ROOT"
@@ -336,6 +427,14 @@ fi
 STEP=$((STEP + 1))
 
 run_conda_step "Smoke Tests (GPU)" "python -m pytest tests/smoke -m gpu -v" "$STEP" || ANY_FAIL=1
+if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
+  generate_summary
+  cat "$SUMMARY_MD"
+  exit 1
+fi
+STEP=$((STEP + 1))
+
+run_conda_step "Physics Validation Tests" "python -m pytest tests/validation -m physics_validation -v" "$STEP" || ANY_FAIL=1
 if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
   generate_summary
   cat "$SUMMARY_MD"

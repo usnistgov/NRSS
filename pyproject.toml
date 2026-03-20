@@ -47,5 +47,7 @@ markers = [
     "cpu: CPU-only tests",
     "gpu: tests that require GPU hardware or GPU-only dependencies",
     "slow: long-running tests",
+    "physics_validation: physics-facing validation tests for scattering behavior and analytical comparisons",
+    "toolchain_validation: validation tests that exercise the pybind-to-reduction workflow end to end",
     "phase0: phase-0 hardening tests",
 ]
