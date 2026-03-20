@@ -10,15 +10,27 @@ Usage:
 Options:
   -e, --env NAME            Conda environment name (default: $NRSS_TEST_ENV or mar2025)
   -r, --report-root PATH    Report root directory (default: test-reports)
+  --cyrsoxs-cli-dir PATH    Prepend PATH to CLI lookup inside each conda-run step.
+  --cyrsoxs-pybind-dir PATH Prepend PATH to PYTHONPATH inside each conda-run step.
   --cmd "COMMAND"           Add a test command to run in conda env.
                             Can be passed multiple times.
                             If not provided, default smoke tests (CPU+GPU) are executed.
   --stop-on-fail            Stop after first failing step.
   -h, --help                Show this help.
 
+Environment overrides:
+  NRSS_TEST_CYRSOXS_CLI_DIR     Same as --cyrsoxs-cli-dir.
+  NRSS_TEST_CYRSOXS_PYBIND_DIR  Same as --cyrsoxs-pybind-dir.
+
 Examples:
   scripts/run_local_test_report.sh
   NRSS_TEST_ENV=mar2025 scripts/run_local_test_report.sh
+  scripts/run_local_test_report.sh -e nrss-dev \\
+    --cyrsoxs-cli-dir /path/to/cyrsoxs/build \\
+    --cyrsoxs-pybind-dir /path/to/cyrsoxs/build-pybind
+  NRSS_TEST_CYRSOXS_CLI_DIR=/path/to/cyrsoxs/build \\
+    NRSS_TEST_CYRSOXS_PYBIND_DIR=/path/to/cyrsoxs/build-pybind \\
+    scripts/run_local_test_report.sh -e nrss-dev
   scripts/run_local_test_report.sh --cmd "python -m pytest -m 'not slow' -q"
   scripts/run_local_test_report.sh --cmd "python -m pytest tests/smoke -m gpu -q"
   scripts/run_local_test_report.sh -e mar2025 --cmd "python -m pytest tests/validation -q"
@@ -28,6 +40,8 @@ EOF
 ENV_NAME="${NRSS_TEST_ENV:-mar2025}"
 REPORT_ROOT="test-reports"
 STOP_ON_FAIL=0
+CYRSOXS_CLI_DIR="${NRSS_TEST_CYRSOXS_CLI_DIR:-${NRSS_TEST_PATH_PREPEND:-}}"
+CYRSOXS_PYBIND_DIR="${NRSS_TEST_CYRSOXS_PYBIND_DIR:-${NRSS_TEST_PYTHONPATH_PREPEND:-}}"
 declare -a TEST_CMDS=()
 
 while [[ $# -gt 0 ]]; do
@@ -38,6 +52,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     -r|--report-root)
       REPORT_ROOT="${2:-}"
+      shift 2
+      ;;
+    --cyrsoxs-cli-dir)
+      CYRSOXS_CLI_DIR="${2:-}"
+      shift 2
+      ;;
+    --cyrsoxs-pybind-dir)
+      CYRSOXS_PYBIND_DIR="${2:-}"
       shift 2
       ;;
     --cmd)
@@ -115,6 +137,8 @@ write_metadata() {
     echo "git_worktree=$git_dirty"
     echo "conda_env=$ENV_NAME"
     echo "cuda_visible_devices=$visible_gpus"
+    echo "cyrsoxs_cli_dir=$CYRSOXS_CLI_DIR"
+    echo "cyrsoxs_pybind_dir=$CYRSOXS_PYBIND_DIR"
     if command -v nvidia-smi >/dev/null 2>&1; then
       echo "nvidia_smi=present"
       nvidia-smi -L || true
@@ -209,7 +233,7 @@ run_conda_step() {
   local step_name="$1"
   local cmd="$2"
   local step_index="$3"
-  local slug log_file case_file start_ts end_ts duration status rc result_line cmd_oneline
+  local slug log_file case_file start_ts end_ts duration status rc result_line cmd_oneline inner_cmd
 
   slug="$(slugify "$step_name")"
   log_file="$REPORT_DIR/step-$(printf '%02d' "$step_index")-${slug}.log"
@@ -220,7 +244,15 @@ run_conda_step() {
   log "    Command: $cmd"
   start_ts="$(date +%s)"
 
-  CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" conda run -n "$ENV_NAME" bash -lc "$cmd" > "$log_file" 2>&1
+  inner_cmd="$cmd"
+  if [[ -n "$CYRSOXS_PYBIND_DIR" ]]; then
+    inner_cmd="export PYTHONPATH=\"${CYRSOXS_PYBIND_DIR}\${PYTHONPATH:+:\$PYTHONPATH}\""$'\n'"$inner_cmd"
+  fi
+  if [[ -n "$CYRSOXS_CLI_DIR" ]]; then
+    inner_cmd="export PATH=\"${CYRSOXS_CLI_DIR}:\$PATH\""$'\n'"$inner_cmd"
+  fi
+
+  CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" conda run -n "$ENV_NAME" bash -lc "$inner_cmd" > "$log_file" 2>&1
   rc=$?
 
   end_ts="$(date +%s)"
