@@ -1,6 +1,6 @@
 # NRSS Phase 0 Test Strategy (Draft)
 
-Status: In progress (smoke harness landed; Bragg-inclusive 3D+2D physics-validation layer landed; latest local report green)  
+Status: In progress (smoke harness landed; Bragg-inclusive 3D+2D physics-validation layer landed; sphere orientational-contrast physics validation landed; latest local report green)  
 Branch: `test/phase0-pytest-hardening`
 
 ## 1. Why this exists
@@ -25,32 +25,36 @@ Current implemented Phase 0 assets:
 1. `tests/smoke/test_smoke.py` (22 tests total: 12 CPU/non-GPU, 10 GPU-marked).
 2. `tests/conftest.py` (default single-GPU pinning for reproducibility and to avoid known CyRSoXS multi-GPU instability during energy fan-out).
 3. `scripts/run_local_test_report.sh` (default `nrss-dev` environment, environment snapshot + CPU smoke + GPU smoke + physics validation + markdown summary, plus `--skip-defaults` and `--repeat N` for targeted command sweeps).
-4. `tests/validation/test_analytical_sphere_form_factor.py` (flat-detector analytical sphere guardrail through the pybind-to-PyHyper workflow).
-5. `tests/validation/test_sphere_contrast_scaling.py` (quadratic contrast-scaling validation across beta/delta/mixed/split families).
-6. `tests/validation/test_analytical_2d_disk_form_factor.py` (direct analytical 2D disk guardrail through the pybind-to-PyHyper workflow).
-7. `tests/validation/test_2d_disk_contrast_scaling.py` (quadratic contrast-scaling validation for the 2D disk pathway).
-8. `tests/validation/lib/bragg.py` (shared deterministic Bragg lattice morphology/prediction helpers for 2D and 3D validation).
-9. `tests/validation/test_bragg_2d_lattice.py` (deterministic square and hexagonal 2D Bragg peak-position validation through the pybind-to-PyHyper workflow).
-10. `tests/validation/test_bragg_3d_lattice.py` (deterministic simple-cubic and HCP 3D Bragg peak-position validation through the pybind-to-PyHyper workflow).
-11. `scripts/validation_diagnostics/` (archived one-off development diagnostics kept out of pytest collection).
-12. `pyproject.toml` pytest markers (`smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `toolchain_validation`, `phase0`).
+4. `tests/validation/lib/orientational_contrast.py` (reusable tensor-based para/perp-to-far-field helper for inspectable anisotropic contrast predictions).
+5. `tests/validation/test_analytical_sphere_form_factor.py` (flat-detector analytical sphere guardrail through the pybind-to-PyHyper workflow).
+6. `tests/validation/test_sphere_contrast_scaling.py` (quadratic contrast-scaling validation across beta/delta/mixed/split families).
+7. `tests/validation/test_sphere_orientational_contrast_scaling.py` (helper-driven orientational-contrast validation across `theta`, `psi`, low-symmetry Euler combinations, and `S`, including the explicit `S=0` isotropic endpoint).
+8. `tests/validation/test_analytical_2d_disk_form_factor.py` (direct analytical 2D disk guardrail through the pybind-to-PyHyper workflow).
+9. `tests/validation/test_2d_disk_contrast_scaling.py` (quadratic contrast-scaling validation for the 2D disk pathway).
+10. `tests/validation/lib/bragg.py` (shared deterministic Bragg lattice morphology/prediction helpers for 2D and 3D validation).
+11. `tests/validation/test_bragg_2d_lattice.py` (deterministic square and hexagonal 2D Bragg peak-position validation through the pybind-to-PyHyper workflow).
+12. `tests/validation/test_bragg_3d_lattice.py` (deterministic simple-cubic and HCP 3D Bragg peak-position validation through the pybind-to-PyHyper workflow).
+13. `scripts/validation_diagnostics/` (archived one-off development diagnostics plus opt-in orientational-contrast plot/tiny-model probes kept out of pytest collection).
+14. `pyproject.toml` pytest markers (`smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `toolchain_validation`, `phase0`).
 
 Latest local evidence (GPU-enabled host):
 
-1. Injected-build physics lane command: `bash scripts/run_local_test_report.sh --skip-defaults --cyrsoxs-cli-dir /homes/deand/dev/cyrsoxs/build --cyrsoxs-pybind-dir /homes/deand/dev/cyrsoxs/build-pybind --cmd "python -m pytest tests/validation -m physics_validation -v"`
-2. Timestamp (UTC): `20260321T104515Z`
-3. Report directory: `test-reports/20260321T104515Z`
+1. Installed-build full physics lane command: `bash scripts/run_local_test_report.sh --skip-defaults --cmd "python -m pytest tests/validation -m physics_validation -v"`
+2. Timestamp (UTC): `20260321T190132Z`
+3. Report directory: `test-reports/20260321T190132Z`
 4. Result: `1/1` steps passed
-5. Physics validation: `10 passed, 2 deselected`
-6. The standard physics lane in `scripts/run_local_test_report.sh` auto-discovers these Bragg modules because it runs `python -m pytest tests/validation -m physics_validation -v`.
-7. Installed-build cross-check: `CUDA_VISIBLE_DEVICES=1 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_bragg_2d_lattice.py tests/validation/test_bragg_3d_lattice.py -v` passed `4/4` against the installed `CyRSoXS 1.1.8.0` package build.
+5. Physics validation: `11 passed, 2 deselected`
+6. The standard physics lane in `scripts/run_local_test_report.sh` auto-discovers the new orientational module because it runs `python -m pytest tests/validation -m physics_validation -v`.
+7. The markdown report now carries full physics-test docstrings in the “Physics Tests” section, and targeted custom physics commands also resolve per-test statuses correctly.
+8. Opt-in orientational artifacts were generated successfully via `python scripts/validation_diagnostics/sphere_orientational_contrast_diagnostic.py` under `test-reports/sphere-orientational-contrast-dev/`.
+9. Installed-build cross-check for the earlier Bragg coverage still stands: `CUDA_VISIBLE_DEVICES=1 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_bragg_2d_lattice.py tests/validation/test_bragg_3d_lattice.py -v` passed `4/4` against the installed `CyRSoXS 1.1.8.0` package build.
 
 Observed caveats:
 
 1. GPU tests are hardware-dependent and still require a visible NVIDIA GPU.
 2. GPU smoke emitted one upstream `PendingDeprecationWarning` from `PyHyperScattering` (`GroupBy.apply`).
 3. Core-shell and circle-lattice validation migration still remain open, but Bragg lattice coverage is now pytest-native for both 2D and 3D pathways.
-4. Validation plot writing is opt-in via `NRSS_WRITE_VALIDATION_PLOTS=1`; routine runs should stay plot-free.
+4. Validation plot writing remains opt-in; the orientational sphere case now has a dedicated manual plot/TSV diagnostic under `scripts/validation_diagnostics/` so routine runs can stay plot-free.
 
 ## 4. Proposed test layers
 
@@ -113,7 +117,16 @@ Implemented:
    - beta-only, positive-delta-only, negative-delta-only, mixed, and split-material families,
    - integrated intensity metrics over `q in [0.06, 1.0] nm^-1`,
    - fixed thresholds for weighted/unweighted contrast scaling and family pairing consistency.
-3. Analytical 2D disk form-factor comparison:
+3. Sphere orientational-contrast guardrail:
+   - one `128 x 128 x 128` sphere-in-vacuum morphology at `PhysSize = 2.0 nm`, `Diameter = 32 nm`,
+   - contrast varied only through uniaxial tensor orientation and aligned fraction rather than scalar OC magnitude,
+   - helper-driven expectations from `tests/validation/lib/orientational_contrast.py`,
+   - three close-energy optical-constant families: pure delta dichroism, pure beta dichroism, and mixed delta+beta,
+   - high-symmetry `theta` coverage across `[0, pi]`,
+   - high-symmetry `psi` coverage across `[0, 2*pi]`,
+   - low-symmetry coupled Euler cases plus an `S` sweep including `S=0`,
+   - direct detector-annulus ratio checks with a fixed empirical threshold.
+4. Analytical 2D disk form-factor comparison:
    - pybind execution only,
    - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
    - diameters `70 nm` and `128 nm`,
@@ -122,7 +135,7 @@ Implemented:
    - direct analytical disk comparison on the PyHyper q bins,
    - separate pointwise and minima-alignment metrics with fixed thresholds,
    - fixed `sr=1` to match the established sphere-harness assertion mode while exercising the distinct 2D compute path.
-4. 2D disk contrast-scaling guardrail:
+5. 2D disk contrast-scaling guardrail:
    - one `70 nm` 2D disk morphology reused across energies,
    - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
    - 24 close-energy contrast scenarios,
@@ -194,6 +207,8 @@ From repository root:
 bash scripts/run_local_test_report.sh --stop-on-fail
 bash scripts/run_local_test_report.sh --skip-defaults --repeat 20 \
   --cmd "python -m pytest tests/validation/test_analytical_2d_disk_form_factor.py -q"
+python scripts/validation_diagnostics/orientational_contrast_tiny_diagnostic.py
+python scripts/validation_diagnostics/sphere_orientational_contrast_diagnostic.py
 conda run -n nrss-dev python -m pytest tests/smoke -m "not gpu" -v
 conda run -n nrss-dev python -m pytest tests/smoke -m "gpu" -v
 conda run -n nrss-dev python -m pytest tests/validation -m "physics_validation" -v

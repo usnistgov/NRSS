@@ -1,18 +1,36 @@
 # Validation Diagnostics Archive
 
-This directory preserves one-off diagnostic scripts that were useful while rebuilding the analytical sphere validation into a robust pytest suite.
+This directory preserves opt-in development diagnostics that are useful while
+building or re-opening validation work, but which do not belong in the default
+pytest suite.
 
 These files are intentionally **not** under `tests/` anymore:
 - they were exploratory rather than stable regression tests,
 - they often used large ad hoc geometries and custom plotting paths,
 - several probe overlapping hypotheses and would be noisy to maintain as part of the normal suite.
+- some are still actively useful for manual artifact generation or small
+  development probes, even after a stable pytest replacement exists.
 
 The stable replacement that came out of this work is:
 - `tests/validation/test_analytical_sphere_form_factor.py`
+- `tests/validation/test_sphere_orientational_contrast_scaling.py`
 
 Use these archived scripts only when re-opening one of the specific investigation threads below.
 
 ## Archived Files
+
+- `orientational_contrast_tiny_diagnostic.py`
+  - Purpose: preserves the original `64^3` tiny-model probe used to debug and
+    validate the reusable orientational-contrast helper before promoting the
+    `128^3` sphere check to an official physics test.
+  - Status: development-only. The stable regression is now
+    `tests/validation/test_sphere_orientational_contrast_scaling.py`.
+
+- `sphere_orientational_contrast_diagnostic.py`
+  - Purpose: reruns the official orientational-contrast validation matrix and
+    writes opt-in plots plus a TSV summary under `test-reports/`.
+  - Status: active manual diagnostic helper. It intentionally stays out of the
+    default report/suite because the normal physics lane should remain plot-free.
 
 - `analytical_disk_form_factor_diagnostic.py`
   - Purpose: tested whether a 2D disk/circle could be a cheaper analytical comparison surrogate when the 3D sphere showed persistent high-q disagreement.
@@ -51,6 +69,9 @@ Use these archived scripts only when re-opening one of the specific investigatio
 ## Guidance For Future Reuse
 
 - Treat these as archived notebooks-in-code, not as authoritative tests.
+- When a stable pytest replacement exists, treat the pytest module as the
+  source of truth and use these scripts only for manual inspection or new
+  development work.
 - If one of these themes becomes relevant again, copy the relevant logic into a fresh diagnostic script rather than reviving the whole file uncritically.
 - If a future backend rewrite changes the sphere behavior substantially, the most relevant starting points are:
   - `sphere_flat_detector_analytic_diagnostic.py`

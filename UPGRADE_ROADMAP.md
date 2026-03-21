@@ -214,6 +214,9 @@ Recommended implementation order:
 2. PyTorch: good GPU kernel ecosystem and deployment maturity for later integration.
 3. JAX: strong for compiled/fused workflows, but higher complexity for this parity-first migration.
 
+Important backend variant(s):
+approximate but accelerated computation could be done by computing a 3D model up to the point of the 3D p-fields, then collapsing the Z-axis by sum or mean (Z-axis projection), then continuing on the 2D FFT computation track to results. This may be accurate enough for many users and could be significantly faster for some jobs. The legacy cyrsoxs engine does not have this capability. Ideally, this could be incorporated into the above implementations with a flag that is ignored with warning by backends that don't support it (like cyrsoxs)
+
 TensorFlow is deprioritized for this project.
 
 ## 8. Test-First Program (Highest Priority)
@@ -287,41 +290,60 @@ Latest run evidence:
    - one-morph, multi-energy contrast-scaling validation,
    - 24 close-energy scenarios covering beta-only, delta-only, mixed, and split-material families,
    - integrated-intensity checks over a fixed q window with fixed empirical thresholds.
-3. Added `tests/validation/test_analytical_2d_disk_form_factor.py`:
+3. Added `tests/validation/lib/orientational_contrast.py`:
+   - reusable tensor-based helper that turns para/perp delta/beta channels plus Euler angles and `S` into inspectable effective indices, induced polarization vectors, and Eq. 15/16-style far-field contrast predictions,
+   - explicitly documents the How-to-RSoXS citation plus the rotation / far-field projection path used for expectations.
+4. Added `tests/validation/test_sphere_orientational_contrast_scaling.py`:
+   - one-morph, multi-energy orientational-contrast validation for a sphere in vacuum,
+   - `128 x 128 x 128`, `PhysSize = 2.0 nm`, `Diameter = 32 nm`,
+   - close-energy pure-delta, pure-beta, and mixed dichroic families,
+   - high-symmetry `theta` and `psi` coverage, low-symmetry coupled Euler cases, and an `S` series including `S=0`,
+   - helper-driven expected ratios plus direct detector-annulus observed ratios,
+   - optional plot writing through `NRSS_WRITE_VALIDATION_PLOTS=1`.
+5. Added `tests/validation/test_analytical_2d_disk_form_factor.py`:
    - direct analytical 2D disk comparison through the pybind-to-PyHyper workflow,
    - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`, diameters `70 nm` and `128 nm`,
    - pointwise and minima-alignment metrics with fixed empirical thresholds,
    - explicit disk-versus-vacuum morphology,
    - fixed `sr=1` only, mirroring the sphere test’s assertion anchor while avoiding extra 2D-path variability,
    - optional plot writing gated by `NRSS_WRITE_VALIDATION_PLOTS=1`.
-4. Added `tests/validation/test_2d_disk_contrast_scaling.py`:
+6. Added `tests/validation/test_2d_disk_contrast_scaling.py`:
    - one-morph, multi-energy contrast-scaling validation for the 2D pathway,
    - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
    - 24 close-energy scenarios covering beta-only, delta-only, mixed, and split-material families,
    - integrated-intensity checks over a fixed q window with fixed empirical thresholds.
-5. Added `tests/validation/lib/bragg.py`:
+7. Added `tests/validation/lib/bragg.py`:
    - shared deterministic lattice builders and reciprocal-space prediction helpers for Bragg validation,
    - supports square/hexagonal 2D disk lattices and simple-cubic/HCP 3D sphere lattices,
    - keeps explicit vacuum as the second material and uses float-center local stamping for morphology construction.
-6. Added `tests/validation/test_bragg_2d_lattice.py`:
+8. Added `tests/validation/test_bragg_2d_lattice.py`:
    - deterministic square (`a = 30 nm`) and hexagonal (`a = 45 nm`) disk lattices at `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
    - validates detector-peak locations and quasi-powder shell locations through the pybind-to-PyHyper workflow,
    - includes verbose diagnostic plots with full predicted-shell overlays.
-7. Added `tests/validation/test_bragg_3d_lattice.py`:
+9. Added `tests/validation/test_bragg_3d_lattice.py`:
    - deterministic simple-cubic (`a = 30 nm`) and ideal HCP (`a = 45 nm`) sphere lattices at `256 x 1024 x 1024`, `PhysSize = 1.0 nm`,
    - validates detector-visible 3D Bragg peak locations plus azimuthally averaged shell locations,
    - uses explicit flat-detector geometry handling for shell prediction and includes verbose diagnostic plots with visibility-class overlays.
-8. Archived one-off exploratory validation code under `scripts/validation_diagnostics/` so it remains available for future archaeology without polluting pytest collection.
-9. Extended `scripts/run_local_test_report.sh` to include the marker-based `physics_validation` lane in the standard local report, while also supporting `--skip-defaults` plus repeated explicit `--cmd` runs for targeted validation and stochastic-failure checks. Newly added Bragg pytest modules are therefore included automatically.
-10. Targeted local validation against an injected fixed CyRSoXS pybind build removed the prior same-process 2D analytical disk stochastic failure in local testing:
+10. Archived one-off exploratory validation code under `scripts/validation_diagnostics/` so it remains available for future archaeology without polluting pytest collection.
+    - this directory now also holds `orientational_contrast_tiny_diagnostic.py`, the development-only preserved `64^3` probe that preceded the official orientational test,
+    - and `sphere_orientational_contrast_diagnostic.py`, an opt-in artifact generator that writes orientational ratio plots plus TSV summaries under `test-reports/sphere-orientational-contrast-dev/`.
+11. Extended `scripts/run_local_test_report.sh` to include the marker-based `physics_validation` lane in the standard local report, while also supporting `--skip-defaults` plus repeated explicit `--cmd` runs for targeted validation and stochastic-failure checks. Newly added physics modules are therefore included automatically.
+    - physics-test report summaries now retain full docstring descriptions rather than only the first line,
+    - and targeted custom physics commands now resolve per-test statuses in the markdown report instead of falling back to `DESELECTED`.
+12. Targeted local validation against an injected fixed CyRSoXS pybind build removed the prior same-process 2D analytical disk stochastic failure in local testing:
    - one-process back-to-back `70 nm` then `128 nm` analytical 2D disk validation passed `20/20` repeated runs on a single visible GPU,
    - the shipped pytest module also passed cleanly against the injected build,
    - interpret this as local evidence that the 2D-path failure was upstream to NRSS rather than a remaining deterministic NRSS harness issue.
-11. Latest injected-build physics-lane evidence for the expanded suite:
-   - command: `bash scripts/run_local_test_report.sh --skip-defaults --cyrsoxs-cli-dir /homes/deand/dev/cyrsoxs/build --cyrsoxs-pybind-dir /homes/deand/dev/cyrsoxs/build-pybind --cmd "python -m pytest tests/validation -m physics_validation -v"`,
-   - timestamp/report: `20260321T104515Z` / `test-reports/20260321T104515Z`,
-   - result: `10 passed, 2 deselected` in the physics-validation lane.
-12. Installed-package cross-check for the new Bragg coverage also passed:
+13. Latest installed-build physics-lane evidence for the expanded suite:
+   - command: `bash scripts/run_local_test_report.sh --skip-defaults --cmd "python -m pytest tests/validation -m physics_validation -v"`,
+   - timestamp/report: `20260321T190132Z` / `test-reports/20260321T190132Z`,
+   - result: `11 passed, 2 deselected` in the physics-validation lane.
+14. A targeted installed-build report run also confirmed that the new orientational module is described correctly in `summary.md`:
+   - command: `bash scripts/run_local_test_report.sh --skip-defaults --cmd "python -m pytest tests/validation/test_sphere_orientational_contrast_scaling.py -m physics_validation -v"`,
+   - timestamp/report: `20260321T190619Z` / `test-reports/20260321T190619Z`,
+   - result: `1 passed`,
+   - the “Physics Tests” section now includes the full orientational test description and a `PASSED` status.
+15. Installed-package cross-check for the earlier Bragg coverage also passed:
    - command: `CUDA_VISIBLE_DEVICES=1 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_bragg_2d_lattice.py tests/validation/test_bragg_3d_lattice.py -v`,
    - result: `4 passed in 126.03s`,
    - installed package resolved to `CyRSoXS 1.1.8.0`, patch `9d45790`.

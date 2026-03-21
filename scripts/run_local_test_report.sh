@@ -285,7 +285,7 @@ for test_file in sorted(validation_dir.glob("test_*.py")):
         if "physics_validation" not in markers:
             continue
         doc = (ast.get_docstring(node) or "").strip().splitlines()
-        summary = doc[0] if doc else ""
+        summary = "<br>".join(line.strip() for line in doc if line.strip())
         rows.append((str(test_file), node.lineno, node.name, ",".join(markers), summary))
 
 rows.sort(key=lambda r: (r[0], r[1]))
@@ -459,6 +459,20 @@ def load_cases(path):
             statuses[parts[0]] = parts[1]
     return statuses
 
+def soft_break_code(text):
+    escaped = (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    return escaped.replace("/", "/<wbr>").replace("_", "_<wbr>")
+
+def format_markers(markers):
+    marker_list = [marker.strip() for marker in markers.split(",") if marker.strip()]
+    if not marker_list:
+        return "-"
+    return ", ".join(f"<code>{soft_break_code(marker)}</code>" for marker in marker_list)
+
 cpu_cases = {}
 gpu_cases = {}
 for line in steps_path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -473,9 +487,8 @@ for line in steps_path.read_text(encoding="utf-8", errors="replace").splitlines(
         gpu_cases = load_cases(case_file)
 
 print("")
-print("### Smoke Test Meanings")
-print("| Test | Markers | Summary | CPU smoke | GPU smoke |")
-print("|---|---|---|---|---|")
+print("### Smoke Tests")
+print("")
 for row in catalog_path.read_text(encoding="utf-8", errors="replace").splitlines():
     if not row.strip():
         continue
@@ -483,10 +496,13 @@ for row in catalog_path.read_text(encoding="utf-8", errors="replace").splitlines
     name = parts[0]
     markers = parts[1] if len(parts) > 1 and parts[1] else "-"
     summary = parts[2] if len(parts) > 2 and parts[2] else "-"
-    summary = summary.replace("|", "\\|")
     cpu = cpu_cases.get(name, "DESELECTED")
     gpu = gpu_cases.get(name, "DESELECTED")
-    print(f"| `{name}` | `{markers}` | {summary} | {cpu} | {gpu} |")
+    print(f"- <code>{soft_break_code(name)}</code>")
+    print(f"  Status: CPU <code>{cpu}</code>; GPU <code>{gpu}</code>")
+    print(f"  Markers: {format_markers(markers)}")
+    print(f"  Summary: {summary}")
+    print("")
 PY
   fi
 
@@ -508,19 +524,36 @@ def load_cases(path):
             statuses[parts[0]] = parts[1]
     return statuses
 
+def soft_break_code(text):
+    escaped = (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    return escaped.replace("/", "/<wbr>").replace("_", "_<wbr>")
+
+def format_markers(markers):
+    marker_list = [marker.strip() for marker in markers.split(",") if marker.strip()]
+    if not marker_list:
+        return "-"
+    return ", ".join(f"<code>{soft_break_code(marker)}</code>" for marker in marker_list)
+
 physics_cases = {}
 for line in steps_path.read_text(encoding="utf-8", errors="replace").splitlines():
     parts = line.split("\t")
     if len(parts) < 8:
         continue
-    if parts[1] == "Physics Validation Tests":
+    step_name = parts[1]
+    step_cmd = parts[5] if len(parts) > 5 else ""
+    if step_name == "Physics Validation Tests" or (
+        "tests/validation" in step_cmd and "physics_validation" in step_cmd
+    ):
         physics_cases = load_cases(pathlib.Path(parts[7]))
         break
 
 print("")
-print("### Physics Validation Meanings")
-print("| Test | File | Markers | Summary | Status |")
-print("|---|---|---|---|---|")
+print("### Physics Tests")
+print("")
 for row in catalog_path.read_text(encoding="utf-8", errors="replace").splitlines():
     if not row.strip():
         continue
@@ -529,9 +562,13 @@ for row in catalog_path.read_text(encoding="utf-8", errors="replace").splitlines
     name = parts[1]
     markers = parts[2] if len(parts) > 2 and parts[2] else "-"
     summary = parts[3] if len(parts) > 3 and parts[3] else "-"
-    summary = summary.replace("|", "\\|")
     status = physics_cases.get(name, "DESELECTED")
-    print(f"| `{name}` | `{test_file}` | `{markers}` | {summary} | {status} |")
+    print(f"- <code>{soft_break_code(name)}</code>")
+    print(f"  Status: <code>{status}</code>")
+    print(f"  File: <code>{soft_break_code(test_file)}</code>")
+    print(f"  Markers: {format_markers(markers)}")
+    print(f"  Description: {summary}")
+    print("")
 PY
   fi
 }
