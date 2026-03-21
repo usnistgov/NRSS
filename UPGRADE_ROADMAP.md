@@ -299,12 +299,32 @@ Latest run evidence:
    - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
    - 24 close-energy scenarios covering beta-only, delta-only, mixed, and split-material families,
    - integrated-intensity checks over a fixed q window with fixed empirical thresholds.
-5. Archived one-off exploratory validation code under `scripts/validation_diagnostics/` so it remains available for future archaeology without polluting pytest collection.
-6. Extended `scripts/run_local_test_report.sh` to include the `physics_validation` lane in the standard local report, while also supporting `--skip-defaults` plus repeated explicit `--cmd` runs for targeted validation and stochastic-failure checks.
-7. Targeted local validation against an injected fixed CyRSoXS pybind build removed the prior same-process 2D analytical disk stochastic failure in local testing:
+5. Added `tests/validation/lib/bragg.py`:
+   - shared deterministic lattice builders and reciprocal-space prediction helpers for Bragg validation,
+   - supports square/hexagonal 2D disk lattices and simple-cubic/HCP 3D sphere lattices,
+   - keeps explicit vacuum as the second material and uses float-center local stamping for morphology construction.
+6. Added `tests/validation/test_bragg_2d_lattice.py`:
+   - deterministic square (`a = 30 nm`) and hexagonal (`a = 45 nm`) disk lattices at `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
+   - validates detector-peak locations and quasi-powder shell locations through the pybind-to-PyHyper workflow,
+   - includes verbose diagnostic plots with full predicted-shell overlays.
+7. Added `tests/validation/test_bragg_3d_lattice.py`:
+   - deterministic simple-cubic (`a = 30 nm`) and ideal HCP (`a = 45 nm`) sphere lattices at `256 x 1024 x 1024`, `PhysSize = 1.0 nm`,
+   - validates detector-visible 3D Bragg peak locations plus azimuthally averaged shell locations,
+   - uses explicit flat-detector geometry handling for shell prediction and includes verbose diagnostic plots with visibility-class overlays.
+8. Archived one-off exploratory validation code under `scripts/validation_diagnostics/` so it remains available for future archaeology without polluting pytest collection.
+9. Extended `scripts/run_local_test_report.sh` to include the marker-based `physics_validation` lane in the standard local report, while also supporting `--skip-defaults` plus repeated explicit `--cmd` runs for targeted validation and stochastic-failure checks. Newly added Bragg pytest modules are therefore included automatically.
+10. Targeted local validation against an injected fixed CyRSoXS pybind build removed the prior same-process 2D analytical disk stochastic failure in local testing:
    - one-process back-to-back `70 nm` then `128 nm` analytical 2D disk validation passed `20/20` repeated runs on a single visible GPU,
    - the shipped pytest module also passed cleanly against the injected build,
    - interpret this as local evidence that the 2D-path failure was upstream to NRSS rather than a remaining deterministic NRSS harness issue.
+11. Latest injected-build physics-lane evidence for the expanded suite:
+   - command: `bash scripts/run_local_test_report.sh --skip-defaults --cyrsoxs-cli-dir /homes/deand/dev/cyrsoxs/build --cyrsoxs-pybind-dir /homes/deand/dev/cyrsoxs/build-pybind --cmd "python -m pytest tests/validation -m physics_validation -v"`,
+   - timestamp/report: `20260321T104515Z` / `test-reports/20260321T104515Z`,
+   - result: `10 passed, 2 deselected` in the physics-validation lane.
+12. Installed-package cross-check for the new Bragg coverage also passed:
+   - command: `CUDA_VISIBLE_DEVICES=1 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_bragg_2d_lattice.py tests/validation/test_bragg_3d_lattice.py -v`,
+   - result: `4 passed in 126.03s`,
+   - installed package resolved to `CyRSoXS 1.1.8.0`, patch `9d45790`.
 
 ### 8.9 Remaining Phase 0 test-hardening gaps
 

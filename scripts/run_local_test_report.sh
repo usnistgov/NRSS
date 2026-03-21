@@ -576,6 +576,8 @@ if [[ $SKIP_DEFAULTS -eq 0 ]]; then
   fi
   STEP=$((STEP + 1))
 
+  # Marker-based discovery keeps newly added physics_validation modules,
+  # including Bragg cases under tests/validation/, in the standard lane.
   run_conda_step "Physics Validation Tests" "python -m pytest tests/validation -m physics_validation -v" "$STEP" || ANY_FAIL=1
   if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
     generate_summary

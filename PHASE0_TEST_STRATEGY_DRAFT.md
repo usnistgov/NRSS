@@ -1,6 +1,6 @@
 # NRSS Phase 0 Test Strategy (Draft)
 
-Status: In progress (smoke harness landed; initial 3D+2D physics-validation layer landed; latest local report green)  
+Status: In progress (smoke harness landed; Bragg-inclusive 3D+2D physics-validation layer landed; latest local report green)  
 Branch: `test/phase0-pytest-hardening`
 
 ## 1. Why this exists
@@ -18,7 +18,7 @@ A good Phase 0 test program should:
 4. Compare against trusted references with documented tolerances.
 5. Fail with clear messages when physics changes.
 
-## 3. Current state (as of March 20, 2026)
+## 3. Current state (as of March 21, 2026)
 
 Current implemented Phase 0 assets:
 
@@ -29,25 +29,27 @@ Current implemented Phase 0 assets:
 5. `tests/validation/test_sphere_contrast_scaling.py` (quadratic contrast-scaling validation across beta/delta/mixed/split families).
 6. `tests/validation/test_analytical_2d_disk_form_factor.py` (direct analytical 2D disk guardrail through the pybind-to-PyHyper workflow).
 7. `tests/validation/test_2d_disk_contrast_scaling.py` (quadratic contrast-scaling validation for the 2D disk pathway).
-8. `scripts/validation_diagnostics/` (archived one-off development diagnostics kept out of pytest collection).
-9. `pyproject.toml` pytest markers (`smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `toolchain_validation`, `phase0`).
+8. `tests/validation/lib/bragg.py` (shared deterministic Bragg lattice morphology/prediction helpers for 2D and 3D validation).
+9. `tests/validation/test_bragg_2d_lattice.py` (deterministic square and hexagonal 2D Bragg peak-position validation through the pybind-to-PyHyper workflow).
+10. `tests/validation/test_bragg_3d_lattice.py` (deterministic simple-cubic and HCP 3D Bragg peak-position validation through the pybind-to-PyHyper workflow).
+11. `scripts/validation_diagnostics/` (archived one-off development diagnostics kept out of pytest collection).
+12. `pyproject.toml` pytest markers (`smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `toolchain_validation`, `phase0`).
 
 Latest local evidence (GPU-enabled host):
 
-1. Command: `bash scripts/run_local_test_report.sh --stop-on-fail`
-2. Timestamp (UTC): `20260320T134227Z`
-3. Report directory: `test-reports/20260320T134227Z`
-4. Result: `4/4` steps passed
-5. CPU smoke: `12 passed, 10 deselected`
-6. GPU smoke: `10 passed, 12 deselected`
-7. Physics validation: `6 passed, 2 deselected`
-8. Targeted injected-build check: repeated same-process analytical 2D disk validation passed `20/20` runs with the fixed local CyRSoXS pybind build, eliminating the prior stochastic failure in local testing.
+1. Injected-build physics lane command: `bash scripts/run_local_test_report.sh --skip-defaults --cyrsoxs-cli-dir /homes/deand/dev/cyrsoxs/build --cyrsoxs-pybind-dir /homes/deand/dev/cyrsoxs/build-pybind --cmd "python -m pytest tests/validation -m physics_validation -v"`
+2. Timestamp (UTC): `20260321T104515Z`
+3. Report directory: `test-reports/20260321T104515Z`
+4. Result: `1/1` steps passed
+5. Physics validation: `10 passed, 2 deselected`
+6. The standard physics lane in `scripts/run_local_test_report.sh` auto-discovers these Bragg modules because it runs `python -m pytest tests/validation -m physics_validation -v`.
+7. Installed-build cross-check: `CUDA_VISIBLE_DEVICES=1 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_bragg_2d_lattice.py tests/validation/test_bragg_3d_lattice.py -v` passed `4/4` against the installed `CyRSoXS 1.1.8.0` package build.
 
 Observed caveats:
 
 1. GPU tests are hardware-dependent and still require a visible NVIDIA GPU.
 2. GPU smoke emitted one upstream `PendingDeprecationWarning` from `PyHyperScattering` (`GroupBy.apply`).
-3. The first two physics-validation modules are now pytest-native, but core-shell and circle-lattice validation migration remain open.
+3. Core-shell and circle-lattice validation migration still remain open, but Bragg lattice coverage is now pytest-native for both 2D and 3D pathways.
 4. Validation plot writing is opt-in via `NRSS_WRITE_VALIDATION_PLOTS=1`; routine runs should stay plot-free.
 
 ## 4. Proposed test layers
