@@ -1,6 +1,6 @@
 # NRSS Phase 0 Test Strategy (Draft)
 
-Status: In progress (smoke harness landed; Bragg-inclusive 3D+2D physics-validation layer landed; sphere orientational-contrast physics validation landed; latest local report green)  
+Status: In progress (smoke harness landed; Bragg-inclusive 3D+2D physics-validation layer landed; sphere orientational-contrast physics validation landed; CoreShell experimental+sim-reference validation landed; latest local physics lane green)  
 Branch: `test/phase0-pytest-hardening`
 
 ## 1. Why this exists
@@ -34,27 +34,31 @@ Current implemented Phase 0 assets:
 10. `tests/validation/lib/bragg.py` (shared deterministic Bragg lattice morphology/prediction helpers for 2D and 3D validation).
 11. `tests/validation/test_bragg_2d_lattice.py` (deterministic square and hexagonal 2D Bragg peak-position validation through the pybind-to-PyHyper workflow).
 12. `tests/validation/test_bragg_3d_lattice.py` (deterministic simple-cubic and HCP 3D Bragg peak-position validation through the pybind-to-PyHyper workflow).
-13. `scripts/validation_diagnostics/` (archived one-off development diagnostics plus opt-in orientational-contrast plot/tiny-model probes kept out of pytest collection).
-14. `pyproject.toml` pytest markers (`smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `toolchain_validation`, `phase0`).
+13. `tests/validation/lib/core_shell.py` (shared maintained CoreShell baseline morphology/reduction/reference helper for the official pytest module; falsification scenarios stay under `scripts/validation_diagnostics/`).
+14. `tests/validation/test_core_shell_reference.py` (official CoreShell physics validation against the experimental A-wedge reference plus a parallel sim-derived regression golden).
+15. `scripts/validation_diagnostics/` (archived one-off development diagnostics plus opt-in orientational-contrast/CoreShell plot probes, including the CoreShell falsification scenarios, kept out of pytest collection).
+16. `pyproject.toml` pytest markers (`smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `experimental_validation`, `toolchain_validation`, `phase0`).
 
 Latest local evidence (GPU-enabled host):
 
-1. Installed-build full physics lane command: `bash scripts/run_local_test_report.sh --skip-defaults --cmd "python -m pytest tests/validation -m physics_validation -v"`
-2. Timestamp (UTC): `20260321T190132Z`
-3. Report directory: `test-reports/20260321T190132Z`
-4. Result: `1/1` steps passed
-5. Physics validation: `11 passed, 2 deselected`
-6. The standard physics lane in `scripts/run_local_test_report.sh` auto-discovers the new orientational module because it runs `python -m pytest tests/validation -m physics_validation -v`.
-7. The markdown report now carries full physics-test docstrings in the “Physics Tests” section, and targeted custom physics commands also resolve per-test statuses correctly.
-8. Opt-in orientational artifacts were generated successfully via `python scripts/validation_diagnostics/sphere_orientational_contrast_diagnostic.py` under `test-reports/sphere-orientational-contrast-dev/`.
-9. Installed-build cross-check for the earlier Bragg coverage still stands: `CUDA_VISIBLE_DEVICES=1 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_bragg_2d_lattice.py tests/validation/test_bragg_3d_lattice.py -v` passed `4/4` against the installed `CyRSoXS 1.1.8.0` package build.
+1. Default local report command: `CUDA_VISIBLE_DEVICES=0 bash scripts/run_local_test_report.sh --stop-on-fail`
+2. Timestamp (UTC): `20260321T220543Z`
+3. Report directory: `test-reports/20260321T220543Z`
+4. Result: `4/4` steps passed
+5. Physics validation lane inside the report: `13 passed`
+6. The standard physics lane in `scripts/run_local_test_report.sh` auto-discovers the CoreShell module because it runs `python -m pytest tests/validation -m physics_validation -v`.
+7. The markdown report carries physics-test docstrings and marker metadata in the “Physics Tests” section, so the CoreShell provenance/citation block and `experimental_validation` tag in `test_core_shell_reference.py` flow into future summaries.
+8. CoreShell-only command: `CUDA_VISIBLE_DEVICES=0 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_core_shell_reference.py -v`
+9. CoreShell-only result: `2 passed`
+10. Opt-in CoreShell diagnostic artifacts were regenerated successfully via `python scripts/validation_diagnostics/core_shell_reference_diagnostic.py --write-sim-reference` under `test-reports/core-shell-dev/`.
+11. Opt-in orientational artifacts remain available via `python scripts/validation_diagnostics/sphere_orientational_contrast_diagnostic.py` under `test-reports/sphere-orientational-contrast-dev/`.
 
 Observed caveats:
 
 1. GPU tests are hardware-dependent and still require a visible NVIDIA GPU.
 2. GPU smoke emitted one upstream `PendingDeprecationWarning` from `PyHyperScattering` (`GroupBy.apply`).
-3. Core-shell and circle-lattice validation migration still remain open, but Bragg lattice coverage is now pytest-native for both 2D and 3D pathways.
-4. Validation plot writing remains opt-in; the orientational sphere case now has a dedicated manual plot/TSV diagnostic under `scripts/validation_diagnostics/` so routine runs can stay plot-free.
+3. Circle-lattice validation migration still remains open. CoreShell now has official pytest coverage on the maintained pybind + PyHyper + manual A-wedge path, with the experimental reference as the scientific gate and a sim-derived golden as a secondary regression guard.
+4. Validation plot writing remains opt-in; the orientational sphere case and the CoreShell case each have dedicated manual plot/TSV diagnostics under `scripts/validation_diagnostics/`, and the CoreShell falsification/subterfuge checks live there rather than under `tests/validation/`.
 
 ## 4. Proposed test layers
 
@@ -98,7 +102,7 @@ Targets:
 
 Purpose: compare simulation outputs against trusted analytical/golden references.
 
-Status: Initial 3D+2D layer implemented; further case migration still pending.
+Status: Initial 3D+2D layer implemented, including the CoreShell experimental-reference migration; further case migration still pending.
 
 Implemented:
 
@@ -145,9 +149,9 @@ Implemented:
 
 Next targets:
 
-1. Core-shell parity against `CS_reference.nc` or an updated pybind-native trusted reference.
-2. Circle-lattice peak-position parity.
-3. Two-material mixed beta/delta equivalence cases beyond the current split-family contrast checks.
+1. Circle-lattice peak-position parity.
+2. Two-material mixed beta/delta equivalence cases beyond the current split-family contrast checks.
+3. Shared validation fixtures/helpers for cases that now reuse the same pybind-to-PyHyper comparison pattern.
 
 ## 5. Pytest architecture
 
@@ -155,8 +159,9 @@ Next targets:
 
 Use pytest-discoverable names:
 
-1. Rename `circle-lattice-test.py` -> `test_circle_lattice.py`.
-2. Keep existing test module names for sphere and core-shell.
+1. Keep active pytest modules under `tests/validation/test_*.py`.
+2. Legacy development-era cases that are not pytest-ready now live under `scripts/validation_diagnostics/legacy_validation_tests/` so they cannot pollute normal collection.
+3. When circle-lattice returns to the maintained suite, reintroduce it as a fresh pytest-native module rather than moving the legacy script back unchanged.
 
 ### 5.2 Shared fixtures
 
@@ -181,8 +186,9 @@ Define and use:
 2. `@pytest.mark.gpu`
 3. `@pytest.mark.slow`
 4. `@pytest.mark.physics_validation`
-5. `@pytest.mark.toolchain_validation`
-6. `@pytest.mark.phase0`
+5. `@pytest.mark.experimental_validation`
+6. `@pytest.mark.toolchain_validation`
+7. `@pytest.mark.phase0`
 
 Default local run can skip slow/GPU unless explicitly requested.
 
@@ -233,10 +239,9 @@ Current status snapshot:
 
 ## 10. Proposed implementation order
 
-1. Finish migration of remaining legacy validation cases (core-shell, circle lattice) into pytest-native modules.
+1. Finish migration of the remaining circle-lattice legacy case if it still warrants maintained coverage.
 2. Add shared validation fixtures/helpers for PyHyper reduction and reference-metric computation.
-3. Decide whether core-shell/circle-lattice should use analytical references, golden references, or both.
-4. Add any missing two-material contrast-family follow-ons if physics coverage warrants it.
+3. Add any missing two-material contrast-family follow-ons if physics coverage warrants it.
 5. Add smoke/unit tests around helper utilities.
 6. Add basic performance/memory logging (non-gating initially).
 

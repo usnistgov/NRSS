@@ -267,7 +267,7 @@ Initial threshold table is intentionally provisional; calibrate from empirical b
    - Default conda env is now `nrss-dev` unless overridden with `-e/--env` or `NRSS_TEST_ENV`.
    - Standard lanes can be skipped with `--skip-defaults`.
    - Explicit `--cmd` entries can be repeated with `--repeat N` for brittleness sweeps and injected-build validation.
-3. Added pytest marker declarations in `pyproject.toml` for `smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `toolchain_validation`, and `phase0`.
+3. Added pytest marker declarations in `pyproject.toml` for `smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `experimental_validation`, `toolchain_validation`, and `phase0`.
 4. Added `tests/conftest.py` to default tests to a single visible GPU when the environment is otherwise unset, improving reproducibility and avoiding known CyRSoXS multi-GPU instability during energy fan-out.
 
 Latest run evidence:
@@ -277,7 +277,7 @@ Latest run evidence:
 3. Result: `4/4` steps passed
 4. CPU smoke: `12 passed, 10 deselected`
 5. GPU smoke: `10 passed, 12 deselected`
-6. Physics validation: `6 passed, 2 deselected`
+6. Physics validation: this early snapshot is superseded by the later expanded lane below.
 
 ### 8.8 Implemented physics validation layer (March 20, 2026)
 
@@ -324,33 +324,45 @@ Latest run evidence:
    - deterministic simple-cubic (`a = 30 nm`) and ideal HCP (`a = 45 nm`) sphere lattices at `256 x 1024 x 1024`, `PhysSize = 1.0 nm`,
    - validates detector-visible 3D Bragg peak locations plus azimuthally averaged shell locations,
    - uses explicit flat-detector geometry handling for shell prediction and includes verbose diagnostic plots with visibility-class overlays.
-10. Archived one-off exploratory validation code under `scripts/validation_diagnostics/` so it remains available for future archaeology without polluting pytest collection.
+10. Added `tests/validation/lib/core_shell.py` plus `tests/validation/test_core_shell_reference.py`:
+   - maintained CoreShell baseline workflow through pybind + PyHyperScattering `WPIntegrator` + manual A-wedge reduction,
+   - experimental PGN RSoXS golden as the scientific gate,
+   - parallel sim-derived golden as a tight regression guard,
+   - `experimental_validation` marker applied to the experimental-reference test,
+   - falsification/subterfuge scenarios intentionally kept only in the development diagnostic, not in the principal `tests/validation` surface.
+11. Archived one-off exploratory validation code under `scripts/validation_diagnostics/` so it remains available for future archaeology without polluting pytest collection.
     - this directory now also holds `orientational_contrast_tiny_diagnostic.py`, the development-only preserved `64^3` probe that preceded the official orientational test,
     - and `sphere_orientational_contrast_diagnostic.py`, an opt-in artifact generator that writes orientational ratio plots plus TSV summaries under `test-reports/sphere-orientational-contrast-dev/`.
-11. Extended `scripts/run_local_test_report.sh` to include the marker-based `physics_validation` lane in the standard local report, while also supporting `--skip-defaults` plus repeated explicit `--cmd` runs for targeted validation and stochastic-failure checks. Newly added physics modules are therefore included automatically.
+    - and `core_shell_reference_diagnostic.py`, the opt-in CoreShell artifact generator that also owns the falsification/subterfuge comparisons.
+12. Extended `scripts/run_local_test_report.sh` to include the marker-based `physics_validation` lane in the standard local report, while also supporting `--skip-defaults` plus repeated explicit `--cmd` runs for targeted validation and stochastic-failure checks. Newly added physics modules are therefore included automatically.
     - physics-test report summaries now retain full docstring descriptions rather than only the first line,
     - and targeted custom physics commands now resolve per-test statuses in the markdown report instead of falling back to `DESELECTED`.
-12. Targeted local validation against an injected fixed CyRSoXS pybind build removed the prior same-process 2D analytical disk stochastic failure in local testing:
+13. Targeted local validation against an injected fixed CyRSoXS pybind build removed the prior same-process 2D analytical disk stochastic failure in local testing:
    - one-process back-to-back `70 nm` then `128 nm` analytical 2D disk validation passed `20/20` repeated runs on a single visible GPU,
    - the shipped pytest module also passed cleanly against the injected build,
    - interpret this as local evidence that the 2D-path failure was upstream to NRSS rather than a remaining deterministic NRSS harness issue.
-13. Latest installed-build physics-lane evidence for the expanded suite:
-   - command: `bash scripts/run_local_test_report.sh --skip-defaults --cmd "python -m pytest tests/validation -m physics_validation -v"`,
-   - timestamp/report: `20260321T190132Z` / `test-reports/20260321T190132Z`,
-   - result: `11 passed, 2 deselected` in the physics-validation lane.
-14. A targeted installed-build report run also confirmed that the new orientational module is described correctly in `summary.md`:
+14. Latest default local report evidence for the expanded suite:
+   - command: `CUDA_VISIBLE_DEVICES=0 bash scripts/run_local_test_report.sh --stop-on-fail`,
+   - timestamp/report: `20260321T220543Z` / `test-reports/20260321T220543Z`,
+   - result: `4/4` steps passed,
+   - physics-validation lane inside the report: `13 passed`, including both CoreShell tests,
+   - the generated markdown summary lists the experimental CoreShell test with the `experimental_validation` marker and full scientific citation block.
+15. A targeted local CoreShell-only run confirmed the new official module passes cleanly on its own:
+   - command: `CUDA_VISIBLE_DEVICES=0 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_core_shell_reference.py -v`,
+   - result: `2 passed`.
+16. A targeted installed-build report run also confirmed that the new orientational module is described correctly in `summary.md`:
    - command: `bash scripts/run_local_test_report.sh --skip-defaults --cmd "python -m pytest tests/validation/test_sphere_orientational_contrast_scaling.py -m physics_validation -v"`,
    - timestamp/report: `20260321T190619Z` / `test-reports/20260321T190619Z`,
    - result: `1 passed`,
    - the “Physics Tests” section now includes the full orientational test description and a `PASSED` status.
-15. Installed-package cross-check for the earlier Bragg coverage also passed:
+17. Installed-package cross-check for the earlier Bragg coverage also passed:
    - command: `CUDA_VISIBLE_DEVICES=1 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_bragg_2d_lattice.py tests/validation/test_bragg_3d_lattice.py -v`,
    - result: `4 passed in 126.03s`,
    - installed package resolved to `CyRSoXS 1.1.8.0`, patch `9d45790`.
 
 ### 8.9 Remaining Phase 0 test-hardening gaps
 
-1. Complete migration of remaining legacy validation workflows to pytest-native modules (especially core-shell and circle lattice).
+1. Complete migration of remaining legacy validation workflows to pytest-native modules (especially circle lattice).
 2. Decide which remaining cases should use analytical references, golden references, or both.
 3. Add CI gating policy for CPU smoke and GPU smoke/parity/physics lanes.
 4. Revisit follow-on physics coverage such as additional two-material mixed beta/delta equivalence cases if needed.

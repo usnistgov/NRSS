@@ -4,6 +4,10 @@ This directory preserves opt-in development diagnostics that are useful while
 building or re-opening validation work, but which do not belong in the default
 pytest suite.
 
+Legacy validation scripts that used to live under `tests/validation/` now live
+under `legacy_validation_tests/` in this directory so they cannot pollute
+pytest collection.
+
 These files are intentionally **not** under `tests/` anymore:
 - they were exploratory rather than stable regression tests,
 - they often used large ad hoc geometries and custom plotting paths,
@@ -14,6 +18,7 @@ These files are intentionally **not** under `tests/` anymore:
 The stable replacement that came out of this work is:
 - `tests/validation/test_analytical_sphere_form_factor.py`
 - `tests/validation/test_sphere_orientational_contrast_scaling.py`
+- `tests/validation/test_core_shell_reference.py`
 
 Use these archived scripts only when re-opening one of the specific investigation threads below.
 
@@ -31,6 +36,17 @@ Use these archived scripts only when re-opening one of the specific investigatio
     writes opt-in plots plus a TSV summary under `test-reports/`.
   - Status: active manual diagnostic helper. It intentionally stays out of the
     default report/suite because the normal physics lane should remain plot-free.
+
+- `core_shell_reference_diagnostic.py`
+  - Purpose: reruns the maintained pybind-native CoreShell workflow against the
+    vendored experimental A-wedge reference plus the local sim-derived
+    regression golden, and writes agreement plots plus metrics under
+    `test-reports/core-shell-dev/`.
+  - Status: active manual companion diagnostic for
+    `tests/validation/test_core_shell_reference.py`. Use it when reviewing
+    agreement plots, threshold discrimination, refreshed reference artifacts,
+    or deliberate falsification/subterfuge scenarios; routine physics
+    validation should go through pytest.
 
 - `analytical_disk_form_factor_diagnostic.py`
   - Purpose: tested whether a 2D disk/circle could be a cheaper analytical comparison surrogate when the 3D sphere showed persistent high-q disagreement.

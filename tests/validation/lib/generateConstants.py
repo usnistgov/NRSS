@@ -8,6 +8,12 @@ Created on Mon Dec 16 14:27:24 2019
 
 
 import numpy as np
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+VALIDATION_DATA_DIR = REPO_ROOT / "tests" / "validation" / "data"
+OPTICAL_CONSTANTS_DIR = VALIDATION_DATA_DIR / "optical_constants"
 
 """
 Function to find the nearest index 
@@ -63,6 +69,22 @@ def get_interpolated_value(array,value,nearest_id,energy_id):
             
     valArray[energy_id] = value;
     return valArray;
+
+
+def resolve_material_path(fname):
+    path = Path(fname)
+    if path.exists():
+        return path
+
+    for candidate in (
+        OPTICAL_CONSTANTS_DIR / fname,
+        VALIDATION_DATA_DIR / fname,
+        REPO_ROOT / fname,
+    ):
+        if candidate.exists():
+            return candidate
+
+    raise FileNotFoundError(f"Could not resolve material file: {fname}")
          
 def dump_dataVacuum(index,energy,f):
     Header = "EnergyData" + str(index) +":\n{\n";
@@ -105,7 +127,7 @@ def write_materials(startEnergy, endEnergy,increment,dict,labelEnergy,numMateria
         f = open("Material" + str(numMat+1) + ".txt", "w")
         fname = dict["Material" + str(numMat)]
         if(fname != 'vacuum'):
-            Data = np.loadtxt(fname,skiprows=1);
+            Data = np.loadtxt(resolve_material_path(fname),skiprows=1);
             Data = Data[Data[:,labelEnergy["Energy"]].argsort()]
             for i in range(0,NumEnergy):
                 currentEnergy = startEnergy + i* increment;

@@ -16,9 +16,11 @@ tests/validation/3Dsphere_test*
 tests/validation/CoreShelltest*
 tests/validation/grating_test*
 tests/validation/spheretest_*
+tests/validation/__pycache__/
 tests/validation/.ipynb_checkpoints/*
 tests/validation/lib/__pycache__
 tests/validation/*.log
+scripts/validation_diagnostics/generated_runs/
 *CyRSoXS.log
 .ipynb_checkpoints
 NRSS/.ipynb_checkpoints
