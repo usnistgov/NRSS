@@ -22,6 +22,12 @@ It holds workflow, tutorial, test, and implementation details that should versio
 - `tests/validation`: physics-facing and analytical comparison tests.
 - `docs/source`: editable docs source.
 
+## Validation Layout
+- `tests/validation/test_*.py`: maintained pytest-facing validation tests.
+- `tests/validation/lib/`: maintained reusable helpers for validation tests.
+- `tests/validation/data/`: minimal vendored inputs/references needed by maintained validation tests.
+- `tests/validation/dev/`: development-only sweeps, falsification probes, and benchmarks; do not treat this as the maintained pytest surface.
+
 ## Runtime Assumptions
 - Preferred install path is a conda-installed `NRSS` package.
 - Current runtime also requires `CyRSoXS` bindings to be importable from Python.
@@ -39,6 +45,7 @@ It holds workflow, tutorial, test, and implementation details that should versio
 - Do not edit generated docs output under `docs/build/`; edit sources under `docs/source/` instead.
 - Do not edit `test-reports/`, `CyRSoXS.log`, or generated validation output directories under `tests/validation/`.
 - Avoid committing notebook-output churn, checkpoint directories, logs, or other ignored artifacts unless the task explicitly requires regenerated artifacts.
+- Do not commit or leave behind generated caches such as `__pycache__`, `.nbc`, or `.nbi`, especially under `tests/validation/dev/`.
 
 ## Tutorial-Derived Workflow Position
 
@@ -160,6 +167,8 @@ scripts/run_local_test_report.sh
   - CLI-vs-pybind parity only for legacy compatibility,
   - `EAngleRotation` semantics,
   - geometry/orientation invariants for the morphology under test.
+- Physics test docstrings are surfaced in the local report summary.
+- Experimental-validation tests should include a concise provenance/citation block in the docstring, consistent with the maintained core-shell validation style.
 
 ## EAngleRotation Semantics In This Repo
 - Treat `EAngleRotation` as `[StartAngle, IncrementAngle, EndAngle]`. Spell the argument order out explicitly whenever you discuss it because users frequently get it wrong.
