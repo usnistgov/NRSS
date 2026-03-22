@@ -17,3 +17,13 @@ try:
     from ._version import version as __version__
 except ImportError:
     __version__ = "0.0.0"  # Fallback version if the file is missing
+
+from .backends import available_backends, format_backend_availability, get_backend_info, known_backends
+
+__all__ = [
+    "__version__",
+    "available_backends",
+    "format_backend_availability",
+    "get_backend_info",
+    "known_backends",
+]

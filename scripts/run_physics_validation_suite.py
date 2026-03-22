@@ -49,6 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--harvest-root", required=True, type=Path)
     parser.add_argument("--zip-path", required=True, type=Path)
     parser.add_argument("--no-plots", action="store_true")
+    parser.add_argument("--nrss-backend", default=None)
     return parser.parse_args()
 
 
@@ -202,9 +203,16 @@ def render_summary_line(total_counts: Counter[str], duration_s: float) -> str:
     return f"================= {payload} in {duration_s:.2f}s =================="
 
 
-def run_pytest_row(repo_root: Path, row: PhysicsRow, write_plots: bool) -> tuple[int, Counter[str]]:
+def run_pytest_row(
+    repo_root: Path,
+    row: PhysicsRow,
+    write_plots: bool,
+    nrss_backend: str | None = None,
+) -> tuple[int, Counter[str]]:
     env = os.environ.copy()
     env.setdefault("CUDA_VISIBLE_DEVICES", "0")
+    if nrss_backend is not None and nrss_backend.strip():
+        env["NRSS_BACKEND"] = nrss_backend.strip()
     if write_plots:
         env["NRSS_WRITE_VALIDATION_PLOTS"] = "1"
     else:
@@ -327,7 +335,12 @@ def main() -> int:
                 sys.stdout.flush()
         before_state = snapshot_png_state(plot_dirs) if plot_dirs else {}
 
-        rc, counts = run_pytest_row(repo_root, row, write_plots=not args.no_plots)
+        rc, counts = run_pytest_row(
+            repo_root,
+            row,
+            write_plots=not args.no_plots,
+            nrss_backend=args.nrss_backend,
+        )
         total_counts.update(counts)
         if rc != 0:
             any_fail = True

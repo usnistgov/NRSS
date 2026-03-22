@@ -26,6 +26,9 @@ from tests.validation.lib.core_shell import (
 )
 
 
+pytestmark = [pytest.mark.backend_specific, pytest.mark.reference_parity]
+
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLOT_DIR = REPO_ROOT / "test-reports" / "core-shell-dev"
 WRITE_VALIDATION_PLOTS = os.environ.get("NRSS_WRITE_VALIDATION_PLOTS", "").strip() == "1"

@@ -30,6 +30,14 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+# PEP 621 metadata cannot express "require one of these distributions" as a
+# single hard dependency. Expose the supported CuPy install lines explicitly and
+# enforce importability in the runtime environment/tests.
+cupy = ["cupy"]
+cupy-cuda12x = ["cupy-cuda12x"]
+cupy-cuda13x = ["cupy-cuda13x"]
+
 [project.urls]
 Homepage = "https://github.com/usnistgov/NRSS/"
 
@@ -47,6 +55,10 @@ markers = [
     "cpu: CPU-safe smoke tests for validator, I/O, and basic contract behavior",
     "gpu: tests that require GPU hardware or GPU-only dependencies",
     "slow: long-running tests",
+    "backend_agnostic_contract: tests that exercise NRSS behavior without depending on a specific backend runtime",
+    "backend_specific: tests that exercise the selected NRSS backend runtime path",
+    "cyrsoxs_only: tests that require the legacy CyRSoXS backend or CLI compatibility surface",
+    "reference_parity: tests whose assertions encode CyRSoXS-compatible reference behavior",
     "physics_validation: physics-facing validation tests for scattering behavior and analytical comparisons",
     "experimental_validation: validation tests gated against experimental reference data",
     "toolchain_validation: validation tests that exercise the pybind-to-reduction workflow end to end",

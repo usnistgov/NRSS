@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-import CyRSoXS as cy
 import matplotlib
 
 matplotlib.use("Agg")
@@ -16,10 +15,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
+from tests.validation.lib.lazy_cyrsoxs import cy
 from tests.validation.lib.orientational_contrast import (
     UniaxialOpticalState,
     predict_uniaxial_vacuum_far_field_contrast,
 )
+
+
+pytestmark = [pytest.mark.cyrsoxs_only, pytest.mark.reference_parity]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

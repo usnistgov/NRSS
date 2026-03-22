@@ -1,11 +1,27 @@
 import h5py
 # import pathlib
-import CyRSoXS as cy
 import warnings
 from .checkH5 import check_NumMat
 from .reader import read_material, read_config
 from .writer import write_opts, write_hdf5
 from .visualizer import morphology_visualizer
+from .backends import (
+    BackendUnavailableError,
+    assess_array_for_backend,
+    coerce_array_for_backend,
+    get_namespace_module,
+    get_backend_info,
+    inspect_array,
+    normalize_backend_options,
+    resolve_backend_name,
+    resolve_backend_array_contract,
+    to_python_bool,
+)
+from .backends.cyrsoxs import (
+    cyrsoxs_input_mapping as _cyrsoxs_input_mapping,
+    require_cyrsoxs_module as _require_cyrsoxs_module,
+)
+from .backends.runtime import get_backend_runtime
 
 import numpy as np
 import xarray as xr
@@ -43,6 +59,24 @@ def wraps(wrapper: Callable[P, T]) -> Callable[[Callable[P, T]], Callable[P, T]]
         return func
 
     return decorator
+
+def _validate_input_policy(policy):
+    if policy not in {"coerce", "strict"}:
+        raise ValueError(
+            f"Unsupported NRSS input_policy {policy!r}. "
+            "Supported policies are 'coerce' and 'strict'."
+        )
+    return policy
+
+
+def _validate_output_policy(policy):
+    normalized = "backend-native" if policy == "backend" else policy
+    if normalized not in {"numpy", "backend-native"}:
+        raise ValueError(
+            f"Unsupported NRSS output_policy {policy!r}. "
+            "Supported policies are 'numpy', 'backend-native', and alias 'backend'."
+        )
+    return normalized
 
 class Morphology:
     '''
@@ -97,15 +131,6 @@ class Morphology:
         further analysis
     '''
 
-    # dict to deal with specific CyRSoXS input objects. dict structure inspired from David Ackerman's cyrsoxs-framework
-    input_mapping = {'CaseType': ['setCaseType',[cy.CaseType.Default, cy.CaseType.BeamDivergence, cy.CaseType.GrazingIncidence]],
-                     'MorphologyType': ['setMorphologyType', [cy.MorphologyType.EulerAngles, cy.MorphologyType.VectorMorphology]],
-                     'EwaldsInterpolation': ['interpolationType', [cy.InterpolationType.NearestNeighour, cy.InterpolationType.Linear]],
-                     'WindowingType': ['windowingType', [cy.FFTWindowing.NoPadding, cy.FFTWindowing.Hanning]],
-                     'RotMask': ['rotMask', [False, True]],
-                     'AlgorithmType': ['setAlgorithm', [0, 1]],
-                     'ReferenceFrame': ['referenceFrame', [0, 1]]}
-
     config_default = {'CaseType': 0, 'Energies': [270.0], 'EAngleRotation': [0.0, 1.0, 0.0],
                       'MorphologyType': 0, 'AlgorithmType': 0, 'WindowingType': 0,
                       'RotMask': 0,
@@ -113,11 +138,29 @@ class Morphology:
                       'EwaldsInterpolation': 1}
 
     def __init__(self, numMaterial, materials=None, PhysSize=None,
-                 config={'CaseType': 0, 'MorphologyType': 0, 'Energies': [270.0], 'EAngleRotation': [0.0, 1.0, 0.0]}, create_cy_object=True):
+                 config={'CaseType': 0, 'MorphologyType': 0, 'Energies': [270.0], 'EAngleRotation': [0.0, 1.0, 0.0]},
+                 create_cy_object=True,
+                 backend=None,
+                 backend_options=None,
+                 input_policy='coerce',
+                 output_policy='numpy'):
 
         self._numMaterial = numMaterial
         self._PhysSize = PhysSize
         self.NumZYX = None
+        self._backend = resolve_backend_name(backend)
+        self._backend_info = get_backend_info(self._backend)
+        self._backend_runtime = get_backend_runtime(self._backend)
+        self._backend_options = normalize_backend_options(self._backend, backend_options)
+        self._backend_array_contract = resolve_backend_array_contract(
+            self._backend,
+            self._backend_options,
+        )
+        self._input_policy = _validate_input_policy(input_policy)
+        self._output_policy = _validate_output_policy(output_policy)
+        self.input_compatibility_report = []
+        self.construction_backend_coercion_report = []
+        self.last_backend_coercion_report = []
         self.inputData = None
         self.OpticalConstants = None
         self.voxelData = None
@@ -144,11 +187,13 @@ class Morphology:
                     warnings.warn('numMaterial is greater than number of Material objects passed in. Creating empty Material')
                     self.materials[i] = Material(materialID=i)
 
+        self.normalize_materials_for_backend(report_attr='construction_backend_coercion_report')
+
         # flag denoting if Morphology has been simulated
         self._simulated = False
 
         if create_cy_object:
-            self.create_update_cy()
+            self.prepare()
 
     def __repr__(self):
         return f'Morphology (NumMaterial : {self.numMaterial}, PhysSize : {self.PhysSize})'
@@ -165,7 +210,8 @@ class Morphology:
             self._CaseType = casevalue
 
             if self.inputData:
-                self.inputData.setCaseType(self.input_mapping['CaseType'][1][casevalue])
+                cy = _require_cyrsoxs_module()
+                self.inputData.setCaseType(_cyrsoxs_input_mapping(cy)['CaseType'][1][casevalue])
 
     @property
     def Energies(self):
@@ -203,7 +249,8 @@ class Morphology:
             self._MorphologyType = value
 
             if self.inputData:
-                self.inputData.setMorphologyType(self.input_mapping['MorphologyType'][1][value])
+                cy = _require_cyrsoxs_module()
+                self.inputData.setMorphologyType(_cyrsoxs_input_mapping(cy)['MorphologyType'][1][value])
 
     @property
     def AlgorithmType(self):
@@ -230,7 +277,8 @@ class Morphology:
             self._WindowingType = value
 
             if self.inputData:
-                self.inputData.windowingType = self.input_mapping['WindowingType'][1][value]
+                cy = _require_cyrsoxs_module()
+                self.inputData.windowingType = _cyrsoxs_input_mapping(cy)['WindowingType'][1][value]
 
     @property
     def RotMask(self):
@@ -258,7 +306,8 @@ class Morphology:
             self._EwaldsInterpolation = value
 
             if self.inputData:
-                self.inputData.interpolationType = self.input_mapping['EwaldsInterpolation'][1][value]
+                cy = _require_cyrsoxs_module()
+                self.inputData.interpolationType = _cyrsoxs_input_mapping(cy)['EwaldsInterpolation'][1][value]
 
     @property
     def ReferenceFrame(self):
@@ -272,11 +321,40 @@ class Morphology:
             self._ReferenceFrame = value
 
             if self.inputData:
-                self.inputData.referenceFrame = self.input_mapping['ReferenceFrame'][1][value]
+                cy = _require_cyrsoxs_module()
+                self.inputData.referenceFrame = _cyrsoxs_input_mapping(cy)['ReferenceFrame'][1][value]
 
     @property
     def simulated(self):
         return self._simulated
+
+    @property
+    def backend(self):
+        return self._backend
+
+    @property
+    def backend_info(self):
+        return self._backend_info
+
+    @property
+    def backend_options(self):
+        return dict(self._backend_options)
+
+    @property
+    def backend_array_contract(self):
+        return dict(self._backend_array_contract)
+
+    @property
+    def backend_dtype(self):
+        return self._backend_array_contract["dtype"]
+
+    @property
+    def input_policy(self):
+        return self._input_policy
+
+    @property
+    def output_policy(self):
+        return self._output_policy
 
     @property
     def PhysSize(self):
@@ -294,6 +372,119 @@ class Morphology:
     @property
     def numMaterial(self):
         return self._numMaterial
+
+    def _require_backend(self, backend_name, operation):
+        if self.backend != backend_name:
+            raise BackendUnavailableError(
+                f"{operation} requires backend {backend_name!r}, but this Morphology "
+                f"is configured for backend {self.backend!r}."
+            )
+
+    def _refresh_backend_info(self):
+        self._backend_info = get_backend_info(self.backend)
+
+    def _refresh_backend_contract(self):
+        self._backend_array_contract = resolve_backend_array_contract(
+            self.backend,
+            self._backend_options,
+        )
+
+    def _collect_backend_assessment(self):
+        reports = []
+        for material_id, mat in self.materials.items():
+            for field_name in ('Vfrac', 'S', 'theta', 'psi'):
+                reports.append(
+                    assess_array_for_backend(
+                        getattr(mat, field_name),
+                        backend_name=self.backend,
+                        field_name=field_name,
+                        material_id=material_id,
+                        backend_options=self.backend_options,
+                    )
+                )
+        return reports
+
+    @staticmethod
+    def _plan_requires_coercion(plan):
+        return (
+            plan.transfer != 'none'
+            or plan.requires_dtype_cast
+            or plan.requires_layout_copy
+        )
+
+    def _format_backend_input_error(self, plans, *, strict):
+        header = (
+            f"Morphology backend input normalization failed for backend {self.backend!r}."
+            if not strict
+            else (
+                f"Morphology backend input normalization would require coercion under "
+                f"input_policy='strict' for backend {self.backend!r}."
+            )
+        )
+        details = []
+        for plan in plans:
+            material_label = "unknown" if plan.material_id is None else str(plan.material_id)
+            details.append(
+                f"- material {material_label} field {plan.field_name}: {plan.reason} "
+                f"(from {plan.original_namespace}/{plan.original_dtype} "
+                f"to {plan.target_namespace}/{plan.target_dtype}; transfer={plan.transfer})"
+            )
+        return "\n".join([header, *details])
+
+    def refresh_backend_assessment(self):
+        reports = self._collect_backend_assessment()
+        self.input_compatibility_report = reports
+        self._refresh_backend_contract()
+        self._refresh_backend_info()
+        return reports
+
+    def normalize_materials_for_backend(self, report_attr='last_backend_coercion_report'):
+        reports = self._collect_backend_assessment()
+        unsupported = [plan for plan in reports if not plan.supported]
+        if unsupported:
+            raise TypeError(self._format_backend_input_error(unsupported, strict=False))
+
+        if self.input_policy == 'strict':
+            required = [
+                plan for plan in reports
+                if plan.original_namespace != 'missing' and self._plan_requires_coercion(plan)
+            ]
+            if required:
+                raise TypeError(self._format_backend_input_error(required, strict=True))
+            setattr(self, report_attr, list(reports))
+            self.input_compatibility_report = list(reports)
+            self._refresh_backend_info()
+            return self.input_compatibility_report
+
+        normalized_reports = []
+        for material_id, mat in self.materials.items():
+            for field_name in ('Vfrac', 'S', 'theta', 'psi'):
+                plan = assess_array_for_backend(
+                    getattr(mat, field_name),
+                    backend_name=self.backend,
+                    field_name=field_name,
+                    material_id=material_id,
+                    backend_options=self.backend_options,
+                )
+                normalized_reports.append(plan)
+                if getattr(mat, field_name) is not None:
+                    setattr(mat, field_name, coerce_array_for_backend(getattr(mat, field_name), plan))
+
+        setattr(self, report_attr, normalized_reports)
+        return self.refresh_backend_assessment()
+
+    def _coerce_material_field(self, value, field_name, material_id):
+        plan = assess_array_for_backend(
+            value,
+            backend_name=self.backend,
+            field_name=field_name,
+            material_id=material_id,
+            backend_options=self.backend_options,
+        )
+        self.last_backend_coercion_report.append(plan)
+        if value is None:
+            return None
+        return coerce_array_for_backend(value, plan)
 
     # @numMaterial.setter
     # def numMaterial(self, val):
@@ -319,7 +510,15 @@ class Morphology:
                 warnings.warn(f'Key {key} not supported')
 
     @classmethod
-    def load_morph_hdf5(cls, hdf5_file, create_cy_object=False):
+    def load_morph_hdf5(
+        cls,
+        hdf5_file,
+        create_cy_object=False,
+        backend=None,
+        backend_options=None,
+        input_policy='coerce',
+        output_policy='numpy',
+    ):
         with h5py.File(hdf5_file, 'r') as f:
             if 'Euler_Angles' not in f.keys():
                 raise KeyError('Only the Euler Angle convention is currently supported')
@@ -339,7 +538,16 @@ class Morphology:
                     psi=f[f'Euler_Angles/Mat_{i+1}_Psi'][()],
                     NumZYX=f[f'Euler_Angles/Mat_{i+1}_Vfrac'][()].shape)
 
-        return cls(numMat, materials=materials, PhysSize=PhysSize, create_cy_object=create_cy_object)
+        return cls(
+            numMat,
+            materials=materials,
+            PhysSize=PhysSize,
+            create_cy_object=create_cy_object,
+            backend=backend,
+            backend_options=backend_options,
+            input_policy=input_policy,
+            output_policy=output_policy,
+        )
 
     def load_config(self, config_file):
         self.config = read_config(config_file)
@@ -347,7 +555,12 @@ class Morphology:
     def load_matfile(self, matfile):
         return read_material(matfile)
 
+    def prepare(self):
+        return self._backend_runtime.prepare(self)
+
     def create_inputData(self):
+        self._require_backend('cyrsoxs', 'create_inputData')
+        cy = _require_cyrsoxs_module()
         self.inputData = cy.InputData(NumMaterial=self._numMaterial)
         # parse config dictionary and assign to appropriate places in inputData object
         self.config_to_inputData()
@@ -365,6 +578,8 @@ class Morphology:
             warnings.warn('Validation failed. Double check inputData values')
 
     def create_optical_constants(self):
+        self._require_backend('cyrsoxs', 'create_optical_constants')
+        cy = _require_cyrsoxs_module()
         self.OpticalConstants = cy.RefractiveIndex(self.inputData)
         self.update_optical_constants()        
         if not self.OpticalConstants.validate():
@@ -380,19 +595,22 @@ class Morphology:
             self.OpticalConstants.addData(OpticalConstants=all_constants, Energy=energy)
 
     def create_voxel_data(self):
+        self._require_backend('cyrsoxs', 'create_voxel_data')
+        cy = _require_cyrsoxs_module()
         self.voxelData = cy.VoxelData(InputData=self.inputData)
         self.update_voxel_data()
         if not self.voxelData.validate():
             warnings.warn('Validation failed. Double check voxel data values')
 
     def update_voxel_data(self):
+        self._require_backend('cyrsoxs', 'update_voxel_data')
+        self.last_backend_coercion_report = []
         for ID in range(1, self.numMaterial+1):
             mat = self.materials[ID]
-            # Check types and only convert if needed
-            s = mat.S if mat.S.dtype == np.float32 else mat.S.astype(np.float32)
-            theta = mat.theta if mat.theta.dtype == np.float32 else mat.theta.astype(np.float32)
-            psi = mat.psi if mat.psi.dtype == np.float32 else mat.psi.astype(np.float32)
-            vfrac = mat.Vfrac if mat.Vfrac.dtype == np.float32 else mat.Vfrac.astype(np.float32)
+            s = self._coerce_material_field(mat.S, field_name='S', material_id=ID)
+            theta = self._coerce_material_field(mat.theta, field_name='theta', material_id=ID)
+            psi = self._coerce_material_field(mat.psi, field_name='psi', material_id=ID)
+            vfrac = self._coerce_material_field(mat.Vfrac, field_name='Vfrac', material_id=ID)
             
             self.voxelData.addVoxelData(
                 S=s,
@@ -402,6 +620,9 @@ class Morphology:
                 MaterialID=ID)
 
     def config_to_inputData(self):
+        self._require_backend('cyrsoxs', 'config_to_inputData')
+        cy = _require_cyrsoxs_module()
+        input_mapping = _cyrsoxs_input_mapping(cy)
         for key in self.config:
             if key == "Energies":
                 self.inputData.setEnergies(self.config[key])
@@ -413,19 +634,21 @@ class Morphology:
             elif key == 'AlgorithmType':
                 self.inputData.setAlgorithm(AlgorithmID=self.config[key], MaxStreams=1)
             # if the key corresponds to one of the idiosyncratic methods, use this
-            elif key in self.input_mapping.keys():
-                func = getattr(self.inputData,self.input_mapping[key][0])
+            elif key in input_mapping.keys():
+                func = getattr(self.inputData, input_mapping[key][0])
                 if callable(func):
-                    func(self.input_mapping[key][1][self.config[key]])
+                    func(input_mapping[key][1][self.config[key]])
                 # if the attribute is not callable, use input_mapping to set the attribute
                 else:
                     setattr(self.inputData,
-                            self.input_mapping[key][0],
-                            self.input_mapping[key][1][self.config[key]])
+                            input_mapping[key][0],
+                            input_mapping[key][1][self.config[key]])
             else:
                 warnings.warn(f'{key} is currently not implemented')
 
     def create_update_cy(self):
+        self._require_backend('cyrsoxs', 'create_update_cy')
+        self.refresh_backend_assessment()
         # create or update all CyRSoXS objects
         if self.inputData:
             self.config_to_inputData()
@@ -462,20 +685,14 @@ class Morphology:
 
     # submit to CyRSoXS
     def run(self, stdout=True, stderr=True, return_xarray=True, print_vec_info=False, validate=False):
-        if validate:
-            self.create_update_cy()
-
-        # if we haven't created a ScatteringPattern object, create it now
-        if not self.scatteringPattern:
-            self.scatteringPattern = cy.ScatteringPattern(self.inputData)
-        with cy.ostream_redirect(stdout=stdout, stderr=stderr):
-            cy.launch(VoxelData=self.voxelData,
-                      RefractiveIndexData=self.OpticalConstants,
-                      InputData=self.inputData,
-                      ScatteringPattern=self.scatteringPattern)
-        self._simulated = True
-        if return_xarray:
-            return self.scattering_to_xarray(return_xarray=return_xarray, print_vec_info=print_vec_info)
+        return self._backend_runtime.run(
+            self,
+            stdout=stdout,
+            stderr=stderr,
+            return_xarray=return_xarray,
+            print_vec_info=print_vec_info,
+            validate=validate,
+        )
 
     def scattering_to_xarray(self, return_xarray=True, print_vec_info=False):
         if self.simulated:
@@ -518,11 +735,8 @@ class Morphology:
     # TODO : restructure to have a single checkH5 engine for both NRSS and
     # command line formats
     def check_materials(self, quiet=True):
-        # Vectorized sum of volume fractions
-        Vfrac_sum = sum(mat.Vfrac for mat in self.materials.values())
-        assert np.allclose(Vfrac_sum, 1), 'Total material volume fractions do not sum to 1'
-        del Vfrac_sum  # Free memory immediately
-        
+        coerced_vfracs = []
+
         # Check each material's properties
         for i, mat in self.materials.items():
             # Validate value ranges and types in one pass
@@ -532,17 +746,50 @@ class Morphology:
                 'theta': mat.theta,
                 'psi': mat.psi
             }.items():
+                if arr is None:
+                    raise AssertionError(f'Material {i} {name} is not populated')
+
+                plan = assess_array_for_backend(
+                    arr,
+                    backend_name=self.backend,
+                    field_name=name,
+                    material_id=i,
+                    backend_options=self.backend_options,
+                )
+                if not plan.supported:
+                    raise AssertionError(plan.reason)
+
+                xp = get_namespace_module(plan.original_namespace)
+
                 # Check for NaNs and float type in one operation
                 if not np.issubdtype(arr.dtype, np.floating):
                     raise AssertionError(f'Material {i} {name} is not of type float')
                 
-                if np.any(np.isnan(arr)):
+                if to_python_bool(xp.any(xp.isnan(arr))):
                     raise AssertionError(f'NaNs are present in Material {i} {name}')
                 
                 # Check bounds for S and Vfrac
                 if name in ('S', 'Vfrac'):
-                    if not np.all((arr >= 0) & (arr <= 1)):
+                    if not to_python_bool(xp.all((arr >= 0) & (arr <= 1))):
                         raise AssertionError(f'Material {i} {name} value(s) does not lie between 0 and 1')
+
+            vfrac_plan = assess_array_for_backend(
+                mat.Vfrac,
+                backend_name=self.backend,
+                field_name='Vfrac',
+                material_id=i,
+                backend_options=self.backend_options,
+            )
+            coerced_vfracs.append(coerce_array_for_backend(mat.Vfrac, vfrac_plan))
+
+        # Vectorized sum of volume fractions in backend-compatible space
+        Vfrac_sum = coerced_vfracs[0]
+        for arr in coerced_vfracs[1:]:
+            Vfrac_sum = Vfrac_sum + arr
+
+        sum_namespace = inspect_array(Vfrac_sum)['namespace']
+        sum_xp = get_namespace_module(sum_namespace)
+        assert to_python_bool(sum_xp.allclose(Vfrac_sum, 1)), 'Total material volume fractions do not sum to 1'
         
         if not quiet:
             print('All material checks have passed')
@@ -554,15 +801,7 @@ class Morphology:
 
 
     def validate_all(self, quiet=True):
-        self.check_materials(quiet=quiet)
-        input_check = self.inputData.validate()
-        opt_const_check = self.OpticalConstants.validate()
-        voxel_check = self.voxelData.validate()
-        assert (input_check), 'CyRSoXS object inputData validation has failed'
-        assert (opt_const_check), 'CyRSoXS object OpticalConstants validation has failed'
-        assert (voxel_check), 'CyRSoXS object voxelData validation has failed'
-        if not quiet:
-            print('All objects have been validated successfully. You can run your simulation')
+        return self._backend_runtime.validate_all(self, quiet=quiet)
 
 
 class OpticalConstants:
@@ -671,12 +910,23 @@ class Material(OpticalConstants):
     def __repr__(self):
         return f'Material (Name : {self.name}, ID : {self.materialID}, Shape : {self.NumZYX})'
 
+    @staticmethod
+    def _copy_field(value):
+        if value is None:
+            return None
+        if hasattr(value, 'copy'):
+            try:
+                return value.copy()
+            except TypeError:
+                pass
+        return copy.copy(value)
+
     def __copy__(self):
         return Material(materialID=self.materialID,
-                        Vfrac=self.Vfrac.copy(),
-                        S=self.S.copy(),
-                        theta=self.theta.copy(),
-                        psi=self.psi.copy(),
+                        Vfrac=self._copy_field(self.Vfrac),
+                        S=self._copy_field(self.S),
+                        theta=self._copy_field(self.theta),
+                        psi=self._copy_field(self.psi),
                         NumZYX=self.NumZYX,
                         energies=self.energies,
                         opt_constants=self.opt_constants,

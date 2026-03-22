@@ -5,13 +5,17 @@ from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 
-import CyRSoXS as cy
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import xarray as xr
+
+from tests.validation.lib.lazy_cyrsoxs import cy
+
+
+pytestmark = [pytest.mark.cyrsoxs_only, pytest.mark.reference_parity]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

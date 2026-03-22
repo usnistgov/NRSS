@@ -13,6 +13,7 @@ Options:
   --no-plots                Disable default physics plot harvesting and zip creation.
   --cyrsoxs-cli-dir PATH    Prepend PATH to CLI lookup inside each conda-run step.
   --cyrsoxs-pybind-dir PATH Prepend PATH to PYTHONPATH inside each conda-run step.
+  --nrss-backend NAME       Export NRSS_BACKEND=NAME inside each test step.
   --cmd "COMMAND"           Add a test command to run in conda env.
                             Can be passed multiple times. Custom commands run after the
                             default suite unless --skip-defaults is set.
@@ -25,6 +26,7 @@ Options:
 Environment overrides:
   NRSS_TEST_CYRSOXS_CLI_DIR     Same as --cyrsoxs-cli-dir.
   NRSS_TEST_CYRSOXS_PYBIND_DIR  Same as --cyrsoxs-pybind-dir.
+  NRSS_TEST_BACKEND             Same as --nrss-backend.
   NRSS_TEST_ENV                 Same as --env.
 
 Behavior:
@@ -45,6 +47,7 @@ Examples:
   scripts/run_local_test_report.sh -e nrss-dev \\
     --cyrsoxs-cli-dir /path/to/cyrsoxs/build \\
     --cyrsoxs-pybind-dir /path/to/cyrsoxs/build-pybind
+  scripts/run_local_test_report.sh --nrss-backend cyrsoxs
   NRSS_TEST_CYRSOXS_CLI_DIR=/path/to/cyrsoxs/build \\
     NRSS_TEST_CYRSOXS_PYBIND_DIR=/path/to/cyrsoxs/build-pybind \\
     scripts/run_local_test_report.sh -e nrss-dev
@@ -65,6 +68,7 @@ CUSTOM_REPEAT_COUNT=1
 WRITE_PHYSICS_PLOTS=1
 CYRSOXS_CLI_DIR="${NRSS_TEST_CYRSOXS_CLI_DIR:-${NRSS_TEST_PATH_PREPEND:-}}"
 CYRSOXS_PYBIND_DIR="${NRSS_TEST_CYRSOXS_PYBIND_DIR:-${NRSS_TEST_PYTHONPATH_PREPEND:-}}"
+NRSS_BACKEND_NAME="${NRSS_TEST_BACKEND:-${NRSS_BACKEND:-}}"
 declare -a TEST_CMDS=()
 
 while [[ $# -gt 0 ]]; do
@@ -87,6 +91,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --cyrsoxs-pybind-dir)
       CYRSOXS_PYBIND_DIR="${2:-}"
+      shift 2
+      ;;
+    --nrss-backend)
+      NRSS_BACKEND_NAME="${2:-}"
       shift 2
       ;;
     --cmd)
@@ -174,6 +182,9 @@ build_inner_cmd() {
   if [[ -n "$CYRSOXS_CLI_DIR" ]]; then
     inner_cmd="export PATH=\"${CYRSOXS_CLI_DIR}:\$PATH\""$'\n'"$inner_cmd"
   fi
+  if [[ -n "$NRSS_BACKEND_NAME" ]]; then
+    inner_cmd="export NRSS_BACKEND=\"${NRSS_BACKEND_NAME}\""$'\n'"$inner_cmd"
+  fi
 
   printf '%s' "$inner_cmd"
 }
@@ -202,6 +213,7 @@ write_metadata() {
     echo "write_physics_plots=$WRITE_PHYSICS_PLOTS"
     echo "cyrsoxs_cli_dir=$CYRSOXS_CLI_DIR"
     echo "cyrsoxs_pybind_dir=$CYRSOXS_PYBIND_DIR"
+    echo "nrss_backend=$NRSS_BACKEND_NAME"
     echo "nrss_resolution_tsv=$NRSS_RESOLUTION_TSV"
     echo "cyrsoxs_resolution_tsv=$CYRSOXS_RESOLUTION_TSV"
     echo "validation_reference_manifest_tsv=$VALIDATION_REFERENCE_MANIFEST_TSV"
@@ -442,6 +454,7 @@ generate_summary() {
     echo "- Custom repeat count: $CUSTOM_REPEAT_COUNT"
     echo "- CyRSoXS CLI override: ${CYRSOXS_CLI_DIR:-"(env default)"}"
     echo "- CyRSoXS pybind override: ${CYRSOXS_PYBIND_DIR:-"(env default)"}"
+    echo "- NRSS backend: ${NRSS_BACKEND_NAME:-"(default resolution)"}"
     echo "- Steps passed: $pass_count/$total"
     echo "- Steps failed: $fail_count/$total"
     echo ""
