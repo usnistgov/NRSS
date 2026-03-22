@@ -1,6 +1,6 @@
 # NRSS Phase 0 Test Strategy (Draft)
 
-Status: In progress (smoke harness landed; Bragg-inclusive 3D+2D physics-validation layer landed; sphere orientational-contrast physics validation landed; CoreShell experimental+sim-reference validation landed; latest local physics lane green)  
+Status: In progress (smoke harness landed; Bragg-inclusive 3D+2D physics-validation layer landed; sphere orientational-contrast physics validation landed; CoreShell experimental+sim-reference validation landed; MWCNT experimental validation landed; latest local physics lane green)  
 Branch: `test/phase0-pytest-hardening`
 
 ## 1. Why this exists
@@ -18,7 +18,7 @@ A good Phase 0 test program should:
 4. Compare against trusted references with documented tolerances.
 5. Fail with clear messages when physics changes.
 
-## 3. Current state (as of March 21, 2026)
+## 3. Current state (as of March 22, 2026)
 
 Current implemented Phase 0 assets:
 
@@ -36,29 +36,35 @@ Current implemented Phase 0 assets:
 12. `tests/validation/test_bragg_3d_lattice.py` (deterministic simple-cubic and HCP 3D Bragg peak-position validation through the pybind-to-PyHyper workflow).
 13. `tests/validation/lib/core_shell.py` (shared maintained CoreShell baseline morphology/reduction/reference helper for the official pytest module; falsification scenarios stay under `scripts/validation_diagnostics/`).
 14. `tests/validation/test_core_shell_reference.py` (official CoreShell physics validation against the experimental A-wedge reference plus a parallel sim-derived regression golden).
-15. `scripts/validation_diagnostics/` (archived one-off development diagnostics plus opt-in orientational-contrast/CoreShell plot probes, including the CoreShell falsification scenarios, kept out of pytest collection).
-16. `pyproject.toml` pytest markers (`smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `experimental_validation`, `toolchain_validation`, `phase0`).
+15. `tests/validation/lib/mwcnt.py` (shared maintained deterministic MWCNT morphology/reduction/reference helper with periodic field construction, `WindowingType=0`, published Table I provenance, and vendored reduced experimental observables).
+16. `tests/validation/test_mwcnt_reference.py` (official MWCNT physics validation against the experimental anisotropy observables derived from the tutorial/manuscript workflow).
+17. `tests/validation/dev/` (development-only MWCNT studies for RSA benchmarking, EAngleRotation sweeps, windowing/periodicity comparisons, and threshold/falsification probes; kept out of pytest collection).
+18. `scripts/validation_diagnostics/` (archived one-off development diagnostics plus opt-in orientational-contrast/CoreShell plot probes, including the CoreShell falsification scenarios, kept out of pytest collection).
+19. `pyproject.toml` pytest markers (`smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `experimental_validation`, `toolchain_validation`, `phase0`).
 
 Latest local evidence (GPU-enabled host):
 
 1. Default local report command: `CUDA_VISIBLE_DEVICES=0 bash scripts/run_local_test_report.sh --stop-on-fail`
-2. Timestamp (UTC): `20260321T220543Z`
-3. Report directory: `test-reports/20260321T220543Z`
+2. Timestamp (UTC): `20260322T140310Z`
+3. Report directory: `test-reports/20260322T140310Z`
 4. Result: `4/4` steps passed
-5. Physics validation lane inside the report: `13 passed`
-6. The standard physics lane in `scripts/run_local_test_report.sh` auto-discovers the CoreShell module because it runs `python -m pytest tests/validation -m physics_validation -v`.
-7. The markdown report carries physics-test docstrings and marker metadata in the “Physics Tests” section, so the CoreShell provenance/citation block and `experimental_validation` tag in `test_core_shell_reference.py` flow into future summaries.
-8. CoreShell-only command: `CUDA_VISIBLE_DEVICES=0 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_core_shell_reference.py -v`
-9. CoreShell-only result: `2 passed`
-10. Opt-in CoreShell diagnostic artifacts were regenerated successfully via `python scripts/validation_diagnostics/core_shell_reference_diagnostic.py --write-sim-reference` under `test-reports/core-shell-dev/`.
-11. Opt-in orientational artifacts remain available via `python scripts/validation_diagnostics/sphere_orientational_contrast_diagnostic.py` under `test-reports/sphere-orientational-contrast-dev/`.
+5. Physics validation lane inside the report: `14 passed`
+6. The standard physics lane in `scripts/run_local_test_report.sh` auto-discovers both the CoreShell and MWCNT experimental-reference modules because it runs `python -m pytest tests/validation -m physics_validation -v`.
+7. The markdown report carries physics-test docstrings and marker metadata in the “Physics Tests” section, so both the CoreShell and MWCNT provenance/citation blocks and `experimental_validation` tags flow into future summaries.
+8. MWCNT-only command: `CUDA_VISIBLE_DEVICES=0 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_mwcnt_reference.py -v`
+9. MWCNT-only result: `1 passed`
+10. CoreShell-only command: `CUDA_VISIBLE_DEVICES=0 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_core_shell_reference.py -v`
+11. CoreShell-only result: `2 passed`
+12. Development-only MWCNT falsification evidence now lives under `tests/validation/dev/mwcnt_threshold/` and `test-reports/mwcnt-threshold-dev/`; current maintained thresholds already reject nearby radius falsifications, so no tightening was applied.
+13. Opt-in CoreShell diagnostic artifacts were regenerated successfully via `python scripts/validation_diagnostics/core_shell_reference_diagnostic.py --write-sim-reference` under `test-reports/core-shell-dev/`.
+14. Opt-in orientational artifacts remain available via `python scripts/validation_diagnostics/sphere_orientational_contrast_diagnostic.py` under `test-reports/sphere-orientational-contrast-dev/`.
 
 Observed caveats:
 
 1. GPU tests are hardware-dependent and still require a visible NVIDIA GPU.
 2. GPU smoke emitted one upstream `PendingDeprecationWarning` from `PyHyperScattering` (`GroupBy.apply`).
-3. Circle-lattice validation migration still remains open. CoreShell now has official pytest coverage on the maintained pybind + PyHyper + manual A-wedge path, with the experimental reference as the scientific gate and a sim-derived golden as a secondary regression guard.
-4. Validation plot writing remains opt-in; the orientational sphere case and the CoreShell case each have dedicated manual plot/TSV diagnostics under `scripts/validation_diagnostics/`, and the CoreShell falsification/subterfuge checks live there rather than under `tests/validation/`.
+3. Circle-lattice validation migration still remains open. CoreShell now has official pytest coverage on the maintained pybind + PyHyper + manual A-wedge path, and MWCNT now has official pytest coverage on the maintained pybind + PyHyper + anisotropy-observable path against the published experimental reference.
+4. Validation plot writing remains opt-in; the orientational sphere and CoreShell cases keep dedicated manual diagnostics under `scripts/validation_diagnostics/`, while MWCNT development diagnostics and falsification probes now live under `tests/validation/dev/` rather than the maintained pytest surface.
 
 ## 4. Proposed test layers
 
@@ -102,7 +108,7 @@ Targets:
 
 Purpose: compare simulation outputs against trusted analytical/golden references.
 
-Status: Initial 3D+2D layer implemented, including the CoreShell experimental-reference migration; further case migration still pending.
+Status: Initial 3D+2D layer implemented, including the CoreShell and MWCNT experimental-reference migrations; further case migration still pending.
 
 Implemented:
 

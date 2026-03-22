@@ -330,32 +330,44 @@ Latest run evidence:
    - parallel sim-derived golden as a tight regression guard,
    - `experimental_validation` marker applied to the experimental-reference test,
    - falsification/subterfuge scenarios intentionally kept only in the development diagnostic, not in the principal `tests/validation` surface.
-11. Archived one-off exploratory validation code under `scripts/validation_diagnostics/` so it remains available for future archaeology without polluting pytest collection.
+11. Added `tests/validation/lib/mwcnt.py` plus `tests/validation/test_mwcnt_reference.py`:
+   - maintained deterministic MWCNT workflow through pybind + PyHyperScattering `WPIntegrator` + anisotropy-observable reduction,
+   - periodic field construction is now the maintained default and the legacy field path remains available as an explicit switch,
+   - maintained simulation defaults are `WindowingType=0` and `EAngleRotation=[0, 20, 340]`,
+   - experimental reduced `A(E)` / `A(q)` observables derived from the tutorial/manuscript workflow are the scientific gate,
+   - `experimental_validation` marker applied to the official MWCNT test,
+   - manuscript Table I provenance plus realized fixed-seed geometry statistics are exposed in the maintained validation plots and helper metadata,
+   - development-only MWCNT falsification/threshold probes stay under `tests/validation/dev/`, not in the principal `tests/validation` surface.
+12. Archived one-off exploratory validation code under `scripts/validation_diagnostics/` so it remains available for future archaeology without polluting pytest collection.
     - this directory now also holds `orientational_contrast_tiny_diagnostic.py`, the development-only preserved `64^3` probe that preceded the official orientational test,
     - and `sphere_orientational_contrast_diagnostic.py`, an opt-in artifact generator that writes orientational ratio plots plus TSV summaries under `test-reports/sphere-orientational-contrast-dev/`.
     - and `core_shell_reference_diagnostic.py`, the opt-in CoreShell artifact generator that also owns the falsification/subterfuge comparisons.
-12. Extended `scripts/run_local_test_report.sh` to include the marker-based `physics_validation` lane in the standard local report, while also supporting `--skip-defaults` plus repeated explicit `--cmd` runs for targeted validation and stochastic-failure checks. Newly added physics modules are therefore included automatically.
+13. Extended `scripts/run_local_test_report.sh` to include the marker-based `physics_validation` lane in the standard local report, while also supporting `--skip-defaults` plus repeated explicit `--cmd` runs for targeted validation and stochastic-failure checks. Newly added physics modules are therefore included automatically.
     - physics-test report summaries now retain full docstring descriptions rather than only the first line,
     - and targeted custom physics commands now resolve per-test statuses in the markdown report instead of falling back to `DESELECTED`.
-13. Targeted local validation against an injected fixed CyRSoXS pybind build removed the prior same-process 2D analytical disk stochastic failure in local testing:
+14. Targeted local validation against an injected fixed CyRSoXS pybind build removed the prior same-process 2D analytical disk stochastic failure in local testing:
    - one-process back-to-back `70 nm` then `128 nm` analytical 2D disk validation passed `20/20` repeated runs on a single visible GPU,
    - the shipped pytest module also passed cleanly against the injected build,
    - interpret this as local evidence that the 2D-path failure was upstream to NRSS rather than a remaining deterministic NRSS harness issue.
-14. Latest default local report evidence for the expanded suite:
+15. Latest default local report evidence for the expanded suite:
    - command: `CUDA_VISIBLE_DEVICES=0 bash scripts/run_local_test_report.sh --stop-on-fail`,
-   - timestamp/report: `20260321T220543Z` / `test-reports/20260321T220543Z`,
+   - timestamp/report: `20260322T140310Z` / `test-reports/20260322T140310Z`,
    - result: `4/4` steps passed,
-   - physics-validation lane inside the report: `13 passed`, including both CoreShell tests,
-   - the generated markdown summary lists the experimental CoreShell test with the `experimental_validation` marker and full scientific citation block.
-15. A targeted local CoreShell-only run confirmed the new official module passes cleanly on its own:
+   - physics-validation lane inside the report: `14 passed`, including both CoreShell tests and the new MWCNT experimental test,
+   - the generated markdown summary lists both experimental-reference tests with their `experimental_validation` markers and full scientific citation blocks.
+16. A targeted local CoreShell-only run confirmed the new official module passes cleanly on its own:
    - command: `CUDA_VISIBLE_DEVICES=0 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_core_shell_reference.py -v`,
    - result: `2 passed`.
-16. A targeted installed-build report run also confirmed that the new orientational module is described correctly in `summary.md`:
+17. A targeted local MWCNT-only run confirmed the new official module passes cleanly on its own:
+   - command: `CUDA_VISIBLE_DEVICES=0 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_mwcnt_reference.py -v`,
+   - result: `1 passed`,
+   - a development-only threshold probe showed that nearby radius falsifications fail the maintained thresholds while a moderate orientation broadening can still pass, so no threshold tightening was applied.
+18. A targeted installed-build report run also confirmed that the new orientational module is described correctly in `summary.md`:
    - command: `bash scripts/run_local_test_report.sh --skip-defaults --cmd "python -m pytest tests/validation/test_sphere_orientational_contrast_scaling.py -m physics_validation -v"`,
    - timestamp/report: `20260321T190619Z` / `test-reports/20260321T190619Z`,
    - result: `1 passed`,
    - the “Physics Tests” section now includes the full orientational test description and a `PASSED` status.
-17. Installed-package cross-check for the earlier Bragg coverage also passed:
+19. Installed-package cross-check for the earlier Bragg coverage also passed:
    - command: `CUDA_VISIBLE_DEVICES=1 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_bragg_2d_lattice.py tests/validation/test_bragg_3d_lattice.py -v`,
    - result: `4 passed in 126.03s`,
    - installed package resolved to `CyRSoXS 1.1.8.0`, patch `9d45790`.
