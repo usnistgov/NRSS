@@ -10,6 +10,7 @@ Usage:
 Options:
   -e, --env NAME            Conda environment name (default: $NRSS_TEST_ENV or nrss-dev)
   -r, --report-root PATH    Report root directory (default: test-reports)
+  --no-plots                Disable default physics plot harvesting and zip creation.
   --cyrsoxs-cli-dir PATH    Prepend PATH to CLI lookup inside each conda-run step.
   --cyrsoxs-pybind-dir PATH Prepend PATH to PYTHONPATH inside each conda-run step.
   --cmd "COMMAND"           Add a test command to run in conda env.
@@ -32,6 +33,8 @@ Behavior:
     2. Smoke Tests (CPU Fast)
     3. Smoke Tests (GPU)
     4. Physics Validation Tests
+  Physics Validation Tests also harvest any generated graphical-abstract PNGs
+  into the per-run report directory and write graphical-abstracts.zip.
   Any explicit --cmd commands are appended afterward.
   Use --skip-defaults to run only the explicit commands.
   Use --repeat N to repeat each explicit command N times.
@@ -50,6 +53,7 @@ Examples:
     --cmd "python -m pytest tests/validation/test_analytical_2d_disk_form_factor.py -q"
   scripts/run_local_test_report.sh --cmd "python -m pytest tests/smoke -m gpu -q"
   scripts/run_local_test_report.sh -e mar2025 --cmd "python -m pytest tests/validation -q"
+  scripts/run_local_test_report.sh --no-plots
 EOF
 }
 
@@ -58,6 +62,7 @@ REPORT_ROOT="test-reports"
 STOP_ON_FAIL=0
 SKIP_DEFAULTS=0
 CUSTOM_REPEAT_COUNT=1
+WRITE_PHYSICS_PLOTS=1
 CYRSOXS_CLI_DIR="${NRSS_TEST_CYRSOXS_CLI_DIR:-${NRSS_TEST_PATH_PREPEND:-}}"
 CYRSOXS_PYBIND_DIR="${NRSS_TEST_CYRSOXS_PYBIND_DIR:-${NRSS_TEST_PYTHONPATH_PREPEND:-}}"
 declare -a TEST_CMDS=()
@@ -71,6 +76,10 @@ while [[ $# -gt 0 ]]; do
     -r|--report-root)
       REPORT_ROOT="${2:-}"
       shift 2
+      ;;
+    --no-plots)
+      WRITE_PHYSICS_PLOTS=0
+      shift
       ;;
     --cyrsoxs-cli-dir)
       CYRSOXS_CLI_DIR="${2:-}"
@@ -137,6 +146,8 @@ STEPS_TSV="$REPORT_DIR/steps.tsv"
 SMOKE_CATALOG_TSV="$REPORT_DIR/smoke_catalog.tsv"
 PHYSICS_CATALOG_TSV="$REPORT_DIR/physics_catalog.tsv"
 CYRSOXS_RESOLUTION_TSV="$REPORT_DIR/cyrsoxs_resolution.tsv"
+GRAPHICAL_ABSTRACTS_DIR="$REPORT_DIR/graphical-abstracts"
+GRAPHICAL_ABSTRACTS_ZIP="$REPORT_DIR/graphical-abstracts.zip"
 
 : > "$RUN_LOG"
 : > "$STEPS_TSV"
@@ -186,9 +197,12 @@ write_metadata() {
     echo "cuda_visible_devices=$visible_gpus"
     echo "skip_defaults=$SKIP_DEFAULTS"
     echo "custom_repeat_count=$CUSTOM_REPEAT_COUNT"
+    echo "write_physics_plots=$WRITE_PHYSICS_PLOTS"
     echo "cyrsoxs_cli_dir=$CYRSOXS_CLI_DIR"
     echo "cyrsoxs_pybind_dir=$CYRSOXS_PYBIND_DIR"
     echo "cyrsoxs_resolution_tsv=$CYRSOXS_RESOLUTION_TSV"
+    echo "graphical_abstracts_dir=$GRAPHICAL_ABSTRACTS_DIR"
+    echo "graphical_abstracts_zip=$GRAPHICAL_ABSTRACTS_ZIP"
     if command -v nvidia-smi >/dev/null 2>&1; then
       echo "nvidia_smi=present"
       nvidia-smi -L || true
@@ -615,7 +629,11 @@ if [[ $SKIP_DEFAULTS -eq 0 ]]; then
 
   # Marker-based discovery keeps newly added physics_validation modules,
   # including experimental-reference cases such as CoreShell, in the standard lane.
-  run_conda_step "Physics Validation Tests" "python -m pytest tests/validation -m physics_validation -v" "$STEP" || ANY_FAIL=1
+  PHYSICS_CMD="python scripts/run_physics_validation_suite.py --repo-root \"$REPO_ROOT\" --catalog \"$PHYSICS_CATALOG_TSV\" --harvest-root \"$GRAPHICAL_ABSTRACTS_DIR\" --zip-path \"$GRAPHICAL_ABSTRACTS_ZIP\""
+  if [[ $WRITE_PHYSICS_PLOTS -eq 0 ]]; then
+    PHYSICS_CMD="$PHYSICS_CMD --no-plots"
+  fi
+  run_conda_step "Physics Validation Tests" "$PHYSICS_CMD" "$STEP" || ANY_FAIL=1
   if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
     generate_summary
     cat "$SUMMARY_MD"
@@ -647,6 +665,10 @@ generate_summary
 log ""
 log "Copy/paste this summary into your PR:"
 cat "$SUMMARY_MD"
+
+if [[ -f "$GRAPHICAL_ABSTRACTS_ZIP" ]]; then
+  log "Graphical abstracts zip: $GRAPHICAL_ABSTRACTS_ZIP"
+fi
 
 if [[ $ANY_FAIL -ne 0 ]]; then
   log ""
