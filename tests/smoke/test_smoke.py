@@ -97,6 +97,7 @@ def test_tiny_deterministic_white_noise_kernel():
     assert np.isclose(float(smoothed[0, 0]), 0.15636713796507423, atol=1e-12)
 
 
+@pytest.mark.cpu
 def test_small_hdf5_roundtrip(tmp_path: Path):
     """Validate basic HDF5 write/read roundtrip integrity."""
     arr = np.arange(64, dtype=np.float64).reshape(8, 8)
@@ -111,6 +112,7 @@ def test_small_hdf5_roundtrip(tmp_path: Path):
     assert np.array_equal(loaded, arr)
 
 
+@pytest.mark.cpu
 def test_write_and_read_config_roundtrip(tmp_path: Path):
     """Ensure NRSS config writer/reader roundtrip preserves key fields."""
     cwd = Path.cwd()
@@ -275,6 +277,7 @@ def test_vacuum_named_matches_explicit_zero_constants():
         assert np.allclose(named_vals, explicit_vals, atol=0.0)
 
 
+@pytest.mark.cpu
 def test_optical_constants_calc_and_load_matfile_smoke(tmp_path: Path):
     """Smoke-test optical constant interpolation and MaterialX.txt parsing."""
     reference_data = {
@@ -316,6 +319,7 @@ def test_optical_constants_calc_and_load_matfile_smoke(tmp_path: Path):
     assert np.allclose(loaded.opt_constants[200.0], [3.0, 4.0, 7.0, 8.0], atol=1e-12)
 
 
+@pytest.mark.cpu
 def test_morphology_validation_fails_when_total_vfrac_exceeds_one():
     """Assert morphology validator rejects voxels where total volume fraction exceeds one."""
     energies = [285.0]
@@ -363,6 +367,7 @@ def test_morphology_validation_fails_when_total_vfrac_exceeds_one():
         morph.check_materials(quiet=True)
 
 
+@pytest.mark.cpu
 def test_morphology_validation_fails_on_nan_field():
     """Assert morphology validator rejects NaN values in material fields."""
     energies = [285.0]
@@ -398,6 +403,7 @@ def test_morphology_validation_fails_on_nan_field():
         morph.check_materials(quiet=True)
 
 
+@pytest.mark.cpu
 def test_morphology_validation_fails_on_non_float_field():
     """Assert morphology validator rejects non-float material arrays."""
     energies = [285.0]
@@ -430,6 +436,166 @@ def test_morphology_validation_fails_on_non_float_field():
 
     with pytest.raises(AssertionError, match="Material 1 theta is not of type float"):
         morph.check_materials(quiet=True)
+
+
+@pytest.mark.cpu
+def test_morphology_validation_fails_on_negative_s():
+    """Assert morphology validator rejects aligned-fraction values below zero."""
+    energies = [285.0]
+    shape = (1, 4, 4)
+    zeros = np.zeros(shape, dtype=np.float32)
+    ones = np.ones(shape, dtype=np.float32)
+    bad_s = zeros.copy()
+    bad_s[0, 0, 0] = -1e-3
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=ones.copy(),
+        S=bad_s,
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [1e-4, 2e-4, 1e-4, 2e-4]},
+        name="mat1",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=zeros.copy(),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="mat2",
+    )
+    morph = Morphology(2, materials={1: mat1, 2: mat2}, PhysSize=5.0, create_cy_object=False)
+
+    with pytest.raises(
+        AssertionError,
+        match="Material 1 S value\\(s\\) does not lie between 0 and 1",
+    ):
+        morph.check_materials(quiet=True)
+
+
+@pytest.mark.cpu
+def test_morphology_validation_fails_on_s_above_one():
+    """Assert morphology validator rejects aligned-fraction values above one."""
+    energies = [285.0]
+    shape = (1, 4, 4)
+    zeros = np.zeros(shape, dtype=np.float32)
+    ones = np.ones(shape, dtype=np.float32)
+    bad_s = zeros.copy()
+    bad_s[0, 0, 0] = 1.001
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=ones.copy(),
+        S=bad_s,
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [1e-4, 2e-4, 1e-4, 2e-4]},
+        name="mat1",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=zeros.copy(),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="mat2",
+    )
+    morph = Morphology(2, materials={1: mat1, 2: mat2}, PhysSize=5.0, create_cy_object=False)
+
+    with pytest.raises(
+        AssertionError,
+        match="Material 1 S value\\(s\\) does not lie between 0 and 1",
+    ):
+        morph.check_materials(quiet=True)
+
+
+@pytest.mark.cpu
+def test_morphology_validation_fails_on_negative_vfrac():
+    """Assert morphology validator rejects negative volume fractions."""
+    energies = [285.0]
+    shape = (1, 4, 4)
+    zeros = np.zeros(shape, dtype=np.float32)
+    ones = np.ones(shape, dtype=np.float32)
+    bad_vfrac = ones.copy()
+    bad_vfrac[0, 0, 0] = -1e-3
+    matrix_vfrac = zeros.copy()
+    matrix_vfrac[0, 0, 0] = 1.001
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=bad_vfrac,
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [1e-4, 2e-4, 1e-4, 2e-4]},
+        name="mat1",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=matrix_vfrac,
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="mat2",
+    )
+    morph = Morphology(2, materials={1: mat1, 2: mat2}, PhysSize=5.0, create_cy_object=False)
+
+    with pytest.raises(
+        AssertionError,
+        match="Material 1 Vfrac value\\(s\\) does not lie between 0 and 1",
+    ):
+        morph.check_materials(quiet=True)
+
+
+@pytest.mark.cpu
+def test_morphology_validation_accepts_small_closure_drift_within_allclose_defaults():
+    """Pin the current closure tolerance implied by numpy allclose defaults."""
+    energies = [285.0]
+    shape = (1, 4, 4)
+    zeros = np.zeros(shape, dtype=np.float64)
+    vfrac_1 = np.full(shape, 0.500005, dtype=np.float64)
+    vfrac_2 = np.full(shape, 0.5, dtype=np.float64)
+
+    assert np.allclose(vfrac_1 + vfrac_2, 1.0)
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=vfrac_1,
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [1e-4, 2e-4, 1e-4, 2e-4]},
+        name="mat1",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=vfrac_2,
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="mat2",
+    )
+    morph = Morphology(
+        2,
+        materials={1: mat1, 2: mat2},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    morph.check_materials(quiet=True)
 
 
 @pytest.mark.cpu

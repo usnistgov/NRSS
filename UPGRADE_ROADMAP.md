@@ -225,18 +225,23 @@ TensorFlow is deprioritized for this project.
 
 Convert `tests/validation/` legacy scripts into robust pytest suites using pybind CyRSoXS execution where applicable (no CLI serialization bottleneck), while establishing a first stable physics-validation lane before backend refactors.
 
-### 8.2 Canonical initial cases
+### 8.2 Maintained validation cases
 
 1. Analytical sphere form factor.
 2. Sphere contrast scaling.
-3. Core-shell.
-4. Circle lattice.
+3. Sphere orientational contrast scaling.
+4. Analytical 2D disk form factor.
+5. 2D disk contrast scaling.
+6. 2D and 3D Bragg lattice peak-position validation.
+7. Core-shell.
+8. MWCNT.
 
 ### 8.3 Required test qualities
 
 1. Deterministic fixtures and fixed RNG seeds if randomness appears anywhere.
 2. Explicit metadata capture (versions, geometry, dtype, parameter hashes, backend flags).
 3. Machine-readable golden references generated from trusted pybind runs.
+4. CPU smoke is intentionally limited to validator, I/O, and API-contract behavior; it is not a CPU physics-parity lane.
 
 ### 8.4 Parity metrics (layered)
 
@@ -267,7 +272,7 @@ Initial threshold table is intentionally provisional; calibrate from empirical b
    - Default conda env is now `nrss-dev` unless overridden with `-e/--env` or `NRSS_TEST_ENV`.
    - Standard lanes can be skipped with `--skip-defaults`.
    - Explicit `--cmd` entries can be repeated with `--repeat N` for brittleness sweeps and injected-build validation.
-3. Added pytest marker declarations in `pyproject.toml` for `smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `experimental_validation`, `toolchain_validation`, and `phase0`.
+3. Added pytest marker declarations in `pyproject.toml` for `smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `experimental_validation`, and `toolchain_validation`.
 4. Added `tests/conftest.py` to default tests to a single visible GPU when the environment is otherwise unset, improving reproducibility and avoiding known CyRSoXS multi-GPU instability during energy fan-out.
 
 Latest run evidence:
@@ -345,6 +350,7 @@ Latest run evidence:
 13. Extended `scripts/run_local_test_report.sh` to include the marker-based `physics_validation` lane in the standard local report, while also supporting `--skip-defaults` plus repeated explicit `--cmd` runs for targeted validation and stochastic-failure checks. Newly added physics modules are therefore included automatically.
     - physics-test report summaries now retain full docstring descriptions rather than only the first line,
     - and targeted custom physics commands now resolve per-test statuses in the markdown report instead of falling back to `DESELECTED`.
+    - the report now also captures imported NRSS module resolution plus a hashed manifest of vendored validation-reference artifacts under `tests/validation/data/`.
 14. Targeted local validation against an injected fixed CyRSoXS pybind build removed the prior same-process 2D analytical disk stochastic failure in local testing:
    - one-process back-to-back `70 nm` then `128 nm` analytical 2D disk validation passed `20/20` repeated runs on a single visible GPU,
    - the shipped pytest module also passed cleanly against the injected build,
@@ -372,12 +378,11 @@ Latest run evidence:
    - result: `4 passed in 126.03s`,
    - installed package resolved to `CyRSoXS 1.1.8.0`, patch `9d45790`.
 
-### 8.9 Remaining Phase 0 test-hardening gaps
+### 8.9 Remaining test-hardening gaps
 
-1. Complete migration of remaining legacy validation workflows to pytest-native modules (especially circle lattice).
-2. Decide which remaining cases should use analytical references, golden references, or both.
-3. Add CI gating policy for CPU smoke and GPU smoke/parity/physics lanes.
-4. Revisit follow-on physics coverage such as additional two-material mixed beta/delta equivalence cases if needed.
+1. Add CI gating policy for CPU smoke and GPU smoke/parity/physics lanes.
+2. Keep the CPU smoke lane focused on validator, I/O, and API-contract behavior rather than CPU physics parity.
+3. Add backend-contract tests only when alternate backend implementation work begins.
 
 ## 9. Input/Output Contract and Compatibility
 
@@ -442,14 +447,14 @@ Rationale:
 
 ## 14. Phased Delivery Plan
 
-1. Phase 0: Test hardening + pybind golden baselines + deterministic harness.
+1. Test-hardening milestone: pybind golden baselines + deterministic harness.
 2. Phase 1: CuPy backend that mimics CyRSoXS algorithmic flow.
 3. Phase 2: Internal math cleanup (tensor-character refactor) while preserving parity tests.
 4. Phase 3: Additional backends behind shared backend contract.
 
 Independent success criterion:
 
-1. Completion of Phase 0 is a meaningful modernization outcome even if backend phases are delayed.
+1. Completion of the test-hardening milestone is a meaningful modernization outcome even if backend phases are delayed.
 
 ## 15. Explicit Non-Goals (Initial Phases)
 

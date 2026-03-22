@@ -145,7 +145,9 @@ METADATA_TXT="$REPORT_DIR/metadata.txt"
 STEPS_TSV="$REPORT_DIR/steps.tsv"
 SMOKE_CATALOG_TSV="$REPORT_DIR/smoke_catalog.tsv"
 PHYSICS_CATALOG_TSV="$REPORT_DIR/physics_catalog.tsv"
+NRSS_RESOLUTION_TSV="$REPORT_DIR/nrss_resolution.tsv"
 CYRSOXS_RESOLUTION_TSV="$REPORT_DIR/cyrsoxs_resolution.tsv"
+VALIDATION_REFERENCE_MANIFEST_TSV="$REPORT_DIR/validation_reference_manifest.tsv"
 GRAPHICAL_ABSTRACTS_DIR="$REPORT_DIR/graphical-abstracts"
 GRAPHICAL_ABSTRACTS_ZIP="$REPORT_DIR/graphical-abstracts.zip"
 
@@ -200,7 +202,9 @@ write_metadata() {
     echo "write_physics_plots=$WRITE_PHYSICS_PLOTS"
     echo "cyrsoxs_cli_dir=$CYRSOXS_CLI_DIR"
     echo "cyrsoxs_pybind_dir=$CYRSOXS_PYBIND_DIR"
+    echo "nrss_resolution_tsv=$NRSS_RESOLUTION_TSV"
     echo "cyrsoxs_resolution_tsv=$CYRSOXS_RESOLUTION_TSV"
+    echo "validation_reference_manifest_tsv=$VALIDATION_REFERENCE_MANIFEST_TSV"
     echo "graphical_abstracts_dir=$GRAPHICAL_ABSTRACTS_DIR"
     echo "graphical_abstracts_zip=$GRAPHICAL_ABSTRACTS_ZIP"
     if command -v nvidia-smi >/dev/null 2>&1; then
@@ -210,6 +214,21 @@ write_metadata() {
       echo "nvidia_smi=not_found"
     fi
   } > "$METADATA_TXT"
+}
+
+capture_nrss_resolution() {
+  local probe_cmd inner_cmd
+
+  probe_cmd=$'python - <<\'PY\'\nimport importlib\nimport subprocess\nfrom pathlib import Path\n\n\ndef safe(value):\n    if value is None:\n        return \"\"\n    return str(value).replace(\"\\t\", \" \").replace(\"\\n\", \" \").strip()\n\n\ndef git_provenance(path_str):\n    if not path_str:\n        return \"\", \"\"\n    try:\n        path = Path(path_str).resolve()\n    except Exception:\n        return \"\", \"\"\n\n    start = path if path.is_dir() else path.parent\n    for candidate in (start, *start.parents):\n        root = subprocess.run(\n            [\"git\", \"-C\", str(candidate), \"rev-parse\", \"--show-toplevel\"],\n            check=False,\n            stdout=subprocess.PIPE,\n            stderr=subprocess.PIPE,\n            text=True,\n            timeout=2,\n        )\n        if root.returncode != 0:\n            continue\n        root_path = root.stdout.strip()\n        branch = subprocess.run(\n            [\"git\", \"-C\", root_path, \"rev-parse\", \"--abbrev-ref\", \"HEAD\"],\n            check=False,\n            stdout=subprocess.PIPE,\n            stderr=subprocess.PIPE,\n            text=True,\n            timeout=2,\n        )\n        sha = subprocess.run(\n            [\"git\", \"-C\", root_path, \"rev-parse\", \"HEAD\"],\n            check=False,\n            stdout=subprocess.PIPE,\n            stderr=subprocess.PIPE,\n            text=True,\n            timeout=2,\n        )\n        return branch.stdout.strip(), sha.stdout.strip()\n    return \"\", \"\"\n\n\nprint(\"resolved_name\\tresolved_path\\tversion\\tgit_branch\\tgit_sha\\tstatus\")\ntry:\n    mod = importlib.import_module(\"NRSS\")\nexcept Exception as exc:\n    print(f\"NRSS\\t\\t\\t\\t\\tIMPORT_FAILED:{exc.__class__.__name__}\")\nelse:\n    path = safe(getattr(mod, \"__file__\", \"\"))\n    version = safe(getattr(mod, \"__version__\", \"\"))\n    branch, sha = git_provenance(path)\n    print(\"\\t\".join([\"NRSS\", path, version, branch, sha, \"OK\"]))\nPY'
+  inner_cmd="$(build_inner_cmd "$probe_cmd")"
+
+  if ! conda run -n "$ENV_NAME" bash -lc "$inner_cmd" > "$NRSS_RESOLUTION_TSV" 2>> "$RUN_LOG"; then
+    cat > "$NRSS_RESOLUTION_TSV" <<'EOF'
+resolved_name	resolved_path	version	git_branch	git_sha	status
+NRSS					PROBE_FAILED
+EOF
+    log "NRSS resolution probe failed; see $RUN_LOG for details."
+  fi
 }
 
 capture_cyrsoxs_resolution() {
@@ -226,6 +245,30 @@ pybind						PROBE_FAILED
 EOF
     log "CyRSoXS resolution probe failed; see $RUN_LOG for details."
   fi
+}
+
+build_validation_reference_manifest() {
+  python - "$REPO_ROOT" "$VALIDATION_REFERENCE_MANIFEST_TSV" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+repo_root = pathlib.Path(sys.argv[1]).resolve()
+out_path = pathlib.Path(sys.argv[2]).resolve()
+data_root = repo_root / "tests" / "validation" / "data"
+
+rows = []
+if data_root.exists():
+    for path in sorted(p for p in data_root.rglob("*") if p.is_file()):
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        relpath = path.relative_to(repo_root).as_posix()
+        rows.append((relpath, str(path.stat().st_size), digest))
+
+with out_path.open("w", encoding="utf-8") as f:
+    f.write("path\tsize_bytes\tsha256\n")
+    for row in rows:
+        f.write("\t".join(row) + "\n")
+PY
 }
 
 build_smoke_catalog() {
@@ -408,8 +451,48 @@ generate_summary() {
     echo ""
     echo "### Log Files"
     awk -F'\t' '{printf "- %s. %s: `%s`\n", $1, $2, $5}' "$STEPS_TSV"
+    echo "- NRSS resolution: \`$NRSS_RESOLUTION_TSV\`"
     echo "- CyRSoXS resolution: \`$CYRSOXS_RESOLUTION_TSV\`"
+    echo "- Validation reference manifest: \`$VALIDATION_REFERENCE_MANIFEST_TSV\`"
   } > "$SUMMARY_MD"
+
+  if [[ -s "$NRSS_RESOLUTION_TSV" ]]; then
+    python - "$NRSS_RESOLUTION_TSV" >> "$SUMMARY_MD" <<'PY'
+import csv
+import pathlib
+import sys
+
+resolution_path = pathlib.Path(sys.argv[1])
+
+print("")
+print("### NRSS Resolution")
+print("| Module | Resolved Path | Version | Source | Status |")
+print("|---|---|---|---|---|")
+
+with resolution_path.open(encoding="utf-8", errors="replace") as f:
+    reader = csv.DictReader(f, delimiter="\t")
+    for row in reader:
+        if not row:
+            continue
+        resolved_name = (row.get("resolved_name") or "").strip() or "NRSS"
+        resolved_path = (row.get("resolved_path") or "").strip() or "-"
+        version = (row.get("version") or "").strip() or "-"
+        git_branch = (row.get("git_branch") or "").strip()
+        git_sha = (row.get("git_sha") or "").strip()
+        status = (row.get("status") or "").strip() or "-"
+        source = "-"
+        if git_sha:
+            source = f"{git_branch}@{git_sha[:7]}" if git_branch else git_sha[:7]
+
+        def esc(value: str) -> str:
+            return value.replace("|", "\\|")
+
+        print(
+            f"| `{esc(resolved_name)}` | `{esc(resolved_path)}` | `{esc(version)}` | "
+            f"`{esc(source)}` | `{esc(status)}` |"
+        )
+PY
+  fi
 
   if [[ -s "$CYRSOXS_RESOLUTION_TSV" ]]; then
     python - "$CYRSOXS_RESOLUTION_TSV" "$CYRSOXS_CLI_DIR" "$CYRSOXS_PYBIND_DIR" >> "$SUMMARY_MD" <<'PY'
@@ -452,6 +535,24 @@ with resolution_path.open(encoding="utf-8", errors="replace") as f:
             f"| `{esc(component)}` | `{esc(requested)}` | `{esc(resolved_name)}` | "
             f"`{esc(resolved_path)}` | `{esc(version)}` | `{esc(source)}` | `{esc(status)}` |"
         )
+PY
+  fi
+
+  if [[ -s "$VALIDATION_REFERENCE_MANIFEST_TSV" ]]; then
+    python - "$VALIDATION_REFERENCE_MANIFEST_TSV" >> "$SUMMARY_MD" <<'PY'
+import csv
+import pathlib
+import sys
+
+manifest_path = pathlib.Path(sys.argv[1])
+with manifest_path.open(encoding="utf-8", errors="replace") as f:
+    reader = csv.DictReader(f, delimiter="\t")
+    rows = [row for row in reader if row]
+
+print("")
+print("### Validation Reference Provenance")
+print(f"- Manifest: `{manifest_path}`")
+print(f"- Hashed reference files: {len(rows)}")
 PY
   fi
 
@@ -588,7 +689,9 @@ PY
 }
 
 write_metadata
+capture_nrss_resolution
 capture_cyrsoxs_resolution
+build_validation_reference_manifest
 build_smoke_catalog
 build_physics_catalog
 
