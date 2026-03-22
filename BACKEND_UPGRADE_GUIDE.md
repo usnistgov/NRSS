@@ -206,6 +206,13 @@ Useful initial capability fields:
 `Morphology` should stop being inherently synonymous with the CyRSoXS object
 graph.
 
+Implementation-phase direction now locked:
+
+- `Morphology` remains the main user-facing simulation container for parity work.
+- phase-1 `cupy-rsoxs` parity scope is Euler-only and single-GPU-only.
+- phase-1 `cupy-rsoxs` parity scope uses the default partial-scatter path only.
+- the parity target is the CyRSoXS math path, not the pybind host-ingestion pathway.
+
 ### 5.3 Runtime object ownership
 
 Current CyRSoXS compatibility requires preserving legacy attributes such as:
@@ -222,6 +229,21 @@ Prep-path policy:
 - keep these working for the `cyrsoxs` backend,
 - do not make them the universal abstraction for all future backends,
 - move toward generic backend-neutral preparation/run entry points.
+
+Implementation-phase direction now locked:
+
+- do not model `cupy-rsoxs` as a thin clone of the CyRSoXS pybind object graph;
+  model it as a backend-owned runtime/session with backend-neutral entry points.
+- do not use a singleton-style runtime object for `cupy-rsoxs` state that owns
+  scratch buffers, plans, or results.
+- prefer per-`Morphology` runtime/session ownership for:
+  - FFT plans,
+  - scratch/intermediate buffers,
+  - memory instrumentation state,
+  - result handles,
+  - explicit release/cleanup hooks.
+- globally cached compiled kernels/modules are acceptable later if they remain
+  stateless and separate from morphology-owned runtime state.
 
 ### 5.4 Input negotiation
 
@@ -259,6 +281,49 @@ share the same option set. The important design point is that backend-specific
 input requirements now have an explicit normalization/validation layer instead
 of being spread implicitly through `Morphology`.
 
+Implementation-phase direction now locked:
+
+- phase-1 `cupy-rsoxs` parity uses `float32` morphology/runtime normalization by
+  default; `float16` is deferred until after parity.
+- add an explicit `ownership_policy` surface in v1 with `borrow` and `copy`
+  modes.
+- `cupy-rsoxs` development/parity work should use `ownership_policy='borrow'`
+  as the default path.
+- `cyrsoxs` should retain copy-oriented construction semantics by default for
+  backward compatibility unless explicitly overridden later.
+- explicit tracking of contiguity remains important because device-side layout
+  changes can be materially expensive.
+- publish backend-preferred CuPy layout/contiguity guidance early for direct
+  CuPy morphology builders, and provide helper inspection/normalization
+  utilities rather than relying on silent coercion.
+- recommended parity contract for CuPy morphology fields is:
+  - shape/order semantics: ZYX voxel indexing,
+  - memory layout: C-contiguous,
+  - dtype: `float32`,
+  - one array per field (`Vfrac`, `S`, `theta`, `psi`) per material.
+- strict-mode rejection should state this expected contract explicitly so users
+  know what to build.
+- strict-mode tests should be used to catch stealth transfers/copies during
+  `cupy-rsoxs` bring-up.
+- avoiding unnecessary copies is a project goal, but changing default
+  `Material`/`Morphology` ownership semantics can be deferred if it would slow
+  parity work.
+- borrowed construction in `cupy-rsoxs` means incoming morphology arrays are
+  used in place after contract validation/coercion rules are satisfied; if a
+  coercion is required under `input_policy='coerce'`, the coerced array becomes
+  the backend-owned borrowed array for that run.
+- ownership/borrowing should be designed as an explicit contract rather than an
+  implicit backend side effect.
+
+Optical-constants direction for parity:
+
+- keep the public `OpticalConstants` contract host-friendly for phase-1 parity.
+- material optical constants do not need to live on device persistently inside
+  `Morphology`.
+- at compute time, the backend may stage the small per-energy optical-constant
+  tensors into CuPy arrays when they are needed for math with device-resident
+  morphology data.
+
 ### 5.5 Output policy
 
 Output policy is lower priority than input negotiation for the prep milestone.
@@ -270,6 +335,38 @@ Direction:
   arrays without forcing immediate device-to-host copies
 - a lightweight result wrapper is acceptable later if it does not impose
   meaningful overhead on the hot path
+
+Implementation-phase direction now locked:
+
+- parity output remains xarray-compatible and NumPy/PyHyperScattering-friendly.
+- for `cupy-rsoxs`, prefer lazy host conversion at result-read time instead of
+  eager device-to-host transfer during compute if practical.
+- backend-native/on-device result access is deferred until after parity, but the
+  result abstraction should be designed now so it can be added without breaking
+  the parity API.
+- users should be able to keep results while allowing the larger runtime/morph
+  state to be released when possible.
+- a lightweight backend-owned result wrapper is now recommended rather than
+  baking xarray conversion directly into the hot compute path.
+- that result wrapper should support an explicit release path so users can drop
+  morphology/runtime working state while keeping the scattering result alive.
+
+### 5.6 Visualization and host-view utilities
+
+The current validator path is already partly backend-aware, but the visualizer
+and several convenience/reporting surfaces are still NumPy/matplotlib-oriented.
+
+Implementation-phase direction now locked:
+
+- keep `check_materials(...)` and related scalar checks backend-aware.
+- add backend-neutral host-view helpers for:
+  - scalar reductions,
+  - selected-slice conversion to NumPy,
+  - lightweight histogram/debug extraction.
+- do not require the visualizer to understand CuPy arrays directly at every call
+  site; centralize host conversion in a narrow utility layer.
+- avoid accidental full-volume device-to-host transfers when visualization only
+  needs a slice or summary.
 
 ## 6. Test Architecture Direction
 
@@ -460,6 +557,52 @@ reported clearly. The coercion layer must record when it performed:
 Do not drift from prep into implementation of `cupy-rsoxs` math kernels during
 this phase.
 
+### 9.5 Runtime-state lifetime risk
+
+For `cupy-rsoxs`, a cached singleton runtime would make it easy to create:
+
+- stale scratch buffers,
+- hidden cross-run coupling,
+- unclear cleanup boundaries,
+- memory retention that is hard to reason about.
+
+The implementation phase should treat runtime/session ownership as explicit and
+per-morphology unless a narrower shared cache is clearly proven safe.
+
+### 9.6 Result-lifetime and mutation risk
+
+Once backend-native results and lazy conversion exist, NRSS must define what
+happens if morphology data is mutated after:
+
+- preparation,
+- run,
+- result conversion/export.
+
+Recommended direction:
+
+- phase-1 should take the safer default and forbid morphology mutation after a
+  result has been materialized unless and until an explicit invalidation API is
+  implemented.
+- this freeze should begin at successful `run()` completion, not only at later
+  xarray/export access.
+- if later mutation is re-enabled, treat post-run mutation as a
+  result-invalidation event at minimum.
+
+### 9.7 Large-box parity risk
+
+Large morphologies are one of the main reasons this backend exists, but they
+also make it easy to accidentally introduce policy drift while trying to save
+memory.
+
+Recommended direction:
+
+- for parity, large-box behavior should initially mirror current CyRSoXS
+  policy/limits rather than introducing new chunking or alternate projection
+  policy at the same time as the backend rewrite.
+- once parity and memory instrumentation are in place, large-box-specific
+  optimizations can be evaluated as explicit follow-up work with separate
+  thresholds.
+
 ## 10. Resumption Checklist
 
 If resuming from a fresh context, do the following first:
@@ -474,6 +617,18 @@ If resuming from a fresh context, do the following first:
 3. Check whether `src/NRSS/backends/` exists and what has been implemented.
 4. Run focused smoke tests first, then targeted backend-aware tests.
 5. Confirm whether `cyrsoxs` remains the default resolved backend.
+
+### 10.1 Preferred parity-validation shape
+
+When `cupy-rsoxs` implementation starts, prefer this minimum targeted test set:
+
+- a CoreShell workflow variant that builds NumPy morphology fields and runs with
+  `backend='cupy-rsoxs'`, `input_policy='coerce'`, and the parity ownership
+  default. This validates the supported NumPy-to-CuPy input contract.
+- a second CoreShell workflow variant that builds CuPy-native morphology fields
+  in backend-preferred layout and runs with `backend='cupy-rsoxs'`,
+  `ownership_policy='borrow'`, and `input_policy='strict'`. This validates the
+  no-stealth-transfer borrowed path.
 
 ## 11. Implementation Status Notes
 
@@ -519,6 +674,37 @@ Completed stages:
     `create_update_cy`, `validate_all`, and `run` remain available for the
     `cyrsoxs` backend
   - CyRSoXS imports are lazy and backend-gated
+
+Planning decisions additionally locked after the prep milestone:
+
+- `cupy-rsoxs` parity targets the CyRSoXS math path rather than the pybind
+  ingestion path
+- phase-1 parity scope is Euler-only
+- phase-1 parity scope uses `ScatterApproach::PARTIAL` only
+- phase-1 parity scope is single-GPU only
+- literal rotation / angle-accumulation semantics are required for parity;
+  alternate leaner/faster variants belong in later optimization notes
+- low-memory path may be implemented first, but parity is not complete until
+  both algorithm paths are supported
+- `ownership_policy` should be exposed in v1 with `borrow` and `copy`, and
+  `cupy-rsoxs` parity work should use `borrow`
+- parity output remains xarray-compatible; backend-native/on-device output is a
+  later extension
+- `float16` is deferred until after parity
+- future `cupy-rsoxs` runtime state should be per-morphology/per-session rather
+  than a singleton backend adapter
+
+- large-box behavior should initially follow current CyRSoXS policy for parity
+- phase-1 should prefer freezing morphology mutation after result creation until
+  an explicit invalidation contract exists
+- the mutation freeze should begin at successful `run()` completion
+- preferred direct-CuPy morphology contract for parity is ZYX-shaped,
+  C-contiguous, `float32` arrays for each material field
+- initial `cupy-rsoxs` parity validation should include both:
+  - a NumPy-input contract case using `input_policy='coerce'`
+  - a CuPy-native borrowed case using `ownership_policy='borrow'` and
+    `input_policy='strict'`
+
 - Stage 4: complete for the current test suite routing scope
   - `tests/conftest.py` now supports `--nrss-backend` and `NRSS_BACKEND`
   - backend-aware skip/routing is implemented for `backend_specific`,

@@ -396,6 +396,27 @@ Contract requirements:
 2. Provide explicit conversion methods (`as_numpy`, backend-native accessors).
 3. Support GPU-resident objective returns for fitting workflows to avoid forced host copies.
 4. Avoid implicit copies; when unavoidable, emit diagnostics in strict mode.
+5. Expose explicit ownership behavior for morphology inputs rather than hiding
+   copy-vs-borrow inside backend internals.
+6. Publish and enforce a backend-preferred morphology-array contract for direct
+   CuPy inputs.
+
+Phase-1 lock-ins for `cupy-rsoxs`:
+
+1. Parity target output remains xarray-compatible and NumPy/PyHyperScattering-friendly.
+2. Host transfer for parity output should happen lazily at result read/conversion time rather than eagerly during compute if practical.
+3. Backend-native/device-resident result access is deferred until after parity, but the result abstraction should be designed so it can be added without breaking the parity API.
+4. The result object should be allowed to outlive the rest of the morphology/runtime state when feasible; do not require users to keep the full morphology alive just to retain scattering output.
+5. Add a lightweight result-wrapper direction now:
+   - backend-owned internal result storage,
+   - explicit `to_xarray()` for parity workflows,
+   - later `to_backend_array()` / device-resident accessors.
+6. Provide an explicit release path so users can keep only the result object and
+   drop morphology/runtime working state when desired.
+7. Add an explicit `ownership_policy` surface in v1 with `borrow` and `copy`.
+8. `cupy-rsoxs` parity development should use `ownership_policy='borrow'`.
+9. Preferred direct-CuPy morphology contract for parity is ZYX-shaped,
+   C-contiguous, `float32` arrays for each material field.
 
 ## 10. Optional Dependency and Packaging Plan
 
@@ -418,12 +439,35 @@ Rationale:
 1. Matches current objective-evaluation workload.
 2. Avoids known instability concerns in CyRSoXS internal multi-GPU energy splitting.
 
+Phase-1 parity lock-in:
+
+1. `cupy-rsoxs` parity development and required parity tests target single-GPU execution only.
+2. Internal multi-GPU energy fan-out is explicitly deferred until after parity because current CyRSoXS multi-GPU behavior is known to be unstable in some workflows.
+
 ## 12. Runtime Observability and Safety Rails
 
 1. Log explicit host<->device transfers at NRSS-controlled boundaries.
 2. Add strict mode warnings for policy-driven conversions.
 3. Record per-stage timings and peak memory for benchmark/parity runs.
 4. Best-effort only for third-party implicit copies; complete interception may not be possible.
+
+Additional phase-1 requirements:
+
+1. Instrumentation must be disableable with effectively zero extra synchronization in non-dev runs.
+2. Memory observability should cover both:
+   - post-run cleanup behavior,
+   - peak and per-stage resident usage during compute, especially around polarization, FFT, and Ewald/result stages.
+3. The parity implementation should prefer structural memory control first:
+   - reuse scratch buffers,
+   - delete/release intermediates as soon as they are dead,
+   - only use allocator/pool trimming as an explicit lifecycle action, not as a hot-path substitute for sound ownership.
+4. For large morphologies, phase-1 behavior should follow current CyRSoXS
+   policy first; large-box-specific chunking or alternate projection strategies
+   are optimization-stage follow-up work rather than parity-stage policy
+   changes.
+5. Optical constants may remain host-oriented in the public API for parity, but
+   the backend should materialize the small per-energy tensors onto device when
+   needed for device-side math.
 
 ## 13. Development Workflow
 
@@ -449,6 +493,10 @@ Rationale:
 
 1. Test-hardening milestone: pybind golden baselines + deterministic harness.
 2. Phase 1: CuPy backend that mimics CyRSoXS algorithmic flow.
+   - Phase 1a: low-memory (`AlgorithmType=1`) implementation first, because it is the best immediate path for GPU headroom learning and memory discipline.
+   - Phase 1b: communication-minimizing (`AlgorithmType=0`) implementation to parity using lessons from the low-memory path.
+   - Phase 1 completion requires both algorithm paths to be runnable and parity-tested, even if one lands first.
+   - Phase 1 parity scope is Euler-only, `ScatterApproach::PARTIAL` only, and single-GPU only.
 3. Phase 2: Internal math cleanup (tensor-character refactor) while preserving parity tests.
 4. Phase 3: Additional backends behind shared backend contract.
 
@@ -469,3 +517,26 @@ Independent success criterion:
 3. GPU CI strategy and minimum gating matrix.
 4. Release performance gates (what is measured and acceptable drift).
 5. Detailed objective-function API and on-device return contract for fitting pipelines.
+
+## 17. Locked Decisions For `cupy-rsoxs` Implementation Start
+
+The following are now considered locked unless later planning explicitly reopens them:
+
+1. Parity target is the CyRSoXS math path, not the pybind ingestion path.
+2. Phase-1 parity is Euler-only.
+3. Phase-1 parity uses `ScatterApproach::PARTIAL` only.
+4. Phase-1 parity is single-GPU only.
+5. Start with literal rotation and angle-accumulation semantics for parity; any leaner/faster alternatives are optimization-track follow-ups only.
+6. Low-memory path may be implemented first, but parity is not declared complete until both algorithm paths are supported.
+7. Parity output contract is xarray-compatible and NumPy/PyHyperScattering-friendly.
+8. Backend-native/on-device result access is deferred until after parity, but the result abstraction should preserve that path.
+9. `float16` is deferred until after parity; parity-sensitive compute remains `float32/complex64`.
+10. Runtime instrumentation for timing/memory is desirable in development but must be fully disableable.
+11. Large-box behavior should initially mirror current CyRSoXS policy during parity.
+12. Phase-1 should prefer freezing morphology mutation after result creation until an explicit invalidation contract exists.
+13. The mutation freeze should begin at successful `run()` completion.
+14. Public optical constants may remain host-oriented for parity; backend staging to CuPy happens when math requires it.
+15. Preferred direct-CuPy morphology contract for parity is ZYX-shaped, C-contiguous, `float32` arrays for each material field.
+16. Initial `cupy-rsoxs` parity validation should include both:
+    - a NumPy-input contract case using `input_policy='coerce'`,
+    - a CuPy-native borrowed case using `ownership_policy='borrow'` and `input_policy='strict'`.
