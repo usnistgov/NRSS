@@ -78,6 +78,17 @@ def _validate_output_policy(policy):
         )
     return normalized
 
+
+def _validate_ownership_policy(policy, backend_name):
+    if policy is None:
+        return "borrow" if backend_name == "cupy-rsoxs" else "copy"
+    if policy not in {"copy", "borrow"}:
+        raise ValueError(
+            f"Unsupported NRSS ownership_policy {policy!r}. "
+            "Supported policies are 'copy', 'borrow', or None."
+        )
+    return policy
+
 class Morphology:
     '''
     Object used to hold all the components necessary for a complete CyRSoXS morphology
@@ -143,7 +154,8 @@ class Morphology:
                  backend=None,
                  backend_options=None,
                  input_policy='coerce',
-                 output_policy='numpy'):
+                 output_policy='numpy',
+                 ownership_policy=None):
 
         self._numMaterial = numMaterial
         self._PhysSize = PhysSize
@@ -158,6 +170,11 @@ class Morphology:
         )
         self._input_policy = _validate_input_policy(input_policy)
         self._output_policy = _validate_output_policy(output_policy)
+        self._ownership_policy = _validate_ownership_policy(ownership_policy, self._backend)
+        self._results_locked = False
+        self._backend_result = None
+        self._backend_runtime_state = {}
+        self._backend_timings = {}
         self.input_compatibility_report = []
         self.construction_backend_coercion_report = []
         self.last_backend_coercion_report = []
@@ -179,7 +196,10 @@ class Morphology:
                 self.materials[i] = Material(materialID=i)
             else:
                 try:
-                    self.materials[i] = materials[i].copy()
+                    if self._ownership_policy == "copy":
+                        self.materials[i] = materials[i].copy()
+                    else:
+                        self.materials[i] = materials[i]
                     if i == 1:
                         self._Energies = materials[i].energies
                         self.NumZYX = materials[i].NumZYX
@@ -187,6 +207,7 @@ class Morphology:
                     warnings.warn('numMaterial is greater than number of Material objects passed in. Creating empty Material')
                     self.materials[i] = Material(materialID=i)
 
+        self._bind_material_owners()
         self.normalize_materials_for_backend(report_attr='construction_backend_coercion_report')
 
         # flag denoting if Morphology has been simulated
@@ -198,12 +219,45 @@ class Morphology:
     def __repr__(self):
         return f'Morphology (NumMaterial : {self.numMaterial}, PhysSize : {self.PhysSize})'
 
+    def _bind_material_owners(self):
+        for material in self.materials.values():
+            material._owner_morphology = self
+
+    def _assert_mutation_allowed(self, target="morphology"):
+        if self._results_locked:
+            raise RuntimeError(
+                f"Cannot mutate {target} after a simulation result has been created for this "
+                "Morphology. Create a new Morphology or release/invalidate results first."
+            )
+
+    def _lock_results(self):
+        self._results_locked = True
+
+    def _reset_result_state(self):
+        self._results_locked = False
+        self._backend_result = None
+        self.scatteringPattern = None
+        self._simulated = False
+
+    @property
+    def ownership_policy(self):
+        return self._ownership_policy
+
+    @property
+    def backend_timings(self):
+        return dict(self._backend_timings)
+
+    def release_runtime(self):
+        if hasattr(self._backend_runtime, "release"):
+            self._backend_runtime.release(self)
+
     @property
     def CaseType(self):
         return self._CaseType
 
     @CaseType.setter
     def CaseType(self, casevalue):
+        self._assert_mutation_allowed("Morphology.CaseType")
         if (casevalue != 0) & (casevalue != 1) & (casevalue !=2):
             raise ValueError('CaseType must be 0, 1, or 2')
         else:
@@ -219,6 +273,7 @@ class Morphology:
 
     @Energies.setter
     def Energies(self, Elist):
+        self._assert_mutation_allowed("Morphology.Energies")
         self._Energies = Elist
 
         if self.inputData:
@@ -230,6 +285,7 @@ class Morphology:
 
     @EAngleRotation.setter
     def EAngleRotation(self, anglelist):
+        self._assert_mutation_allowed("Morphology.EAngleRotation")
         self._EAngleRotation = anglelist
 
         if self.inputData:
@@ -243,6 +299,7 @@ class Morphology:
 
     @MorphologyType.setter
     def MorphologyType(self, value):
+        self._assert_mutation_allowed("Morphology.MorphologyType")
         if value != 0:
             raise ValueError('Only Euler Morphology is currently supported')
         else:
@@ -258,6 +315,7 @@ class Morphology:
 
     @AlgorithmType.setter
     def AlgorithmType(self, value):
+        self._assert_mutation_allowed("Morphology.AlgorithmType")
         if (value != 0) & (value != 1):
             raise ValueError('AlgorithmType must be 0 (communication minimizing) or 1 (memory minimizing).')
         else:
@@ -271,6 +329,7 @@ class Morphology:
 
     @WindowingType.setter
     def WindowingType(self, value):
+        self._assert_mutation_allowed("Morphology.WindowingType")
         if (value != 0) & (value != 1):
             raise ValueError('WindowingType must be 0 (None) or 1 (Hanning).')
         else:
@@ -286,6 +345,7 @@ class Morphology:
 
     @RotMask.setter
     def RotMask(self, value):
+        self._assert_mutation_allowed("Morphology.RotMask")
         if (value != 0) & (value != 1):
             raise ValueError('RotMask must be 0 (False) or 1 (True).')
         else:
@@ -300,6 +360,7 @@ class Morphology:
 
     @EwaldsInterpolation.setter
     def EwaldsInterpolation(self, value):
+        self._assert_mutation_allowed("Morphology.EwaldsInterpolation")
         if (value != 0) & (value != 1):
             raise ValueError('EwaldsInterpolation must be 0 (Nearest Neighbor) or 1 (Trilinear).')
         else:
@@ -315,6 +376,7 @@ class Morphology:
 
     @ReferenceFrame.setter
     def ReferenceFrame(self, value):
+        self._assert_mutation_allowed("Morphology.ReferenceFrame")
         if (value != 0) & (value != 1):
             raise ValueError('ReferenceFrame must be 0 (Material Frame) or 1 (Lab Frame - Default).')
         else:
@@ -362,6 +424,7 @@ class Morphology:
 
     @PhysSize.setter
     def PhysSize(self, val):
+        self._assert_mutation_allowed("Morphology.PhysSize")
         if val < 0:
             raise ValueError('PhysSize must be greater than 0')
         self._PhysSize = float(val)
@@ -421,6 +484,11 @@ class Morphology:
                 f"input_policy='strict' for backend {self.backend!r}."
             )
         )
+        if strict and self.backend == "cupy-rsoxs":
+            header += (
+                " Expected direct CuPy inputs to be ZYX-shaped, C-contiguous, float32 arrays "
+                "for each material field."
+            )
         details = []
         for plan in plans:
             material_label = "unknown" if plan.material_id is None else str(plan.material_id)
@@ -503,6 +571,7 @@ class Morphology:
 
     @config.setter
     def config(self, dict1):
+        self._assert_mutation_allowed("Morphology.config")
         for key in dict1:
             if key in self.config_default:
                 self.__dict__['_'+key] = dict1[key]
@@ -518,6 +587,7 @@ class Morphology:
         backend_options=None,
         input_policy='coerce',
         output_policy='numpy',
+        ownership_policy=None,
     ):
         with h5py.File(hdf5_file, 'r') as f:
             if 'Euler_Angles' not in f.keys():
@@ -547,6 +617,7 @@ class Morphology:
             backend_options=backend_options,
             input_policy=input_policy,
             output_policy=output_policy,
+            ownership_policy=ownership_policy,
         )
 
     def load_config(self, config_file):
@@ -695,6 +766,16 @@ class Morphology:
         )
 
     def scattering_to_xarray(self, return_xarray=True, print_vec_info=False):
+        if self.backend != "cyrsoxs":
+            if self._backend_result is None:
+                warnings.warn('You haven\'t run your simulation yet')
+                return None
+            scattering_data = self._backend_result.to_xarray()
+            if return_xarray:
+                return scattering_data
+            self.scattering_data = scattering_data
+            return None
+
         if self.simulated:
             if not print_vec_info:
                 old_stdout = sys.stdout
@@ -884,8 +965,19 @@ class Material(OpticalConstants):
 
     '''
 
+    _guarded_attributes = {
+        "Vfrac",
+        "S",
+        "theta",
+        "psi",
+        "NumZYX",
+        "energies",
+        "opt_constants",
+    }
+
     def __init__(self, materialID=1, Vfrac=None, S=None, theta=None, psi=None,
                  NumZYX=None, energies=None, opt_constants=None, name=None):
+        self._owner_morphology = None
         self.materialID = materialID
         # Store arrays as-is, type conversion will happen when needed
         self.Vfrac = Vfrac
@@ -909,6 +1001,12 @@ class Material(OpticalConstants):
 
     def __repr__(self):
         return f'Material (Name : {self.name}, ID : {self.materialID}, Shape : {self.NumZYX})'
+
+    def __setattr__(self, key, value):
+        owner = self.__dict__.get("_owner_morphology")
+        if owner is not None and key in self._guarded_attributes:
+            owner._assert_mutation_allowed(f"Material.{key}")
+        super().__setattr__(key, value)
 
     @staticmethod
     def _copy_field(value):

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import gc
+import importlib
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -310,9 +312,30 @@ def _build_core_shell_fields(scenario: CoreShellScenario) -> dict[str, np.ndarra
     }
 
 
+def _convert_fields_namespace(
+    fields: dict[str, np.ndarray],
+    field_namespace: str,
+) -> dict[str, np.ndarray]:
+    if field_namespace == "numpy":
+        return fields
+    if field_namespace != "cupy":
+        raise AssertionError(f"Unsupported field namespace: {field_namespace}")
+
+    cp = importlib.import_module("cupy")
+    converted = {}
+    for key, value in fields.items():
+        converted[key] = cp.ascontiguousarray(cp.asarray(value, dtype=cp.float32))
+    return converted
+
+
 def build_core_shell_morphology(
     scenario: CoreShellScenario | str = "baseline",
     create_cy_object: bool = True,
+    *,
+    backend: str | None = None,
+    input_policy: str = "coerce",
+    ownership_policy: str | None = None,
+    field_namespace: str = "numpy",
 ) -> Morphology:
     if isinstance(scenario, str):
         if scenario != "baseline":
@@ -321,7 +344,10 @@ def build_core_shell_morphology(
 
     constants = _load_optical_constants()
     energies = list(map(float, constants[1].energies))
-    fields = _build_core_shell_fields(scenario=scenario)
+    fields = _convert_fields_namespace(
+        _build_core_shell_fields(scenario=scenario),
+        field_namespace=field_namespace,
+    )
 
     materials = {
         1: Material(
@@ -374,6 +400,9 @@ def build_core_shell_morphology(
         PhysSize=PHYS_SIZE_NM,
         config=config,
         create_cy_object=create_cy_object,
+        backend=backend,
+        input_policy=input_policy,
+        ownership_policy=ownership_policy,
     )
     morph.check_materials(quiet=True)
     if create_cy_object:
@@ -382,13 +411,47 @@ def build_core_shell_morphology(
 
 
 def run_core_shell_pybind(scenario: CoreShellScenario | str = "baseline") -> xr.DataArray:
-    morph = build_core_shell_morphology(scenario=scenario, create_cy_object=True)
+    morph = build_core_shell_morphology(
+        scenario=scenario,
+        create_cy_object=True,
+        backend="cyrsoxs",
+    )
     try:
         scattering = morph.run(stdout=False, stderr=False, return_xarray=True)
         if scattering is None:
             raise AssertionError("Core-shell pybind run returned no scattering data.")
         return scattering.copy(deep=True)
     finally:
+        del morph
+        release_runtime_memory()
+
+
+def run_core_shell_backend(
+    scenario: CoreShellScenario | str = "baseline",
+    *,
+    backend: str,
+    input_policy: str = "coerce",
+    ownership_policy: str | None = None,
+    field_namespace: str = "numpy",
+) -> tuple[xr.DataArray, dict[str, float]]:
+    morph = build_core_shell_morphology(
+        scenario=scenario,
+        create_cy_object=True,
+        backend=backend,
+        input_policy=input_policy,
+        ownership_policy=ownership_policy,
+        field_namespace=field_namespace,
+    )
+    started = time.perf_counter()
+    try:
+        scattering = morph.run(stdout=False, stderr=False, return_xarray=True)
+        if scattering is None:
+            raise AssertionError("Core-shell backend run returned no scattering data.")
+        timings = dict(morph.backend_timings)
+        timings.setdefault("wall_seconds", time.perf_counter() - started)
+        return scattering.copy(deep=True), timings
+    finally:
+        morph.release_runtime()
         del morph
         release_runtime_memory()
 

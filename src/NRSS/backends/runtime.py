@@ -36,21 +36,20 @@ class BackendRuntime(ABC):
     def validate_all(self, morphology: "Morphology", *, quiet: bool = True) -> None:
         """Run backend-aware validation for the morphology."""
 
-
-_RUNTIME_CACHE: dict[str, BackendRuntime] = {}
-
+    def release(self, morphology: "Morphology") -> None:
+        """Release backend-owned runtime state for the morphology."""
+        return None
 
 def get_backend_runtime(backend_name: str) -> BackendRuntime:
-    runtime = _RUNTIME_CACHE.get(backend_name)
-    if runtime is not None:
-        return runtime
-
     if backend_name == "cyrsoxs":
         from .cyrsoxs import CyrsoxsBackendRuntime
 
-        runtime = CyrsoxsBackendRuntime()
-        _RUNTIME_CACHE[backend_name] = runtime
-        return runtime
+        return CyrsoxsBackendRuntime()
+
+    if backend_name == "cupy-rsoxs":
+        from .cupy_rsoxs import CupyRsoxsBackendRuntime
+
+        return CupyRsoxsBackendRuntime()
 
     raise BackendUnavailableError(
         f"Backend {backend_name!r} does not implement an NRSS runtime adapter yet."

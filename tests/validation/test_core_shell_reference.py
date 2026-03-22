@@ -21,6 +21,7 @@ from tests.validation.lib.core_shell import (
     load_sim_reference_awedge,
     metrics_within_thresholds,
     plot_core_shell_validation_panel,
+    run_core_shell_backend,
     run_core_shell_pybind,
     scattering_to_awedge,
 )
@@ -34,9 +35,18 @@ PLOT_DIR = REPO_ROOT / "test-reports" / "core-shell-dev"
 WRITE_VALIDATION_PLOTS = os.environ.get("NRSS_WRITE_VALIDATION_PLOTS", "").strip() == "1"
 
 
-@lru_cache(maxsize=1)
-def _baseline_awedge():
-    scattering = run_core_shell_pybind(scenario="baseline")
+@lru_cache(maxsize=8)
+def _baseline_awedge(backend: str, input_policy: str, ownership_policy: str | None, field_namespace: str):
+    if backend == "cyrsoxs":
+        scattering = run_core_shell_pybind(scenario="baseline")
+    else:
+        scattering, _ = run_core_shell_backend(
+            scenario="baseline",
+            backend=backend,
+            input_policy=input_policy,
+            ownership_policy=ownership_policy,
+            field_namespace=field_namespace,
+        )
     return scattering_to_awedge(scattering).copy(deep=True)
 
 
@@ -45,7 +55,7 @@ def _baseline_awedge():
 @pytest.mark.physics_validation
 @pytest.mark.experimental_validation
 @pytest.mark.toolchain_validation
-def test_core_shell_experimental_reference_pybind():
+def test_core_shell_experimental_reference_pybind(nrss_backend):
     """
     Compare the maintained pybind+WPIntegrator CoreShell A-wedge to the vendored
     experimental PGN RSoXS reference.
@@ -60,7 +70,12 @@ def test_core_shell_experimental_reference_pybind():
     if not has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for CoreShell experimental validation.")
 
-    awedge = _baseline_awedge()
+    awedge = _baseline_awedge(
+        nrss_backend,
+        "coerce",
+        None,
+        "numpy",
+    )
     reference = load_experimental_reference_awedge()
     comparison = awedge_comparison_slices(awedge=awedge, reference=reference)
     metrics = compute_awedge_metrics(comparison)
@@ -84,7 +99,7 @@ def test_core_shell_experimental_reference_pybind():
 @pytest.mark.slow
 @pytest.mark.physics_validation
 @pytest.mark.toolchain_validation
-def test_core_shell_sim_regression_pybind():
+def test_core_shell_sim_regression_pybind(nrss_backend):
     """
     Compare the maintained pybind+WPIntegrator CoreShell A-wedge to the local
     sim-derived regression golden stored alongside the experimental reference.
@@ -94,7 +109,12 @@ def test_core_shell_sim_regression_pybind():
     if not SIM_REFERENCE_PATH.exists():
         pytest.skip(f"CoreShell sim reference not found: {SIM_REFERENCE_PATH}")
 
-    awedge = _baseline_awedge()
+    awedge = _baseline_awedge(
+        nrss_backend,
+        "coerce",
+        None,
+        "numpy",
+    )
     reference = load_sim_reference_awedge()
     comparison = awedge_comparison_slices(awedge=awedge, reference=reference)
     metrics = compute_awedge_metrics(comparison)
@@ -113,6 +133,35 @@ def test_core_shell_sim_regression_pybind():
                 "not experimental truth."
             ),
         )
+
+    if not passed:
+        raise AssertionError("; ".join(failures))
+
+
+@pytest.mark.gpu
+@pytest.mark.slow
+@pytest.mark.backend_specific
+@pytest.mark.reference_parity
+def test_core_shell_sim_regression_cupy_borrow_strict(nrss_backend):
+    """
+    Compare the CuPy-native borrowed CoreShell workflow to the maintained local
+    sim-derived regression golden.
+    """
+    if not has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for CoreShell CuPy borrowed validation.")
+    if nrss_backend != "cupy-rsoxs":
+        pytest.skip("CuPy borrowed CoreShell validation is only applicable to cupy-rsoxs.")
+
+    awedge = _baseline_awedge(
+        "cupy-rsoxs",
+        "strict",
+        "borrow",
+        "cupy",
+    )
+    reference = load_sim_reference_awedge()
+    comparison = awedge_comparison_slices(awedge=awedge, reference=reference)
+    metrics = compute_awedge_metrics(comparison)
+    passed, failures = metrics_within_thresholds(metrics, SIM_THRESHOLDS)
 
     if not passed:
         raise AssertionError("; ".join(failures))
