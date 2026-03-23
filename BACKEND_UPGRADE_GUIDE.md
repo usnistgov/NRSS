@@ -722,8 +722,11 @@ Planning decisions additionally locked after the prep milestone:
   - private `Morphology._set_private_backend_timing_segments(...)` and
     `Morphology._clear_private_backend_timing_segments()` drive opt-in segment
     timing
-  - Segment `A` is measured in the dev harness, Segments `B-F` are measured in
-    `cupy-rsoxs` via CUDA events, and Segment `G` is deferred
+  - Segment `A1` is measured in the dev harness
+  - Segment `A2` is measured in `cupy-rsoxs` via private wall-clock timing for
+    runtime staging
+  - Segments `B-F` are measured in `cupy-rsoxs` via CUDA events, and Segment
+    `G` is deferred
   - when timing is not enabled, `backend_timings` stays empty and the timing
     event path is skipped
 - the default optimization harness now targets the common host-resident public
@@ -741,8 +744,17 @@ Planning decisions additionally locked after the prep milestone:
   lane for either resident-mode variant, but it is not part of the default
   optimization loop
 - in the default host-resident lane, host-to-device staging is included in the
-  primary wall-clock metric but is not yet isolated as a separate named timing
-  segment inside the current `A-F` breakdown
+  primary wall-clock metric and is now isolated as private Segment `A2`
+- Segment `A` is now nominally complete for the common workflow:
+  - Segment `A1` constructor work is already small,
+  - the accepted host-resident Segment `A2` staging improvement is in place,
+  - workflows that intentionally keep morphology fields on GPU should use
+    `resident_mode='device'` and are expected to be faster because Segment
+    `A2` largely disappears in that use case
+- default future speed work should focus on Segments `B` and `D`
+- repeated-run host-resident staging reuse is recorded only as a low-priority
+  niche possibility; if persistent GPU residency is the real use case, prefer
+  `resident_mode='device'`
 - current optimization tuning should default to single-energy lanes; full-energy
   studies are legacy/historical comparison artifacts or milestone confirmation
 

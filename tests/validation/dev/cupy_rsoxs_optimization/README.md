@@ -24,13 +24,24 @@ Current contents:
   - defines the primary timing boundary as:
     - start immediately before `Morphology(...)`,
     - end immediately after synchronized `run(return_xarray=False)`,
-  - supports internal segment timing for segments `A-F`,
+  - supports internal segment timing for segments `A1`, `A2`, and `B-F`,
+  - alias `A` expands to `A1,A2` for convenience,
   - runs each benchmark case in a subprocess so crashes or OOMs are isolated to
     the individual case.
 
 Recommended workflow:
 
+Segment `A` is nominally complete for the common workflow.
+- Default new speed work should focus on Segments `B` and `D`.
+- `resident_mode='device'` is expected to be faster when morphology fields
+  already live on GPU, and that distinction should remain visible in the
+  timing results.
+- Repeated-run host-resident staging reuse remains only a low-priority niche
+  future idea.
+
 1. Iterate on `cupy-rsoxs` with the primary no-rotation lane first:
+   - for new work, start with Segments `B` or `D` unless Segment `A` is being
+     revisited for a specific reason,
    - rerun the default host-resident single-energy small-box timing case after
      each optimization step,
    - narrow `--timing-segments` when focusing on one segment,

@@ -461,7 +461,10 @@ Phase-1 parity lock-in:
    stream synchronize immediately before the start timestamp so unfinished
    upstream GPU work is not counted inside morphology timing.
 6. The current timing pass records:
-   - Segment `A` in the harness with wall-clock timing,
+   - Segment `A1` in the harness with wall-clock timing for `Morphology(...)`
+     construction / contract normalization,
+   - Segment `A2` inside `cupy-rsoxs` with private wall-clock timing for
+     runtime morphology staging,
    - Segments `B-F` inside `cupy-rsoxs` with private CUDA-event timing,
    - no timing payload at all unless timing is explicitly enabled,
    - no Segment `G` / export timing in this pass.
@@ -483,7 +486,8 @@ Additional phase-1 requirements:
    - peak and per-stage resident usage during compute, especially around polarization, FFT, and Ewald/result stages.
 3. Stage-level timing work should continue to be organized around the following
    serial optimization segments:
-   - Segment A: `Morphology` construction, contract normalization, and data staging,
+   - Segment A1: `Morphology` construction and contract normalization,
+   - Segment A2: runtime morphology staging into backend compute space,
    - Segment B: n-field / tensor-character assembly,
    - Segment C: FFT, reorder, scratch reuse, and plan behavior,
    - Segment D: Ewald / scatter / projection math,
@@ -611,8 +615,8 @@ recover:
    - primary timing ends immediately after synchronized `run(return_xarray=False)`,
    - upstream field generation is excluded,
    - export timing is excluded,
-   - Segment `A` is measured in the harness and Segments `B-F` are measured in
-     `cupy-rsoxs`,
+   - Segment `A1` is measured in the harness and Segments `A2-F` are measured
+     in `cupy-rsoxs`,
    - Segment `G` remains reserved for future export timing.
 4. The reusable full-energy backend-comparison harness lives at:
    - `tests/validation/dev/core_shell_backend_performance/run_core_shell_backend_performance_abstract.py`
@@ -655,12 +659,13 @@ recover:
    - this is intentionally private and should remain internal unless a later
      API review explicitly promotes it.
 5. Implemented segment coverage is:
-   - Segment `A`: harness wall time for morphology construction / staging
-     inside the primary timing boundary,
+   - Segment `A1`: harness wall time for morphology construction /
+     contract normalization inside the primary timing boundary,
+   - Segment `A2`: `cupy-rsoxs` private wall time for runtime staging,
    - Segments `B-F`: `cupy-rsoxs` private CUDA-event timings,
    - Segment `G`: deferred for a later export-timing pass.
 6. The backend timing payload now has the shape:
-   - `{"measurement": "cuda_event", "selected_segments": [...], "segment_seconds": {...}}`
+   - `{"measurement": "...", "selected_segments": [...], "segment_seconds": {...}, "segment_measurements": {...}}`
 7. When timing is not explicitly enabled:
    - `morphology.backend_timings` remains `{}`,
    - `cupy-rsoxs` does not enter the CUDA-event timing path,
@@ -668,7 +673,7 @@ recover:
 8. The old dev-harness `workflow_seconds` metric is intentionally discarded and
    should not be revived as an optimization authority.
 9. Segment totals are not expected to sum exactly to `primary_seconds`:
-   - Segment `A` is wall-clock,
+   - Segments `A1` and `A2` are wall-clock,
    - Segments `B-F` are CUDA-event timings,
    - residual host/launch overhead remains in the primary wall metric.
 10. Verification completed in `nrss-dev` for this pass:
@@ -716,15 +721,18 @@ recover:
    - on the primary small single-energy lane, current latency is dominated by
      Segments `B` and `D`,
    - Segment `C` is visible but materially smaller,
-   - Segments `A`, `E`, and `F` are currently minor contributors in that lane.
+   - Segment `A1` is currently minor in that lane,
+   - host-resident `A2` can still be material and should be interpreted
+     separately from constructor overhead,
+   - Segments `E` and `F` are currently minor contributors in that lane.
 7. Important benchmark caveats for the harness going forward:
    - the default host-resident lane is meant to resemble the most common public
      workflow and therefore includes host-resident morphology handling in the
      primary wall-clock metric,
    - in host mode, host-to-device staging happens inside `run()` and is counted
      in total wall time,
-   - that staging is not yet isolated as its own named timing segment in the
-     current `A-F` breakdown.
+   - that staging is now isolated as Segment `A2` inside the private timing
+     breakdown.
 8. Additional caveat for the opt-in device-resident lane:
    - the `cupy -> cupy-rsoxs (device/borrow/strict)` path is contract-clean at
      the `Morphology` boundary,
@@ -732,7 +740,25 @@ recover:
      benchmark,
    - the current CoreShell builder still creates fields in NumPy and then
      preconverts them to CuPy before `Morphology(...)` timing starts.
-9. Maintained parity remains a post-optimization check through the test suite
+9. Latest Segment `A` evidence from the current accepted state:
+   - `segA12_probe_20260323` established that Segment `A1` constructor work is
+     already minor while host-resident Segment `A2` staging is the transfer
+     cost center,
+   - `a2_exp1_empty_set_20260323` replaced the host-resident NumPy -> CuPy
+     staging fast path with `cp.empty(...); out.set(host)` and improved the
+     small single-energy host lane by about `7.5%` on primary wall time and
+     about `7.0%` on Segment `A2` versus the split-only baseline,
+   - in the corresponding device-resident lane, Segment `A2` is effectively
+     zero because the morphology fields already satisfy the backend-preferred
+     device contract before `run()` begins.
+10. Practical prioritization interpretation from that evidence:
+   - Segment `A` is nominally complete for the common workflow,
+   - if a workflow expects morphology fields to remain on GPU,
+     `resident_mode='device'` is the intended faster tradeoff and should
+     remain visibly faster than host-resident staging,
+   - default future speed work should focus on Segments `B` and `D` unless new
+     timing evidence changes the ranking.
+11. Maintained parity remains a post-optimization check through the test suite
    rather than through a `cyrsoxs` timing harness.
 
 ### 18.4 Official resident-mode guidance
@@ -797,8 +823,12 @@ recover:
      resident mode, dense angle sweep when needed.
 6. When chasing a hotspot, narrow `--timing-segments` to the relevant subset
    instead of recording everything on every run.
-   - current evidence makes Segments `B` and `D` the first sensible focal
-     points,
+   - Segment `A` is nominally complete for the common workflow:
+     - `A1` constructor overhead is already minor,
+     - the accepted host-resident `A2` staging improvement is in place,
+     - the device-resident lane is an intentionally faster alternate use case
+       and should remain visibly faster when morphology is already on device,
+   - current evidence makes Segments `B` and `D` the default focal points,
    - re-expand to `all` when checking for regression spillover into neighboring
      stages.
 7. Do not add `cyrsoxs` timing lanes to the default optimization harness.
@@ -841,8 +871,24 @@ recover:
      - improved run time by about `12.8%` to `36.4%` versus the original matrix
        baseline,
      - preserved the ad hoc validation metrics already seen in the baseline
-       run,
-     - this is the current accepted code state for resumed optimization work.
+       run.
+   - `opt08_segment_a_split`
+     - split historical Segment `A` into Segment `A1` constructor timing and
+       Segment `A2` runtime staging timing,
+     - made host-resident transfer cost separately measurable from
+       `Morphology(...)` construction,
+     - changed the accepted measurement basis for resumed work so Segment `A`
+       no longer hides transfer and constructor behavior inside one number.
+   - `opt09_stage_empty_set`
+     - replaced host-resident NumPy -> CuPy staging from `cp.asarray(...)`
+       with `cp.empty(...); out.set(host)`,
+     - improved the small single-energy host lane by about `7.5%` on primary
+       wall time and about `7.0%` on Segment `A2` versus the split-only
+       baseline,
+     - device-resident Segment `A2` remains effectively zero when morphology
+       fields are already on device before `run()` begins,
+     - this makes Segment `A` nominally complete for the common workflow, with
+       future default tuning focus shifted to Segments `B` and `D`.
 2. Explored but not accepted in the first campaign:
    - `opt03_prealloc_result_scratch`
      - mixed result: about `-2.3%` to `+0.4%` versus `opt02`,
@@ -893,9 +939,19 @@ recover:
    Segment `G`.
 6. Per-stage memory instrumentation remains deferred; the existing coarse peak
    memory monitoring is enough for the current pass.
-7. Resume rule for a fresh optimization context:
-   - start from the current accepted `opt04`-equivalent behavior plus the
-     repaired timing apparatus in this repo state,
+7. Host-resident repeated-run staging reuse remains explicitly deferred as a
+   low-priority niche possibility.
+   - examples include registered-host buffers, reusable staged device mirrors,
+     or other host-lane transfer caches,
+   - this repo does not expect many repeated-run workflows to justify making
+     that the default direction,
+   - if a workflow benefits from persistent GPU morphology residency, prefer
+     `resident_mode='device'` rather than adding host-resident caching by
+     default.
+8. Resume rule for a fresh optimization context:
+   - start from the current accepted backend state in this repo, including the
+     Segment `A1/A2` split and the accepted host-resident `A2` staging fast
+     path,
    - use `tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py`
      as the default inner-loop harness,
    - begin with the primary lane:

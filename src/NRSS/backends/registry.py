@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import importlib.util
 import os
 
@@ -42,6 +43,7 @@ class BackendInfo:
     description: str
 
 
+@lru_cache(maxsize=None)
 def _find_import_target(*candidates: str) -> str | None:
     for candidate in candidates:
         try:
@@ -154,6 +156,7 @@ def _detect_cupy_rsoxs() -> BackendInfo:
     )
 
 
+@lru_cache(maxsize=None)
 def get_backend_info(name: str) -> BackendInfo:
     if name == "cyrsoxs":
         return _detect_cyrsoxs()

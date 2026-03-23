@@ -94,13 +94,15 @@ def assess_array_for_backend(
     material_id: int | None = None,
     backend_options: Mapping[str, Any] | None = None,
     resident_mode: str | None = None,
+    contract: Mapping[str, Any] | None = None,
 ) -> ArrayPlan:
     info = inspect_array(arr)
-    contract = resolve_backend_array_contract(
-        backend_name,
-        backend_options,
-        resident_mode=resident_mode,
-    )
+    if contract is None:
+        contract = resolve_backend_array_contract(
+            backend_name,
+            backend_options,
+            resident_mode=resident_mode,
+        )
     return _assess_array_against_contract(
         arr=arr,
         field_name=field_name,
@@ -116,9 +118,11 @@ def assess_array_for_backend_runtime(
     field_name: str,
     material_id: int | None = None,
     backend_options: Mapping[str, Any] | None = None,
+    contract: Mapping[str, Any] | None = None,
 ) -> ArrayPlan:
     info = inspect_array(arr)
-    contract = resolve_backend_runtime_contract(backend_name, backend_options)
+    if contract is None:
+        contract = resolve_backend_runtime_contract(backend_name, backend_options)
     return _assess_array_against_contract(
         arr=arr,
         field_name=field_name,
@@ -252,8 +256,12 @@ def coerce_array_for_backend(arr: Any, plan: ArrayPlan):
             raise RuntimeError("CuPy is not importable.")
         cp_dtype = cp.dtype(plan.target_dtype)
         if plan.original_namespace == "numpy":
-            out = cp.asarray(arr, dtype=cp_dtype)
-            return cp.ascontiguousarray(out)
+            np_dtype = np.dtype(plan.target_dtype)
+            host = np.asarray(arr, dtype=np_dtype)
+            host = np.ascontiguousarray(host)
+            out = cp.empty(host.shape, dtype=cp_dtype)
+            out.set(host)
+            return out
         if plan.original_namespace == "cupy":
             out = cp.asarray(arr, dtype=cp_dtype)
             return cp.ascontiguousarray(out)

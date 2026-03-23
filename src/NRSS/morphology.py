@@ -500,17 +500,22 @@ class Morphology:
         )
 
     def _collect_backend_assessment(self):
+        contract = self._backend_array_contract
+        backend_name = self._backend
+        resident_mode = self._resident_mode
+        backend_options = self._backend_options
         reports = []
         for material_id, mat in self.materials.items():
             for field_name in ('Vfrac', 'S', 'theta', 'psi'):
                 reports.append(
                     assess_array_for_backend(
                         getattr(mat, field_name),
-                        backend_name=self.backend,
+                        backend_name=backend_name,
                         field_name=field_name,
                         material_id=material_id,
-                        backend_options=self.backend_options,
-                        resident_mode=self.resident_mode,
+                        backend_options=backend_options,
+                        resident_mode=resident_mode,
+                        contract=contract,
                     )
                 )
         return reports
@@ -569,37 +574,43 @@ class Morphology:
             ]
             if required:
                 raise TypeError(self._format_backend_input_error(required, strict=True))
-            setattr(self, report_attr, list(reports))
-            self.input_compatibility_report = list(reports)
-            self._refresh_backend_info()
+            setattr(self, report_attr, reports)
+            self.input_compatibility_report = reports
             return self.input_compatibility_report
 
+        contract = self._backend_array_contract
+        backend_name = self._backend
+        resident_mode = self._resident_mode
+        backend_options = self._backend_options
         normalized_reports = []
         for material_id, mat in self.materials.items():
             for field_name in ('Vfrac', 'S', 'theta', 'psi'):
                 plan = assess_array_for_backend(
                     getattr(mat, field_name),
-                    backend_name=self.backend,
+                    backend_name=backend_name,
                     field_name=field_name,
                     material_id=material_id,
-                    backend_options=self.backend_options,
-                    resident_mode=self.resident_mode,
+                    backend_options=backend_options,
+                    resident_mode=resident_mode,
+                    contract=contract,
                 )
                 normalized_reports.append(plan)
                 if getattr(mat, field_name) is not None:
                     setattr(mat, field_name, coerce_array_for_backend(getattr(mat, field_name), plan))
 
         setattr(self, report_attr, normalized_reports)
-        return self.refresh_backend_assessment()
+        self.input_compatibility_report = self._collect_backend_assessment()
+        return self.input_compatibility_report
 
     def _coerce_material_field(self, value, field_name, material_id):
         plan = assess_array_for_backend(
             value,
-            backend_name=self.backend,
+            backend_name=self._backend,
             field_name=field_name,
             material_id=material_id,
-            backend_options=self.backend_options,
-            resident_mode=self.resident_mode,
+            backend_options=self._backend_options,
+            resident_mode=self._resident_mode,
+            contract=self._backend_array_contract,
         )
         self.last_backend_coercion_report.append(plan)
         if value is None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import gc
 import math
+import time
 from typing import Any
 
 import numpy as np
@@ -14,7 +15,15 @@ from .runtime import BackendRuntime
 
 _CUPY_KERNEL_CACHE: dict[str, Any] = {}
 _CUPY_PRIVATE_TIMING_SEGMENTS_KEY = "_private_backend_timing_segments"
-_CUPY_TIMED_SEGMENTS = ("B", "C", "D", "E", "F")
+_CUPY_TIMED_SEGMENTS = ("A2", "B", "C", "D", "E", "F")
+_CUPY_SEGMENT_MEASUREMENTS = {
+    "A2": "wall_clock",
+    "B": "cuda_event",
+    "C": "cuda_event",
+    "D": "cuda_event",
+    "E": "cuda_event",
+    "F": "cuda_event",
+}
 
 
 @dataclass(frozen=True)
@@ -36,26 +45,41 @@ class _RuntimeMaterialView:
 
 class _NullSegmentRecorder:
     selected_segments: tuple[str, ...] = ()
+    segment_measurements: dict[str, str] = {}
 
     def measure(self, segment: str, func):
         del segment
         return func()
 
-    def finalize(self) -> dict[str, float]:
-        return {}
+    def finalize(self) -> tuple[dict[str, float], dict[str, str], str | None]:
+        return {}, {}, None
 
 
-class _EventSegmentRecorder:
+class _SegmentRecorder:
     def __init__(self, cp, selected_segments: tuple[str, ...]):
         self._cp = cp
         self.selected_segments = tuple(
             segment for segment in _CUPY_TIMED_SEGMENTS if segment in selected_segments
         )
+        self.segment_measurements = {
+            segment: _CUPY_SEGMENT_MEASUREMENTS[segment]
+            for segment in self.selected_segments
+        }
         self._records: list[_RecordedEventRange] = []
+        self._wall_totals: dict[str, float] = {}
 
     def measure(self, segment: str, func):
         if segment not in self.selected_segments:
             return func()
+        measurement = self.segment_measurements[segment]
+        if measurement == "wall_clock":
+            start = time.perf_counter()
+            result = func()
+            self._cp.cuda.Stream.null.synchronize()
+            self._wall_totals[segment] = self._wall_totals.get(segment, 0.0) + (
+                time.perf_counter() - start
+            )
+            return result
         start = self._cp.cuda.Event()
         stop = self._cp.cuda.Event()
         start.record()
@@ -64,15 +88,21 @@ class _EventSegmentRecorder:
         self._records.append(_RecordedEventRange(segment=segment, start=start, stop=stop))
         return result
 
-    def finalize(self) -> dict[str, float]:
-        if not self._records:
-            return {}
-        self._cp.cuda.Stream.null.synchronize()
-        totals: dict[str, float] = {}
-        for record in self._records:
-            elapsed_s = float(self._cp.cuda.get_elapsed_time(record.start, record.stop)) / 1000.0
-            totals[record.segment] = totals.get(record.segment, 0.0) + elapsed_s
-        return totals
+    def finalize(self) -> tuple[dict[str, float], dict[str, str], str | None]:
+        if not self._records and not self._wall_totals:
+            return {}, {}, None
+        totals = dict(self._wall_totals)
+        if self._records:
+            self._cp.cuda.Stream.null.synchronize()
+            for record in self._records:
+                elapsed_s = float(self._cp.cuda.get_elapsed_time(record.start, record.stop)) / 1000.0
+                totals[record.segment] = totals.get(record.segment, 0.0) + elapsed_s
+        measurement_modes = set(self.segment_measurements.values())
+        if len(measurement_modes) == 1:
+            measurement = next(iter(measurement_modes))
+        else:
+            measurement = "mixed"
+        return totals, dict(self.segment_measurements), measurement
 
 
 def require_cupy_modules():
@@ -158,7 +188,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         morphology._backend_timings = {}
 
         energies = tuple(float(energy) for energy in morphology.Energies)
-        runtime_materials = self._runtime_material_views(morphology)
+        runtime_materials = recorder.measure("A2", lambda: self._runtime_material_views(morphology))
         projections = []
         window = None
         try:
@@ -191,12 +221,13 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
         morphology._backend_result = result
         morphology.scatteringPattern = result
-        segment_seconds = recorder.finalize()
+        segment_seconds, segment_measurements, measurement = recorder.finalize()
         if recorder.selected_segments:
             morphology._backend_timings = {
-                "measurement": "cuda_event",
+                "measurement": measurement,
                 "selected_segments": list(recorder.selected_segments),
                 "segment_seconds": segment_seconds,
+                "segment_measurements": segment_measurements,
             }
         morphology._simulated = True
         morphology._lock_results()
@@ -231,7 +262,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         requested_segments = self._requested_timing_segments(morphology)
         if not requested_segments:
             return _NullSegmentRecorder()
-        return _EventSegmentRecorder(cp=cp, selected_segments=requested_segments)
+        return _SegmentRecorder(cp=cp, selected_segments=requested_segments)
 
     def _requested_timing_segments(self, morphology) -> tuple[str, ...]:
         requested = morphology._backend_runtime_state.get(_CUPY_PRIVATE_TIMING_SEGMENTS_KEY, ())
@@ -272,6 +303,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return wz * wy * wx
 
     def _runtime_material_views(self, morphology):
+        runtime_contract = morphology._runtime_compute_contract
         staging_reports = []
         runtime_materials = []
         for material_id, material in morphology.materials.items():
@@ -283,7 +315,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     backend_name=self.name,
                     field_name=field_name,
                     material_id=material_id,
-                    backend_options=morphology.backend_options,
+                    contract=runtime_contract,
                 )
                 staging_reports.append(plan)
                 staged_fields[field_name] = coerce_array_for_backend(value, plan)

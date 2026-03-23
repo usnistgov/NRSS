@@ -53,7 +53,10 @@ CENTER_Z_VOX = 15.0
 
 SUMMARY_NAME = "summary.json"
 PRIMARY_TIMING_BOUNDARY = "Morphology(...) -> synchronized run(return_xarray=False)"
-TIMING_SEGMENTS = ("A", "B", "C", "D", "E", "F")
+TIMING_SEGMENTS = ("A1", "A2", "B", "C", "D", "E", "F")
+TIMING_SEGMENT_ALIASES = {
+    "A": ("A1", "A2"),
+}
 
 
 @dataclass(frozen=True)
@@ -145,11 +148,18 @@ def _parse_resident_modes(raw: str) -> tuple[str, ...]:
 def _parse_timing_segments(raw: str) -> tuple[str, ...]:
     if raw.strip().lower() == "all":
         return TIMING_SEGMENTS
-    requested = tuple(dict.fromkeys(part.strip().upper() for part in raw.split(",") if part.strip()))
+    expanded: list[str] = []
+    for part in raw.split(","):
+        cleaned = part.strip().upper()
+        if not cleaned:
+            continue
+        expanded.extend(TIMING_SEGMENT_ALIASES.get(cleaned, (cleaned,)))
+    requested = tuple(dict.fromkeys(expanded))
     unknown = tuple(segment for segment in requested if segment not in TIMING_SEGMENTS)
     if unknown:
         raise SystemExit(
-            f"Unsupported timing segments {unknown!r}. Valid values: {TIMING_SEGMENTS!r} or 'all'."
+            "Unsupported timing segments "
+            f"{unknown!r}. Valid values: {TIMING_SEGMENTS!r}, alias 'A', or 'all'."
         )
     if not requested:
         raise SystemExit("timing_segments must select at least one segment.")
@@ -527,8 +537,8 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         primary_start = time.perf_counter()
         morphology = _construct_morphology_for_timing_case(case, prepared_inputs)
         segment_seconds: dict[str, float] = {}
-        if "A" in case.timing_segments:
-            segment_seconds["A"] = time.perf_counter() - primary_start
+        if "A1" in case.timing_segments:
+            segment_seconds["A1"] = time.perf_counter() - primary_start
 
         morphology._set_private_backend_timing_segments(case.timing_segments)
         backend_result = morphology.run(stdout=False, stderr=False, return_xarray=False)
@@ -765,7 +775,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--timing-segments",
         default="all",
-        help="Comma-separated timing segments to record, or 'all'. Supported segments: A-F.",
+        help=(
+            "Comma-separated timing segments to record, or 'all'. "
+            "Supported segments: A1,A2,B,C,D,E,F. Alias 'A' expands to A1,A2."
+        ),
     )
     parser.add_argument(
         "--include-triple-limited",

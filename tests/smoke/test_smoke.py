@@ -730,6 +730,83 @@ def test_cupy_private_segment_timing_is_opt_in_and_subsettable():
 
 
 @pytest.mark.gpu
+def test_cupy_private_segment_timing_records_runtime_staging_as_a2():
+    """Ensure cupy-rsoxs records runtime morphology staging as the private A2 segment."""
+    cp = _import_cupy_required()
+    shape = (2, 4, 4)
+    energies = [285.0]
+    zeros = np.zeros(shape, dtype=np.float32)
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=np.ones(shape, dtype=np.float32),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="vacuum_1",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=zeros.copy(),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="vacuum_2",
+    )
+    config = {
+        "CaseType": 0,
+        "MorphologyType": 0,
+        "Energies": energies,
+        "EAngleRotation": [0.0, 0.0, 0.0],
+        "RotMask": 0,
+        "WindowingType": 0,
+        "AlgorithmType": 0,
+        "ReferenceFrame": 1,
+        "EwaldsInterpolation": 1,
+    }
+
+    morph = None
+    try:
+        morph = Morphology(
+            2,
+            materials={1: mat1, 2: mat2},
+            PhysSize=5.0,
+            config=config,
+            backend="cupy-rsoxs",
+            input_policy="strict",
+            create_cy_object=True,
+        )
+        morph._set_private_backend_timing_segments(("A2", "B"))
+        result = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.Stream.null.synchronize()
+        assert list(result.to_backend_array().shape) == [1, 4, 4]
+        timings = morph.backend_timings
+        assert timings["measurement"] == "mixed"
+        assert timings["selected_segments"] == ["A2", "B"]
+        assert set(timings["segment_seconds"]) == {"A2", "B"}
+        assert timings["segment_measurements"] == {
+            "A2": "wall_clock",
+            "B": "cuda_event",
+        }
+        assert all(float(value) >= 0.0 for value in timings["segment_seconds"].values())
+    finally:
+        if morph is not None:
+            try:
+                morph._clear_private_backend_timing_segments()
+            except Exception:
+                pass
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
+@pytest.mark.gpu
 def test_cupy_release_runtime_unlocks_mutation_and_allows_rerun():
     """Ensure release_runtime clears cupy-rsoxs transient state and permits rerun after mutation."""
     cp = _import_cupy_required()

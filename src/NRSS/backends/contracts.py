@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any, Mapping
 
 import numpy as np
@@ -122,7 +121,7 @@ def resolve_backend_array_contract(
     backend_options: Mapping[str, Any] | None = None,
     resident_mode: str | None = None,
 ) -> dict[str, Any]:
-    spec = deepcopy(_backend_contract_spec(backend_name))
+    spec = _backend_contract_spec(backend_name)
     normalized_options = normalize_backend_options(backend_name, backend_options)
     normalized_resident_mode = normalize_resident_mode(
         backend_name,
@@ -147,7 +146,7 @@ def resolve_backend_runtime_contract(
     backend_name: str,
     backend_options: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    spec = deepcopy(_backend_contract_spec(backend_name))
+    spec = _backend_contract_spec(backend_name)
     normalized_options = normalize_backend_options(backend_name, backend_options)
     return {
         "namespace": spec["runtime_namespace"],
