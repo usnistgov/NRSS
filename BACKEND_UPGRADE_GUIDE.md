@@ -710,14 +710,22 @@ Planning decisions additionally locked after the prep milestone:
   - a NumPy-input contract case using `input_policy='coerce'`
   - a CuPy-native borrowed case using `ownership_policy='borrow'` and
     `input_policy='strict'`
-- future optimization timing should be measured from immediately before
-  `Morphology(...)` construction to synchronized `run(return_xarray=False)`
-  completion, excluding upstream field generation and export
+- internal `cupy-rsoxs` optimization timing is now implemented:
+  - primary timing runs from immediately before `Morphology(...)`
+    construction to synchronized `run(return_xarray=False)` completion
+  - upstream field generation and export are excluded from the primary metric
+  - private `Morphology._set_private_backend_timing_segments(...)` and
+    `Morphology._clear_private_backend_timing_segments()` drive opt-in segment
+    timing
+  - Segment `A` is measured in the dev harness, Segments `B-F` are measured in
+    `cupy-rsoxs` via CUDA events, and Segment `G` is deferred
+  - when timing is not enabled, `backend_timings` stays empty and the timing
+    event path is skipped
 - the current contract-clean CuPy benchmark should not be treated as a true
   end-to-end GPU-native morphology-generation benchmark because fields were
   still created in NumPy before preconversion to CuPy
-- future optimization tuning should default to single-energy lanes; full-energy
-  studies are for milestone confirmation and comparison artifacts
+- current optimization tuning should default to single-energy lanes; full-energy
+  studies are legacy/historical comparison artifacts or milestone confirmation
 
 - Stage 4: complete for the current test suite routing scope
   - `tests/conftest.py` now supports `--nrss-backend` and `NRSS_BACKEND`
@@ -814,12 +822,20 @@ Important note:
   status purposes
 - that run started before the CuPy memory cleanup fix in the GPU smoke path and
   is not the authoritative post-change report
+- `test-reports/cupy-rsoxs-optimization-dev/verify_cli_small_postcleanup/summary.json`
+  is the first authoritative post-cleanup timing snapshot for resumed
+  optimization work
 
 Remaining intentionally deferred or unresolved items:
 
-- `cupy-rsoxs` compute/runtime implementation now exists; the current open work
-  is measurement cleanup, resident-mode refinement, and further optimization.
-  See `UPGRADE_ROADMAP.md` for the current detailed state.
+- `cupy-rsoxs` compute/runtime implementation now exists; timing cleanup is in
+  place for the current optimization loop, and the open work is resident-mode
+  refinement, segment-targeted optimization, export timing, and deeper memory
+  instrumentation follow-up. See `UPGRADE_ROADMAP.md` for the current detailed
+  state.
+- the legacy full-energy backend-comparison harness under
+  `tests/validation/dev/core_shell_backend_performance/` is no longer the
+  authoritative timing harness for optimization work
 - backend-native result/output policy is still scaffolding only; current run
   behavior remains xarray/NumPy-oriented for parity and comparison workflows
 - serialization and write helpers remain effectively NumPy/CyRSoXS-oriented,

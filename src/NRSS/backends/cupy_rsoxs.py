@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import gc
 import math
-import time
 from typing import Any
 
 import numpy as np
@@ -13,6 +12,56 @@ from .registry import BackendUnavailableError
 from .runtime import BackendRuntime
 
 _CUPY_KERNEL_CACHE: dict[str, Any] = {}
+_CUPY_PRIVATE_TIMING_SEGMENTS_KEY = "_private_backend_timing_segments"
+_CUPY_TIMED_SEGMENTS = ("B", "C", "D", "E", "F")
+
+
+@dataclass(frozen=True)
+class _RecordedEventRange:
+    segment: str
+    start: Any
+    stop: Any
+
+
+class _NullSegmentRecorder:
+    selected_segments: tuple[str, ...] = ()
+
+    def measure(self, segment: str, func):
+        del segment
+        return func()
+
+    def finalize(self) -> dict[str, float]:
+        return {}
+
+
+class _EventSegmentRecorder:
+    def __init__(self, cp, selected_segments: tuple[str, ...]):
+        self._cp = cp
+        self.selected_segments = tuple(
+            segment for segment in _CUPY_TIMED_SEGMENTS if segment in selected_segments
+        )
+        self._records: list[_RecordedEventRange] = []
+
+    def measure(self, segment: str, func):
+        if segment not in self.selected_segments:
+            return func()
+        start = self._cp.cuda.Event()
+        stop = self._cp.cuda.Event()
+        start.record()
+        result = func()
+        stop.record()
+        self._records.append(_RecordedEventRange(segment=segment, start=start, stop=stop))
+        return result
+
+    def finalize(self) -> dict[str, float]:
+        if not self._records:
+            return {}
+        self._cp.cuda.Stream.null.synchronize()
+        totals: dict[str, float] = {}
+        for record in self._records:
+            elapsed_s = float(self._cp.cuda.get_elapsed_time(record.start, record.stop)) / 1000.0
+            totals[record.segment] = totals.get(record.segment, 0.0) + elapsed_s
+        return totals
 
 
 def require_cupy_modules():
@@ -94,28 +143,25 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
         cp, ndimage = require_cupy_modules()
         self.prepare(morphology)
-        timings: dict[str, float] = {}
+        recorder = self._segment_recorder(morphology, cp)
+        morphology._backend_timings = {}
 
-        total_start = time.perf_counter()
         energies = tuple(float(energy) for energy in morphology.Energies)
         projections = []
-        window = self._window_tensor(morphology, cp)
+        window = recorder.measure("C", lambda: self._window_tensor(morphology, cp))
 
         for energy in energies:
-            energy_start = time.perf_counter()
             projection = self._run_single_energy(
                 morphology=morphology,
                 energy=energy,
                 cp=cp,
                 ndimage=ndimage,
                 window=window,
-                timings=timings,
+                recorder=recorder,
             )
             projections.append(projection)
-            cp.cuda.Stream.null.synchronize()
-            timings[f"energy_{energy:.4f}_seconds"] = time.perf_counter() - energy_start
 
-        result_data = cp.stack(projections, axis=0)
+        result_data = recorder.measure("F", lambda: cp.stack(projections, axis=0))
         result = CupyScatteringResult(
             data=result_data,
             energies=energies,
@@ -125,10 +171,13 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
         morphology._backend_result = result
         morphology.scatteringPattern = result
-        morphology._backend_timings = {
-            **timings,
-            "total_seconds": time.perf_counter() - total_start,
-        }
+        segment_seconds = recorder.finalize()
+        if recorder.selected_segments:
+            morphology._backend_timings = {
+                "measurement": "cuda_event",
+                "selected_segments": list(recorder.selected_segments),
+                "segment_seconds": segment_seconds,
+            }
         morphology._simulated = True
         morphology._lock_results()
 
@@ -157,6 +206,19 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         cp.cuda.Stream.null.synchronize()
         cp.get_default_memory_pool().free_all_blocks()
         cp.get_default_pinned_memory_pool().free_all_blocks()
+
+    def _segment_recorder(self, morphology, cp):
+        requested_segments = self._requested_timing_segments(morphology)
+        if not requested_segments:
+            return _NullSegmentRecorder()
+        return _EventSegmentRecorder(cp=cp, selected_segments=requested_segments)
+
+    def _requested_timing_segments(self, morphology) -> tuple[str, ...]:
+        requested = morphology._backend_runtime_state.get(_CUPY_PRIVATE_TIMING_SEGMENTS_KEY, ())
+        if not requested:
+            return ()
+        unique_segments = tuple(dict.fromkeys(str(segment) for segment in requested))
+        return tuple(segment for segment in unique_segments if segment in _CUPY_TIMED_SEGMENTS)
 
     def _validate_supported_config(self, morphology) -> None:
         if morphology.MorphologyType != 0:
@@ -189,23 +251,32 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         wx = cp.asarray(np.hanning(x), dtype=cp.float32)[None, None, :]
         return wz * wy * wx
 
-    def _run_single_energy(self, morphology, energy, cp, ndimage, window, timings):
+    def _run_single_energy(self, morphology, energy, cp, ndimage, window, recorder):
         num_angles = self._num_angles(morphology)
-        angle_start = time.perf_counter()
-        nt = self._compute_nt_components(morphology, energy, cp)
-        angle_projections = self._project_from_fft_nt(
-            morphology=morphology,
-            energy=energy,
-            cp=cp,
-            ndimage=ndimage,
-            fft_nt=self._compute_fft_nt_components(nt=nt, cp=cp, window=window),
-            num_angles=num_angles,
+        nt = recorder.measure("B", lambda: self._compute_nt_components(morphology, energy, cp))
+        fft_nt = recorder.measure("C", lambda: self._compute_fft_nt_components(nt=nt, cp=cp, window=window))
+        proj_x, proj_y, proj_xy = recorder.measure(
+            "D",
+            lambda: self._projection_coefficients_from_fft_nt(
+                morphology=morphology,
+                energy=energy,
+                cp=cp,
+                fft_nt=fft_nt,
+            ),
         )
-        del nt
-        cp.cuda.Stream.null.synchronize()
-        timings["angle_loop_seconds"] = timings.get("angle_loop_seconds", 0.0) + (
-            time.perf_counter() - angle_start
+        angle_projections = recorder.measure(
+            "E",
+            lambda: self._rotate_and_accumulate_projection_coefficients(
+                morphology=morphology,
+                cp=cp,
+                ndimage=ndimage,
+                proj_x=proj_x,
+                proj_y=proj_y,
+                proj_xy=proj_xy,
+                num_angles=num_angles,
+            ),
         )
+        del nt, fft_nt, proj_x, proj_y, proj_xy
         return angle_projections
 
     def _num_angles(self, morphology) -> int:
@@ -298,7 +369,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return npar, nper
 
     def _compute_nt_components(self, morphology, energy, cp):
-        start = time.perf_counter()
         shape = tuple(int(v) for v in morphology.NumZYX)
         nt = cp.zeros((5, *shape), dtype=cp.complex64)
 
@@ -332,10 +402,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
             del phi_a, phi_ui, sin_theta, sx, sy, sz
 
-        cp.cuda.Stream.null.synchronize()
-        morphology._backend_timings["nt_seconds"] = morphology._backend_timings.get("nt_seconds", 0.0) + (
-            time.perf_counter() - start
-        )
         return nt
 
     def _project_from_nt(self, morphology, energy, cp, ndimage, nt, window, num_angles):
@@ -387,13 +453,16 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             del component, fft_component
         return nt
 
-    def _project_from_fft_nt(self, morphology, energy, cp, ndimage, fft_nt, num_angles):
-        proj_x, proj_y, proj_xy = self._projection_coefficients_from_fft_nt(
-            morphology=morphology,
-            energy=energy,
-            cp=cp,
-            fft_nt=fft_nt,
-        )
+    def _rotate_and_accumulate_projection_coefficients(
+        self,
+        morphology,
+        cp,
+        ndimage,
+        proj_x,
+        proj_y,
+        proj_xy,
+        num_angles,
+    ):
         projection_average = None
         valid_counts = None
         use_rot_mask = bool(morphology.RotMask)
@@ -426,7 +495,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 del valid
             projection_average = rotated if projection_average is None else projection_average + rotated
             del projection, rotated
-        del proj_x, proj_y, proj_xy
         return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
 
     def _projection_coefficients_from_fft_nt(self, morphology, energy, cp, fft_nt):
@@ -562,7 +630,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return p_x, p_y, p_z
 
     def _projection_from_polarization(self, morphology, energy, cp, p_x, p_y, p_z, window):
-        start = time.perf_counter()
         if window is not None:
             p_x = p_x * window
             p_y = p_y * window
@@ -589,14 +656,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         projection = self._project_scatter3d(morphology, energy, cp, scatter3d)
 
         del fft_x, fft_y, fft_z, scatter3d
-        cp.cuda.Stream.null.synchronize()
-        morphology._backend_timings["fft_projection_seconds"] = morphology._backend_timings.get(
-            "fft_projection_seconds", 0.0
-        ) + (time.perf_counter() - start)
         return projection
 
     def _projection_from_fft_polarization(self, morphology, energy, cp, fft_x, fft_y, fft_z):
-        start = time.perf_counter()
         scatter3d = self._compute_scatter3d(
             morphology=morphology,
             energy=energy,
@@ -607,10 +669,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         )
         projection = self._project_scatter3d(morphology, energy, cp, scatter3d)
         del scatter3d
-        cp.cuda.Stream.null.synchronize()
-        morphology._backend_timings["fft_projection_seconds"] = morphology._backend_timings.get(
-            "fft_projection_seconds", 0.0
-        ) + (time.perf_counter() - start)
         return projection
 
     def _replace_dc_component(self, arr):

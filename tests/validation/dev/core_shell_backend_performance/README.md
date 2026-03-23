@@ -1,4 +1,7 @@
-This directory is for development-only CoreShell backend performance studies.
+This directory is for legacy, development-only CoreShell backend performance studies.
+
+It is not the authoritative optimization timing harness for `cupy-rsoxs`.
+Use `tests/validation/dev/cupy_rsoxs_optimization/` for current optimization timing work.
 
 Nothing here is part of the maintained pytest surface.
 

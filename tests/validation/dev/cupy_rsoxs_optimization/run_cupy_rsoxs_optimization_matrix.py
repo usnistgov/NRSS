@@ -38,12 +38,9 @@ from tests.validation.lib.core_shell import release_runtime_memory
 
 OUT_ROOT = REPO_ROOT / "test-reports" / "cupy-rsoxs-optimization-dev"
 CORE_SHELL_DATA_DIR = REPO_ROOT / "tests" / "validation" / "data" / "core_shell"
-OPTICAL_CONSTANTS_DIR = REPO_ROOT / "tests" / "validation" / "data" / "optical_constants"
 
 CORE_SHELL_SINGLE_ENERGIES = (285.0,)
 CORE_SHELL_TRIPLE_ENERGIES = (284.7, 285.0, 285.2)
-SPHERE_SINGLE_ENERGIES = (285.0,)
-SPHERE_TRIPLE_ENERGIES = (284.7, 285.0, 285.2)
 EANGLE_OFF = (0.0, 0.0, 0.0)
 EANGLE_LIMITED = (0.0, 15.0, 165.0)
 EANGLE_FULL = (0.0, 1.0, 360.0)
@@ -54,14 +51,9 @@ PHI_ISO = 0.46
 DECAY_ORDER = 0.42
 CENTER_Z_VOX = 15.0
 
-SPHERE_SHAPE = (128, 128, 128)
-SPHERE_DIAMETER_NM = 70.0
-SPHERE_PHYS_SIZE_NM = 1.0
-SPHERE_LOW_SYM_THETA = np.float32(3.0 * math.pi / 10.0)
-SPHERE_LOW_SYM_PSI = np.float32(math.pi / 11.0)
-SPHERE_LOW_SYM_S = np.float32(0.85)
-
 SUMMARY_NAME = "summary.json"
+PRIMARY_TIMING_BOUNDARY = "Morphology(...) -> synchronized run(return_xarray=False)"
+TIMING_SEGMENTS = ("A", "B", "C", "D", "E", "F")
 
 
 @dataclass(frozen=True)
@@ -83,6 +75,7 @@ class BenchmarkCase:
     field_namespace: str
     input_policy: str
     ownership_policy: str | None
+    timing_segments: tuple[str, ...] = ()
     create_cy_object: bool = True
     validation_baseline_name: str | None = None
     notes: str | None = None
@@ -99,33 +92,30 @@ def _timestamp() -> str:
     return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
 
 
+def _parse_csv_labels(raw: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _parse_timing_segments(raw: str) -> tuple[str, ...]:
+    if raw.strip().lower() == "all":
+        return TIMING_SEGMENTS
+    requested = tuple(dict.fromkeys(part.strip().upper() for part in raw.split(",") if part.strip()))
+    unknown = tuple(segment for segment in requested if segment not in TIMING_SEGMENTS)
+    if unknown:
+        raise SystemExit(
+            f"Unsupported timing segments {unknown!r}. Valid values: {TIMING_SEGMENTS!r} or 'all'."
+        )
+    if not requested:
+        raise SystemExit("timing_segments must select at least one segment.")
+    return requested
+
+
 def _json_default(value: Any):
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, np.generic):
         return value.item()
     raise TypeError(f"Unsupported JSON value: {type(value)!r}")
-
-
-def _cupy_memory_snapshot() -> dict[str, float] | None:
-    try:
-        import cupy as cp
-    except Exception:
-        return None
-
-    try:
-        free_bytes, total_bytes = cp.cuda.runtime.memGetInfo()
-        pool = cp.get_default_memory_pool()
-        pinned = cp.get_default_pinned_memory_pool()
-        return {
-            "free_bytes": float(free_bytes),
-            "total_bytes": float(total_bytes),
-            "pool_used_bytes": float(pool.used_bytes()),
-            "pool_total_bytes": float(pool.total_bytes()),
-            "pinned_free_blocks": float(pinned.n_free_blocks()),
-        }
-    except Exception:
-        return None
 
 
 def _subset_optical_constants(optical_constants: OpticalConstants, energies_ev: tuple[float, ...], *, name: str) -> OpticalConstants:
@@ -161,38 +151,6 @@ def _load_core_shell_optics(energies_ev: tuple[float, ...]) -> dict[int, Optical
         ),
     }
 
-
-@lru_cache(maxsize=None)
-def _load_peolig_reference() -> np.ndarray:
-    data = np.loadtxt(OPTICAL_CONSTANTS_DIR / "PEOlig2018.txt", skiprows=1)
-    order = np.argsort(data[:, 6])
-    return data[order]
-
-
-@lru_cache(maxsize=None)
-def _load_peolig_optics(energies_ev: tuple[float, ...]) -> OpticalConstants:
-    data = _load_peolig_reference()
-    ref_energy = data[:, 6]
-    delta_para = np.interp(energies_ev, ref_energy, data[:, 2])
-    delta_perp = np.interp(energies_ev, ref_energy, data[:, 3])
-    beta_para = np.interp(energies_ev, ref_energy, data[:, 0])
-    beta_perp = np.interp(energies_ev, ref_energy, data[:, 1])
-    opt_constants = {
-        float(energy): [
-            float(d_para),
-            float(b_para),
-            float(d_perp),
-            float(b_perp),
-        ]
-        for energy, d_para, b_para, d_perp, b_perp in zip(
-            energies_ev,
-            delta_para,
-            beta_para,
-            delta_perp,
-            beta_perp,
-        )
-    }
-    return OpticalConstants(list(map(float, energies_ev)), opt_constants, name="PEOlig2018")
 
 
 def _convert_fields_namespace(fields: dict[str, np.ndarray], field_namespace: str) -> dict[str, Any]:
@@ -332,21 +290,33 @@ def _build_scaled_core_shell_fields(size_spec: SizeSpec) -> dict[str, np.ndarray
     }
 
 
-def build_scaled_core_shell_morphology(
+def _default_morphology_config(
+    energies_ev: tuple[float, ...],
+    eangle_rotation: tuple[float, float, float],
+) -> dict[str, Any]:
+    return {
+        "CaseType": 0,
+        "MorphologyType": 0,
+        "Energies": list(map(float, energies_ev)),
+        "EAngleRotation": list(map(float, eangle_rotation)),
+        "AlgorithmType": 0,
+        "WindowingType": 0,
+        "RotMask": 0,
+        "ReferenceFrame": 1,
+        "EwaldsInterpolation": 1,
+    }
+
+
+def build_scaled_core_shell_materials(
     *,
     size_spec: SizeSpec,
     energies_ev: tuple[float, ...],
-    eangle_rotation: tuple[float, float, float],
-    backend: str,
     field_namespace: str,
-    input_policy: str,
-    ownership_policy: str | None,
-    create_cy_object: bool,
-) -> Morphology:
+) -> dict[int, Material]:
     optics = _load_core_shell_optics(tuple(map(float, energies_ev)))
     fields = _convert_fields_namespace(_build_scaled_core_shell_fields(size_spec), field_namespace)
 
-    materials = {
+    return {
         1: Material(
             materialID=1,
             Vfrac=fields["mat1_vfrac"],
@@ -379,17 +349,24 @@ def build_scaled_core_shell_morphology(
         ),
     }
 
-    config = {
-        "CaseType": 0,
-        "MorphologyType": 0,
-        "Energies": list(map(float, energies_ev)),
-        "EAngleRotation": list(map(float, eangle_rotation)),
-        "AlgorithmType": 0,
-        "WindowingType": 0,
-        "RotMask": 0,
-        "ReferenceFrame": 1,
-        "EwaldsInterpolation": 1,
-    }
+
+def build_scaled_core_shell_morphology(
+    *,
+    size_spec: SizeSpec,
+    energies_ev: tuple[float, ...],
+    eangle_rotation: tuple[float, float, float],
+    backend: str,
+    field_namespace: str,
+    input_policy: str,
+    ownership_policy: str | None,
+    create_cy_object: bool,
+) -> Morphology:
+    materials = build_scaled_core_shell_materials(
+        size_spec=size_spec,
+        energies_ev=energies_ev,
+        field_namespace=field_namespace,
+    )
+    config = _default_morphology_config(energies_ev, eangle_rotation)
 
     morph = Morphology(
         3,
@@ -405,262 +382,6 @@ def build_scaled_core_shell_morphology(
     return morph
 
 
-def _sphere_mask(shape: tuple[int, int, int], phys_size_nm: float, diameter_nm: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    nz, ny, nx = shape
-    radius_vox = np.float32(diameter_nm / (2.0 * phys_size_nm))
-    cz = np.float32((nz - 1) / 2.0)
-    cy = np.float32((ny - 1) / 2.0)
-    cx = np.float32((nx - 1) / 2.0)
-
-    zz, yy, xx = np.indices(shape, dtype=np.float32)
-    dz = zz - cz
-    dy = yy - cy
-    dx = xx - cx
-    dist2 = dx * dx + dy * dy + dz * dz
-    sphere = dist2 <= np.float32(radius_vox * radius_vox)
-    return sphere, dx, dy, dz
-
-
-def _build_sphere_fields(
-    *,
-    shape: tuple[int, int, int],
-    phys_size_nm: float,
-    diameter_nm: float,
-    orientation_mode: str,
-) -> dict[str, np.ndarray]:
-    sphere, dx, dy, dz = _sphere_mask(shape, phys_size_nm, diameter_nm)
-    sphere_f = sphere.astype(np.float32)
-    vacuum_f = (1.0 - sphere_f).astype(np.float32, copy=False)
-    zeros = np.zeros(shape, dtype=np.float32)
-
-    if orientation_mode == "radial":
-        theta = np.arctan2(
-            np.sqrt(dx * dx + dy * dy, dtype=np.float32),
-            dz,
-        ).astype(np.float32, copy=False)
-        psi = np.arctan2(dy, dx).astype(np.float32, copy=False)
-        s = sphere_f
-    elif orientation_mode == "low_symmetry":
-        theta = np.where(sphere, SPHERE_LOW_SYM_THETA, np.float32(0.0)).astype(np.float32, copy=False)
-        psi = np.where(sphere, SPHERE_LOW_SYM_PSI, np.float32(0.0)).astype(np.float32, copy=False)
-        s = np.where(sphere, SPHERE_LOW_SYM_S, np.float32(0.0)).astype(np.float32, copy=False)
-    else:
-        raise AssertionError(f"Unsupported sphere orientation mode: {orientation_mode}")
-
-    return {
-        "mat1_vfrac": sphere_f,
-        "mat1_s": s,
-        "mat1_theta": theta,
-        "mat1_psi": psi,
-        "mat2_vfrac": vacuum_f,
-        "mat2_s": zeros.copy(),
-        "mat2_theta": zeros.copy(),
-        "mat2_psi": zeros.copy(),
-    }
-
-
-def build_sphere_morphology(
-    *,
-    energies_ev: tuple[float, ...],
-    eangle_rotation: tuple[float, float, float],
-    orientation_mode: str,
-    backend: str,
-    field_namespace: str,
-    input_policy: str,
-    ownership_policy: str | None,
-    create_cy_object: bool,
-) -> Morphology:
-    sphere_optics = _load_peolig_optics(tuple(map(float, energies_ev)))
-    vacuum_optics = OpticalConstants(list(map(float, energies_ev)), name="vacuum")
-    fields = _convert_fields_namespace(
-        _build_sphere_fields(
-            shape=SPHERE_SHAPE,
-            phys_size_nm=SPHERE_PHYS_SIZE_NM,
-            diameter_nm=SPHERE_DIAMETER_NM,
-            orientation_mode=orientation_mode,
-        ),
-        field_namespace,
-    )
-
-    materials = {
-        1: Material(
-            materialID=1,
-            Vfrac=fields["mat1_vfrac"],
-            S=fields["mat1_s"],
-            theta=fields["mat1_theta"],
-            psi=fields["mat1_psi"],
-            energies=list(map(float, energies_ev)),
-            opt_constants=sphere_optics.opt_constants,
-            name=f"sphere_{orientation_mode}",
-        ),
-        2: Material(
-            materialID=2,
-            Vfrac=fields["mat2_vfrac"],
-            S=fields["mat2_s"],
-            theta=fields["mat2_theta"],
-            psi=fields["mat2_psi"],
-            energies=list(map(float, energies_ev)),
-            opt_constants=vacuum_optics.opt_constants,
-            name="vacuum",
-        ),
-    }
-
-    config = {
-        "CaseType": 0,
-        "MorphologyType": 0,
-        "Energies": list(map(float, energies_ev)),
-        "EAngleRotation": list(map(float, eangle_rotation)),
-        "AlgorithmType": 0,
-        "WindowingType": 0,
-        "RotMask": 0,
-        "ReferenceFrame": 1,
-        "EwaldsInterpolation": 1,
-    }
-
-    morph = Morphology(
-        2,
-        materials=materials,
-        PhysSize=float(SPHERE_PHYS_SIZE_NM),
-        config=config,
-        create_cy_object=create_cy_object,
-        backend=backend,
-        input_policy=input_policy,
-        ownership_policy=ownership_policy,
-    )
-    morph.check_materials(quiet=True)
-    return morph
-
-
-def _build_morphology_for_case(case: BenchmarkCase) -> Morphology:
-    if case.family == "core_shell":
-        return build_scaled_core_shell_morphology(
-            size_spec=SIZE_SPECS[case.shape_label],
-            energies_ev=case.energies_ev,
-            eangle_rotation=case.eangle_rotation,
-            backend=case.backend,
-            field_namespace=case.field_namespace,
-            input_policy=case.input_policy,
-            ownership_policy=case.ownership_policy,
-            create_cy_object=case.create_cy_object,
-        )
-
-    if case.family == "sphere_radial":
-        return build_sphere_morphology(
-            energies_ev=case.energies_ev,
-            eangle_rotation=case.eangle_rotation,
-            orientation_mode="radial",
-            backend=case.backend,
-            field_namespace=case.field_namespace,
-            input_policy=case.input_policy,
-            ownership_policy=case.ownership_policy,
-            create_cy_object=case.create_cy_object,
-        )
-
-    if case.family == "sphere_low_symmetry":
-        return build_sphere_morphology(
-            energies_ev=case.energies_ev,
-            eangle_rotation=case.eangle_rotation,
-            orientation_mode="low_symmetry",
-            backend=case.backend,
-            field_namespace=case.field_namespace,
-            input_policy=case.input_policy,
-            ownership_policy=case.ownership_policy,
-            create_cy_object=case.create_cy_object,
-        )
-
-    raise AssertionError(f"Unsupported benchmark family: {case.family}")
-
-
-def _save_scattering_npz(scattering, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        path,
-        data=np.asarray(scattering.values, dtype=np.float32),
-        energy=np.asarray(scattering.coords["energy"].values, dtype=np.float64),
-        qy=np.asarray(scattering.coords["qy"].values, dtype=np.float64),
-        qx=np.asarray(scattering.coords["qx"].values, dtype=np.float64),
-    )
-
-
-def _axis_asymmetry(data: np.ndarray, qy: np.ndarray, qx: np.ndarray) -> np.ndarray:
-    qx_grid, qy_grid = np.meshgrid(qx, qy)
-    q = np.sqrt(qx_grid * qx_grid + qy_grid * qy_grid)
-    band_width = 0.05
-    q_min = 0.05
-    q_max = 1.0
-    horizontal_mask = np.logical_and.reduce(
-        [np.abs(qy_grid) <= band_width, q >= q_min, q <= q_max, np.isfinite(q)]
-    )
-    vertical_mask = np.logical_and.reduce(
-        [np.abs(qx_grid) <= band_width, q >= q_min, q <= q_max, np.isfinite(q)]
-    )
-    if int(np.count_nonzero(horizontal_mask)) == 0 or int(np.count_nonzero(vertical_mask)) == 0:
-        return np.zeros((data.shape[0],), dtype=np.float64)
-
-    asymmetry = np.zeros((data.shape[0],), dtype=np.float64)
-    for idx in range(data.shape[0]):
-        img = np.asarray(data[idx], dtype=np.float64)
-        horiz = float(np.sum(img[horizontal_mask], dtype=np.float64))
-        vert = float(np.sum(img[vertical_mask], dtype=np.float64))
-        denom = max(abs(horiz) + abs(vert), 1.0e-30)
-        asymmetry[idx] = (horiz - vert) / denom
-    return asymmetry
-
-
-def _compare_to_baseline(scattering, baseline_path: Path) -> dict[str, Any]:
-    baseline = np.load(baseline_path)
-    current = np.asarray(scattering.values, dtype=np.float64)
-    reference = np.asarray(baseline["data"], dtype=np.float64)
-    if current.shape != reference.shape:
-        raise AssertionError(
-            f"Shape mismatch against baseline {baseline_path.name}: "
-            f"{current.shape!r} != {reference.shape!r}"
-        )
-
-    qy = np.asarray(scattering.coords["qy"].values, dtype=np.float64)
-    qx = np.asarray(scattering.coords["qx"].values, dtype=np.float64)
-    ref_qy = np.asarray(baseline["qy"], dtype=np.float64)
-    ref_qx = np.asarray(baseline["qx"], dtype=np.float64)
-    if not (np.allclose(qy, ref_qy) and np.allclose(qx, ref_qx)):
-        raise AssertionError(f"Detector coordinates drifted relative to baseline {baseline_path.name}.")
-
-    finite = np.isfinite(current) & np.isfinite(reference)
-    if not np.any(finite):
-        raise AssertionError(f"No overlapping finite detector values found against {baseline_path.name}.")
-
-    diff = current[finite] - reference[finite]
-    ref_vals = reference[finite]
-    rmse = float(np.sqrt(np.mean(diff * diff, dtype=np.float64)))
-    ref_rms = float(np.sqrt(np.mean(ref_vals * ref_vals, dtype=np.float64)))
-    max_abs_diff = float(np.max(np.abs(diff)))
-    mean_abs_diff = float(np.mean(np.abs(diff), dtype=np.float64))
-
-    correlation = 1.0
-    if diff.size > 1:
-        correlation = float(np.corrcoef(current[finite], reference[finite])[0, 1])
-
-    total_current = np.nansum(current, axis=(1, 2), dtype=np.float64)
-    total_reference = np.nansum(reference, axis=(1, 2), dtype=np.float64)
-    total_rel_err = np.max(
-        np.abs(total_current - total_reference) / np.maximum(np.abs(total_reference), 1.0e-30)
-    )
-
-    axis_current = _axis_asymmetry(current, qy, qx)
-    axis_reference = _axis_asymmetry(reference, ref_qy, ref_qx)
-
-    return {
-        "baseline_path": str(baseline_path),
-        "finite_fraction": float(np.count_nonzero(finite)) / float(current.size),
-        "rmse": rmse,
-        "relative_rmse": float(rmse / max(ref_rms, 1.0e-30)),
-        "max_abs_diff": max_abs_diff,
-        "mean_abs_diff": mean_abs_diff,
-        "correlation": correlation,
-        "max_total_intensity_rel_err": float(total_rel_err),
-        "max_axis_asymmetry_abs_diff": float(np.max(np.abs(axis_current - axis_reference))),
-    }
-
-
 def _case_note(case: BenchmarkCase) -> str:
     size_spec = SIZE_SPECS.get(case.shape_label)
     if case.family == "core_shell":
@@ -668,24 +389,58 @@ def _case_note(case: BenchmarkCase) -> str:
             f"CoreShell {case.shape_label} {size_spec.shape} PhysSize={size_spec.phys_size_nm} "
             f"EAngleRotation={list(case.eangle_rotation)} energies={list(case.energies_ev)}"
         )
-    return (
-        f"{case.family} shape={SPHERE_SHAPE} PhysSize={SPHERE_PHYS_SIZE_NM} "
-        f"EAngleRotation={list(case.eangle_rotation)} energies={list(case.energies_ev)}"
-    )
+    raise AssertionError(f"Unsupported benchmark family for the timing harness: {case.family}")
 
 
 def _result_summary_line(result: dict[str, Any]) -> str:
     if result.get("status") != "ok":
         return f"{result['label']}: {result.get('status')} ({result.get('error_type', 'unknown')})"
-    return (
-        f"{result['label']}: build {result['build_seconds']:.3f}s, "
-        f"run {result['run_seconds']:.3f}s, export {result['export_seconds']:.3f}s, "
-        f"workflow {result['workflow_seconds']:.3f}s"
+    segment_seconds = result.get("segment_seconds", {})
+    ordered = [
+        f"{segment} {float(segment_seconds[segment]):.3f}s"
+        for segment in TIMING_SEGMENTS
+        if segment in segment_seconds
+    ]
+    suffix = "" if not ordered else ", " + ", ".join(ordered)
+    return f"{result['label']}: primary {float(result['primary_seconds']):.3f}s{suffix}"
+
+
+def _prepare_core_shell_case_inputs(case: BenchmarkCase) -> dict[str, Any]:
+    if case.family != "core_shell":
+        raise AssertionError(f"Unsupported timing family: {case.family}")
+    size_spec = SIZE_SPECS[case.shape_label]
+    return {
+        "num_material": 3,
+        "materials": build_scaled_core_shell_materials(
+            size_spec=size_spec,
+            energies_ev=case.energies_ev,
+            field_namespace=case.field_namespace,
+        ),
+        "phys_size": float(size_spec.phys_size_nm),
+        "config": _default_morphology_config(case.energies_ev, case.eangle_rotation),
+    }
+
+
+def _construct_morphology_for_timing_case(case: BenchmarkCase, prepared: dict[str, Any]) -> Morphology:
+    return Morphology(
+        prepared["num_material"],
+        materials=prepared["materials"],
+        PhysSize=prepared["phys_size"],
+        config=prepared["config"],
+        create_cy_object=case.create_cy_object,
+        backend=case.backend,
+        input_policy=case.input_policy,
+        ownership_policy=case.ownership_policy,
     )
 
 
-def _worker_main(case_path: Path, result_path: Path, baseline_path: Path | None, scattering_path: Path | None) -> int:
-    started = time.perf_counter()
+def _synchronize_cupy_default_stream() -> None:
+    import cupy as cp
+
+    cp.cuda.Stream.null.synchronize()
+
+
+def _worker_main(case_path: Path, result_path: Path) -> int:
     case = BenchmarkCase(**json.loads(case_path.read_text()))
     result: dict[str, Any] = {
         "label": case.label,
@@ -694,47 +449,48 @@ def _worker_main(case_path: Path, result_path: Path, baseline_path: Path | None,
         "shape_label": case.shape_label,
         "energies_ev": list(case.energies_ev),
         "eangle_rotation": list(case.eangle_rotation),
+        "timing_segments_requested": list(case.timing_segments),
+        "timing_boundary": PRIMARY_TIMING_BOUNDARY,
         "note": _case_note(case),
         "status": "error",
     }
 
+    if case.backend != "cupy-rsoxs":
+        raise AssertionError("The optimization timing harness only supports backend='cupy-rsoxs'.")
+
+    prepared_inputs = None
     morphology = None
     backend_result = None
-    scattering = None
     try:
-        result["memory_before_build"] = _cupy_memory_snapshot()
-        build_start = time.perf_counter()
-        morphology = _build_morphology_for_case(case)
-        result["build_seconds"] = time.perf_counter() - build_start
-        result["memory_after_build"] = _cupy_memory_snapshot()
+        prepared_inputs = _prepare_core_shell_case_inputs(case)
+        if case.field_namespace == "cupy":
+            _synchronize_cupy_default_stream()
 
-        run_start = time.perf_counter()
+        primary_start = time.perf_counter()
+        morphology = _construct_morphology_for_timing_case(case, prepared_inputs)
+        segment_seconds: dict[str, float] = {}
+        if "A" in case.timing_segments:
+            segment_seconds["A"] = time.perf_counter() - primary_start
+
+        morphology._set_private_backend_timing_segments(case.timing_segments)
         backend_result = morphology.run(stdout=False, stderr=False, return_xarray=False)
-        result["run_seconds"] = time.perf_counter() - run_start
-        result["memory_after_run"] = _cupy_memory_snapshot()
-        result["backend_timings"] = morphology.backend_timings
+        _synchronize_cupy_default_stream()
 
-        export_start = time.perf_counter()
-        if case.backend == "cyrsoxs":
-            scattering = morphology.scattering_to_xarray(return_xarray=True)
-        else:
-            scattering = backend_result.to_xarray()
-        result["export_seconds"] = time.perf_counter() - export_start
-        result["memory_after_export"] = _cupy_memory_snapshot()
+        backend_timings = morphology.backend_timings
+        if backend_timings:
+            segment_seconds.update(backend_timings.get("segment_seconds", {}))
 
-        result["panel_shape"] = list(scattering.shape)
-        result["workflow_seconds"] = time.perf_counter() - started
+        result["primary_seconds"] = time.perf_counter() - primary_start
+        result["segment_seconds"] = {
+            segment: float(segment_seconds[segment])
+            for segment in TIMING_SEGMENTS
+            if segment in segment_seconds
+        }
+        result["backend_timing_details"] = backend_timings
+        result["panel_shape"] = list(backend_result.to_backend_array().shape)
         result["status"] = "ok"
 
-        if scattering_path is not None:
-            _save_scattering_npz(scattering, scattering_path)
-            result["scattering_path"] = str(scattering_path)
-
-        if baseline_path is not None:
-            result["validation_metrics"] = _compare_to_baseline(scattering, baseline_path)
-
     except BaseException as exc:  # noqa: BLE001 - worker must serialize failures
-        result["workflow_seconds"] = time.perf_counter() - started
         result["status"] = "error"
         result["error_type"] = exc.__class__.__name__
         result["error"] = str(exc)
@@ -742,12 +498,15 @@ def _worker_main(case_path: Path, result_path: Path, baseline_path: Path | None,
     finally:
         if morphology is not None:
             try:
+                morphology._clear_private_backend_timing_segments()
+            except Exception:
+                pass
+            try:
                 morphology.release_runtime()
             except Exception:
                 pass
-        del scattering, backend_result, morphology
+        del backend_result, morphology, prepared_inputs
         release_runtime_memory()
-        result["memory_after_release"] = _cupy_memory_snapshot()
         result_path.parent.mkdir(parents=True, exist_ok=True)
         result_path.write_text(json.dumps(result, indent=2, default=_json_default) + "\n")
     return 0
@@ -757,8 +516,6 @@ def _run_case_subprocess(
     *,
     case: BenchmarkCase,
     output_dir: Path,
-    baseline_path: Path | None = None,
-    scattering_path: Path | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="cupy_rsoxs_opt_", dir=output_dir) as tmp_dir:
@@ -775,10 +532,6 @@ def _run_case_subprocess(
             "--worker-result-path",
             str(result_path),
         ]
-        if baseline_path is not None:
-            cmd.extend(["--worker-baseline-path", str(baseline_path)])
-        if scattering_path is not None:
-            cmd.extend(["--worker-scattering-path", str(scattering_path)])
 
         started = time.perf_counter()
         completed = subprocess.run(
@@ -813,9 +566,14 @@ def _run_case_subprocess(
         return result
 
 
-def _timing_cases(include_full_small_check: bool) -> list[BenchmarkCase]:
+def _timing_cases(
+    *,
+    size_labels: tuple[str, ...],
+    timing_segments: tuple[str, ...],
+    include_full_small_check: bool,
+) -> list[BenchmarkCase]:
     cases: list[BenchmarkCase] = []
-    for size_label in ("small", "medium", "large"):
+    for size_label in size_labels:
         cases.append(
             BenchmarkCase(
                 label=f"core_shell_{size_label}_single_no_rotation_cupy_borrow",
@@ -827,6 +585,7 @@ def _timing_cases(include_full_small_check: bool) -> list[BenchmarkCase]:
                 field_namespace="cupy",
                 input_policy="strict",
                 ownership_policy="borrow",
+                timing_segments=timing_segments,
                 notes="Primary no-rotation tuning lane.",
             )
         )
@@ -841,11 +600,12 @@ def _timing_cases(include_full_small_check: bool) -> list[BenchmarkCase]:
                 field_namespace="cupy",
                 input_policy="strict",
                 ownership_policy="borrow",
+                timing_segments=timing_segments,
                 notes="Primary limited-EAngle tuning lane.",
             )
         )
 
-    if include_full_small_check:
+    if include_full_small_check and "small" in size_labels:
         cases.append(
             BenchmarkCase(
                 label="core_shell_small_triple_full_rotation_cupy_borrow",
@@ -857,84 +617,11 @@ def _timing_cases(include_full_small_check: bool) -> list[BenchmarkCase]:
                 field_namespace="cupy",
                 input_policy="strict",
                 ownership_policy="borrow",
+                timing_segments=timing_segments,
                 notes="Occasional expensive checkpoint for the full parity-style rotation loop.",
             )
         )
     return cases
-
-
-def _cyrsoxs_reference_timing_cases() -> list[BenchmarkCase]:
-    return [
-        BenchmarkCase(
-            label=f"core_shell_{size_label}_triple_limited_rotation_cyrsoxs_reference",
-            family="core_shell",
-            backend="cyrsoxs",
-            shape_label=size_label,
-            energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
-            eangle_rotation=EANGLE_LIMITED,
-            field_namespace="numpy",
-            input_policy="coerce",
-            ownership_policy=None,
-            notes="One reference cyrsoxs timing per size.",
-        )
-        for size_label in ("small", "medium", "large")
-    ]
-
-
-def _validation_baseline_cases() -> list[BenchmarkCase]:
-    return [
-        BenchmarkCase(
-            label="sphere_radial_single_no_rotation_cyrsoxs_baseline",
-            family="sphere_radial",
-            backend="cyrsoxs",
-            shape_label="n/a",
-            energies_ev=SPHERE_SINGLE_ENERGIES,
-            eangle_rotation=EANGLE_OFF,
-            field_namespace="numpy",
-            input_policy="coerce",
-            ownership_policy=None,
-        ),
-        BenchmarkCase(
-            label="sphere_low_symmetry_triple_limited_rotation_cyrsoxs_baseline",
-            family="sphere_low_symmetry",
-            backend="cyrsoxs",
-            shape_label="n/a",
-            energies_ev=SPHERE_TRIPLE_ENERGIES,
-            eangle_rotation=EANGLE_LIMITED,
-            field_namespace="numpy",
-            input_policy="coerce",
-            ownership_policy=None,
-        ),
-    ]
-
-
-def _validation_cases() -> list[BenchmarkCase]:
-    return [
-        BenchmarkCase(
-            label="sphere_radial_single_no_rotation_cupy_borrow",
-            family="sphere_radial",
-            backend="cupy-rsoxs",
-            shape_label="n/a",
-            energies_ev=SPHERE_SINGLE_ENERGIES,
-            eangle_rotation=EANGLE_OFF,
-            field_namespace="cupy",
-            input_policy="strict",
-            ownership_policy="borrow",
-            validation_baseline_name="sphere_radial_single_no_rotation_cyrsoxs_baseline",
-        ),
-        BenchmarkCase(
-            label="sphere_low_symmetry_triple_limited_rotation_cupy_borrow",
-            family="sphere_low_symmetry",
-            backend="cupy-rsoxs",
-            shape_label="n/a",
-            energies_ev=SPHERE_TRIPLE_ENERGIES,
-            eangle_rotation=EANGLE_LIMITED,
-            field_namespace="cupy",
-            input_policy="strict",
-            ownership_policy="borrow",
-            validation_baseline_name="sphere_low_symmetry_triple_limited_rotation_cyrsoxs_baseline",
-        ),
-    ]
 
 
 def _write_summary(run_dir: Path, summary: dict[str, Any]) -> None:
@@ -947,63 +634,36 @@ def run_matrix(args: argparse.Namespace) -> int:
         raise SystemExit("No visible NVIDIA GPU found for the cupy-rsoxs optimization study.")
 
     run_label = args.label or _timestamp()
+    size_labels = _parse_csv_labels(args.size_labels)
+    unknown = [label for label in size_labels if label not in SIZE_SPECS]
+    if unknown:
+        raise SystemExit(f"Unsupported size_labels entries: {unknown!r}")
+    timing_segments = _parse_timing_segments(args.timing_segments)
+
     run_dir = OUT_ROOT / run_label
-    baselines_dir = Path(args.baseline_dir) if args.baseline_dir else run_dir / "baselines"
     output_dir = run_dir / "cases"
     summary: dict[str, Any] = {
         "label": run_label,
         "created_utc": _timestamp(),
         "python_executable": sys.executable,
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
-        "baseline_dir": str(baselines_dir),
+        "timing_boundary": PRIMARY_TIMING_BOUNDARY,
+        "timing_segments": list(timing_segments),
+        "size_labels": list(size_labels),
+        "segment_g_status": "Reserved for future export timing. Not recorded in this pass.",
         "timing_cases": {},
-        "validation_cases": {},
-        "cyrsoxs_reference_cases": {},
     }
 
     run_dir.mkdir(parents=True, exist_ok=True)
-    baselines_dir.mkdir(parents=True, exist_ok=True)
-
-    if args.refresh_validation_baselines:
-        print("Refreshing cyrsoxs validation baselines...", flush=True)
-        for case in _validation_baseline_cases():
-            baseline_path = baselines_dir / f"{case.label}.npz"
-            result = _run_case_subprocess(
-                case=case,
-                output_dir=output_dir,
-                baseline_path=None,
-                scattering_path=baseline_path,
-            )
-            summary["cyrsoxs_reference_cases"][case.label] = result
-            print(_result_summary_line(result), flush=True)
-
-    if args.include_cyrsoxs_timing:
-        print("Running one cyrsoxs timing case per CoreShell size...", flush=True)
-        for case in _cyrsoxs_reference_timing_cases():
-            result = _run_case_subprocess(case=case, output_dir=output_dir)
-            summary["cyrsoxs_reference_cases"][case.label] = result
-            print(_result_summary_line(result), flush=True)
 
     print("Running cupy-rsoxs timing cases...", flush=True)
-    for case in _timing_cases(include_full_small_check=args.include_full_small_check):
+    for case in _timing_cases(
+        size_labels=size_labels,
+        timing_segments=timing_segments,
+        include_full_small_check=args.include_full_small_check,
+    ):
         result = _run_case_subprocess(case=case, output_dir=output_dir)
         summary["timing_cases"][case.label] = result
-        print(_result_summary_line(result), flush=True)
-
-    print("Running cupy-rsoxs validation cases...", flush=True)
-    for case in _validation_cases():
-        baseline_path = baselines_dir / f"{case.validation_baseline_name}.npz"
-        if not baseline_path.exists():
-            raise SystemExit(
-                f"Validation baseline {baseline_path} is missing. "
-                "Run with --refresh-validation-baselines first or provide --baseline-dir."
-            )
-        result = _run_case_subprocess(
-            case=case,
-            output_dir=output_dir,
-            baseline_path=baseline_path,
-        )
-        summary["validation_cases"][case.label] = result
         print(_result_summary_line(result), flush=True)
 
     _write_summary(run_dir, summary)
@@ -1014,25 +674,21 @@ def run_matrix(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Development-only timing and ad hoc validation matrix for the "
-            "cupy-rsoxs optimization campaign."
+            "Development-only cupy-rsoxs timing matrix for optimization work. "
+            "Primary timing starts at Morphology(...) construction and ends after "
+            "synchronized run(return_xarray=False) completion."
         )
     )
     parser.add_argument("--label", default=None, help="Output subdirectory label under test-reports.")
     parser.add_argument(
-        "--baseline-dir",
-        default=None,
-        help="Reuse an existing baseline directory instead of creating baselines under this run directory.",
+        "--size-labels",
+        default="small,medium,large",
+        help="Comma-separated subset of size labels to run, for example 'small,medium'.",
     )
     parser.add_argument(
-        "--refresh-validation-baselines",
-        action="store_true",
-        help="Regenerate the sphere validation baselines with cyrsoxs and save them as NPZ files.",
-    )
-    parser.add_argument(
-        "--include-cyrsoxs-timing",
-        action="store_true",
-        help="Run one cyrsoxs CoreShell timing case per size on the limited-angle lane.",
+        "--timing-segments",
+        default="all",
+        help="Comma-separated timing segments to record, or 'all'. Supported segments: A-F.",
     )
     parser.add_argument(
         "--include-full-small-check",
@@ -1041,8 +697,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--worker-case-path", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--worker-result-path", default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--worker-baseline-path", default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--worker-scattering-path", default=None, help=argparse.SUPPRESS)
     return parser
 
 
@@ -1053,8 +707,6 @@ def main() -> int:
         return _worker_main(
             case_path=Path(args.worker_case_path),
             result_path=Path(args.worker_result_path),
-            baseline_path=Path(args.worker_baseline_path) if args.worker_baseline_path else None,
-            scattering_path=Path(args.worker_scattering_path) if args.worker_scattering_path else None,
         )
     return run_matrix(args)
 

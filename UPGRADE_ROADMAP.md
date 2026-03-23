@@ -449,28 +449,39 @@ Phase-1 parity lock-in:
 1. Log explicit host<->device transfers at NRSS-controlled boundaries.
 2. Add strict mode warnings for policy-driven conversions and make resident-mode
    assumptions visible in dev diagnostics.
-3. Define the primary optimization wall metric as:
+3. The implemented primary optimization wall metric is:
    - start immediately before `Morphology(...)` construction, after upstream
      field arrays already exist,
    - end immediately after synchronized `run(return_xarray=False)` completion.
-4. The primary optimization wall metric must exclude:
+4. The implemented primary optimization wall metric excludes:
    - morph-field generation before object creation,
    - result export such as `to_xarray()`,
    - downstream A-wedge generation, plotting, or analysis.
-5. If upstream arrays are already on GPU, force a device synchronize
-   immediately before the start timestamp so unfinished upstream GPU work is not
-   counted inside morphology timing.
-6. Record per-stage timings and peak memory for benchmark/parity runs.
-7. Best-effort only for third-party implicit copies; complete interception may
+5. For CuPy-native upstream workflows, the dev timing harness forces a default
+   stream synchronize immediately before the start timestamp so unfinished
+   upstream GPU work is not counted inside morphology timing.
+6. The current timing pass records:
+   - Segment `A` in the harness with wall-clock timing,
+   - Segments `B-F` inside `cupy-rsoxs` with private CUDA-event timing,
+   - no timing payload at all unless timing is explicitly enabled,
+   - no Segment `G` / export timing in this pass.
+7. The internal timing control surface is private-only:
+   - `Morphology._set_private_backend_timing_segments(...)`
+   - `Morphology._clear_private_backend_timing_segments()`
+   - do not expose this as public API without an explicit design decision.
+8. Existing peak-memory monitoring remains acceptable for this pass; per-stage
+   memory instrumentation is deferred to follow-up work.
+9. Best-effort only for third-party implicit copies; complete interception may
    not be possible.
 
 Additional phase-1 requirements:
 
-1. Instrumentation must be disableable with effectively zero extra synchronization in non-dev runs.
-2. Memory observability should cover both:
+1. Instrumentation is now opt-in/internal and must remain disableable with
+   effectively zero extra synchronization in non-dev runs.
+2. Memory observability follow-up should cover both:
    - post-run cleanup behavior,
    - peak and per-stage resident usage during compute, especially around polarization, FFT, and Ewald/result stages.
-3. Stage-level timing and memory work should be organized around the following
+3. Stage-level timing work should continue to be organized around the following
    serial optimization segments:
    - Segment A: `Morphology` construction, contract normalization, and data staging,
    - Segment B: n-field / tensor-character assembly,
@@ -478,7 +489,8 @@ Additional phase-1 requirements:
    - Segment D: Ewald / scatter / projection math,
    - Segment E: rotation and angle accumulation,
    - Segment F: result-buffer assembly and retention,
-   - Segment G: export and host conversion as a separate non-primary metric.
+   - Segment G: export and host conversion as a separate non-primary metric,
+     intentionally deferred in the current timing pass.
 4. The parity implementation should prefer structural memory control first:
    - reuse scratch buffers,
    - delete/release intermediates as soon as they are dead,
@@ -591,103 +603,118 @@ recover:
    - dead `Nt[5]` removed from the supported Euler-only / `PARTIAL` path,
    - FFT storage reused so separate `fft_nt` residency is reduced,
    - Igor reorder implemented with a cached `RawKernel`.
-2. The reusable optimization harness lives at:
+2. The authoritative optimization timing harness now lives at:
    - `tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py`
    - supporting notes at `tests/validation/dev/cupy_rsoxs_optimization/README.md`
-3. The reusable full-energy backend-comparison harness lives at:
+3. That harness is now explicitly cupy-only and timing-only:
+   - primary timing starts immediately before `Morphology(...)`,
+   - primary timing ends immediately after synchronized `run(return_xarray=False)`,
+   - upstream field generation is excluded,
+   - export timing is excluded,
+   - Segment `A` is measured in the harness and Segments `B-F` are measured in
+     `cupy-rsoxs`,
+   - Segment `G` remains reserved for future export timing.
+4. The reusable full-energy backend-comparison harness lives at:
    - `tests/validation/dev/core_shell_backend_performance/run_core_shell_backend_performance_abstract.py`
    - supporting notes at `tests/validation/dev/core_shell_backend_performance/README.md`
-4. Current development artifacts that should be treated as the authoritative
-   resumable record are:
+5. The full-energy backend-comparison harness is now legacy/historical only for
+   optimization work:
+   - it is not the authoritative timing harness,
+   - its old mixed workflow metric should not be used to rank current speed
+     work,
+   - no new `cyrsoxs` timing lanes should be added to the default optimization
+     loop.
+6. Current development artifacts that should be treated as the authoritative
+   resumable timing record are:
    - `test-reports/cupy-rsoxs-optimization-dev/`
-   - `test-reports/core-shell-backend-performance-dev/full_energy_all/`
-5. Maintained parity and physics guardrails still live in the official test
+   - especially `test-reports/cupy-rsoxs-optimization-dev/verify_cli_small_postcleanup/summary.json`
+7. Maintained parity and physics guardrails still live in the official test
    suite. The dev harnesses above are for optimization and comparison work, not
    for replacing the maintained parity suite.
 
-### 18.2 Highest-priority next step: fix timing before ranking more optimizations
+### 18.2 Timing apparatus status (implemented March 23, 2026)
 
-1. The most critical next step is to fix and standardize the wall-timing
-   apparatus before using further optimization results to rank ideas.
-2. The primary optimization wall metric must be:
+1. The timing repair requested in earlier versions of this roadmap is now
+   complete for the current optimization loop.
+2. The primary optimization wall metric is:
    - start immediately before `Morphology(...)` construction,
    - end immediately after synchronized `run(return_xarray=False)` completion.
-3. The primary optimization wall metric must exclude:
+3. The primary optimization wall metric excludes:
    - field generation before object creation,
    - result export such as `to_xarray()`,
    - downstream A-wedge generation, plotting, and analysis.
-4. For CuPy-native upstream workflows, force a device synchronize immediately
-   before the start timestamp so unfinished upstream GPU work is not counted in
-   the morphology-to-run interval.
-5. Export timing is still useful, but it is a separate metric and should not be
-   mixed into the primary optimization score.
-6. Stage-level timing should be recorded, when enabled, against the following
-   serial optimization segments:
-   - Segment A: morphology construction, contract normalization, and staging,
-   - Segment B: n-field / tensor-character assembly,
-   - Segment C: FFT, reorder, scratch reuse, and plan behavior,
-   - Segment D: Ewald / scatter / projection math,
-   - Segment E: rotation and angle accumulation,
-   - Segment F: result-buffer assembly and retention,
-   - Segment G: export / host conversion as a separate non-primary metric.
-7. Stage-level timing and memory instrumentation must remain fully disableable
-   so production runs do not pay synchronization overhead from development
-   observability.
+4. The implemented internal-only control path is:
+   - `Morphology._set_private_backend_timing_segments(...)`
+   - `Morphology._clear_private_backend_timing_segments()`
+   - this is intentionally private and should remain internal unless a later
+     API review explicitly promotes it.
+5. Implemented segment coverage is:
+   - Segment `A`: harness wall time for morphology construction / staging
+     inside the primary timing boundary,
+   - Segments `B-F`: `cupy-rsoxs` private CUDA-event timings,
+   - Segment `G`: deferred for a later export-timing pass.
+6. The backend timing payload now has the shape:
+   - `{"measurement": "cuda_event", "selected_segments": [...], "segment_seconds": {...}}`
+7. When timing is not explicitly enabled:
+   - `morphology.backend_timings` remains `{}`,
+   - `cupy-rsoxs` does not enter the CUDA-event timing path,
+   - production runs therefore avoid development-only synchronization overhead.
+8. The old dev-harness `workflow_seconds` metric is intentionally discarded and
+   should not be revived as an optimization authority.
+9. Segment totals are not expected to sum exactly to `primary_seconds`:
+   - Segment `A` is wall-clock,
+   - Segments `B-F` are CUDA-event timings,
+   - residual host/launch overhead remains in the primary wall metric.
+10. Verification completed in `nrss-dev` for this pass:
+    - smoke coverage now includes
+      `test_cupy_private_segment_timing_is_opt_in_and_subsettable`,
+    - direct single-energy / no-rotation CoreShell worker timing passed,
+    - subset selection such as `("B", "D")` returned only the requested
+      backend segments,
+    - CLI timing harness run `verify_cli_small_postcleanup` passed.
 
 ### 18.3 Current evidence summary from the accepted backend state
 
 1. The first optimization campaign retained three changes and rejected four
    first-pass implementations. See Section 18.6 for the ledger.
-2. The current full-energy backend comparison was run from the accepted tuned
-   state using:
-   - three scaled CoreShell boxes:
-     - `small`: `(32, 512, 512)`,
-     - `medium`: `(64, 1024, 1024)`,
-     - `large`: `(96, 1536, 1536)`,
-   - full `101`-energy baseline,
-   - unique-state `EAngleRotation` ladders at `1`, `12`, `24`, and `72`
-     angles,
-   - three algorithmic paths:
-     - `numpy -> cyrsoxs`,
-     - `numpy -> cupy-rsoxs (coerce)`,
-     - `cupy -> cupy-rsoxs (borrow/strict)`.
-3. Current full-energy crossover summary:
-   - `cyrsoxs` still wins the `1`-angle latency regime for all three sizes,
-   - `cupy-rsoxs` crosses over by `24` angles for `small`,
-   - `cupy-rsoxs` crosses over by `12` angles for `medium` and `large`,
-   - at `72` angles:
-     - `small`: `cyrsoxs 45.809s`, `coerce 11.585s (3.95x)`, `borrow 14.196s (3.23x)`,
-     - `medium`: `cyrsoxs 361.479s`, `coerce 61.407s (5.89x)`, `borrow 61.291s (5.90x)`,
-     - `large`: `cyrsoxs 1340.967s`, `coerce 200.617s (6.68x)`, `borrow 200.449s (6.69x)`.
-4. Current no-rotation / latency summary from the same full-energy study:
-   - `small`: `cyrsoxs 2.599s`, `coerce 10.023s`, `borrow 10.181s`,
-   - `medium`: `cyrsoxs 17.878s`, `coerce 58.563s`, `borrow 58.412s`,
-   - `large`: `cyrsoxs 59.949s`, `coerce 194.502s`, `borrow 195.369s`.
-5. Physics-parity summary from the full-energy comparison overlay case
-   (`large`, `72` angles, `cyrsoxs` vs fastest CuPy path):
-   - `A(E)` relative RMSE: about `0.0037%`,
-   - `A(q)` relative RMSE at `284.7 eV`: about `0.0058%`,
-   - `A(q)` relative RMSE at `285.2 eV`: about `0.0015%`.
-6. Current monitored `72`-angle peak GPU-memory summary:
-   - `small`: `cyrsoxs 763 MiB`, `cupy-rsoxs 1705 MiB`,
-   - `medium`: `cyrsoxs 4805 MiB`, `cupy-rsoxs 12401 MiB`,
-   - `large`: `cyrsoxs 15767 MiB`, `cupy-rsoxs 41437 MiB`.
-7. The higher CuPy footprint should not currently be interpreted as allocator
-   retention alone. It also reflects:
-   - resident morphology fields on device in device-resident workflows,
-   - explicit live intermediate tensors in the current CuPy implementation.
-8. Important benchmark caveat:
+2. Historical full-energy `cyrsoxs` comparison reports remain useful as context
+   for what was explored, but they are no longer the authoritative timing basis
+   for resumed optimization work.
+3. The first authoritative post-cleanup timing snapshot is:
+   - `test-reports/cupy-rsoxs-optimization-dev/verify_cli_small_postcleanup/summary.json`
+4. That snapshot confirms the repaired timing boundary and current segment
+   profile on the accepted backend state:
+   - `core_shell_small_single_no_rotation_cupy_borrow`
+     - `primary_seconds`: about `0.2363s`,
+     - Segment `A`: about `0.0028s`,
+     - Segment `B`: about `0.1319s`,
+     - Segment `C`: about `0.0122s`,
+     - Segment `D`: about `0.0694s`,
+     - Segment `E`: about `0.0034s`,
+     - Segment `F`: about `0.00047s`.
+5. The same snapshot also provides a post-cleanup limited-rotation checkpoint:
+   - `core_shell_small_triple_limited_rotation_cupy_borrow`
+     - `primary_seconds`: about `0.4480s`,
+     - Segment `B`: about `0.1936s`,
+     - Segment `D`: about `0.2001s`,
+     - Segment `E`: about `0.0153s`.
+6. Current interpretation from the repaired timing apparatus:
+   - on the primary small single-energy lane, current latency is dominated by
+     Segments `B` and `D`,
+   - Segment `C` is visible but materially smaller,
+   - Segments `A`, `E`, and `F` are currently minor contributors in that lane.
+7. Important benchmark caveat:
    - the current `cupy -> cupy-rsoxs (borrow/strict)` path is contract-clean at
      the `Morphology` boundary,
    - but it is not a true end-to-end GPU-native morphology-generation
      benchmark,
    - the current CoreShell builder still creates fields in NumPy and then
      preconverts them to CuPy before `Morphology(...)` timing starts.
-9. Consequence of that caveat:
-   - the current near-equality between `coerce` and `borrow/strict` should not
-     be read as evidence that direct-CuPy workflows offer no value,
-   - it only shows that the present harness did not isolate an end-to-end
-     device-native field-generation advantage.
+8. Consequence of that caveat:
+   - current timings isolate backend speed, not morphology generation speed,
+   - this is intentional for the present optimization campaign.
+9. Maintained parity remains a post-optimization check through the test suite
+   rather than through a `cyrsoxs` timing harness.
 
 ### 18.4 Official resident-mode guidance
 
@@ -721,38 +748,43 @@ recover:
 
 ### 18.5 Optimization campaign strategy going forward
 
-1. The optimization goal is not merely to preserve the current large-angle win.
-   The goal is to make `cupy-rsoxs` beat `cyrsoxs` everywhere if possible, or
-   at minimum approach speed parity in the regimes where it still loses while
-   maintaining physics parity.
-2. The immediate performance target is the latency-dominated regime where
-   `cupy-rsoxs` currently loses:
-   - `small`, no rotation,
-   - `medium`, no rotation.
-3. Large many-angle wins must be preserved while latency-focused work proceeds.
-4. Future optimization campaigns should focus on one segment at a time using
+1. The optimization goal is to make `cupy-rsoxs` materially faster while
+   preserving physics parity through the maintained test suite.
+2. The default inner-loop timing command is now:
+   - `/home/deand/mambaforge/envs/nrss-dev/bin/python tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py --label <label> --size-labels small --timing-segments all`
+3. Future optimization campaigns should focus on one segment at a time using
    the segmentation defined in Section 18.2 rather than trying to optimize the
    whole backend at once.
-5. The default optimization benchmark ladder should use single-energy cases
+4. The default optimization benchmark ladder should use single-energy cases
    rather than full-energy runs.
    - energy iteration mostly wraps the same loop structure,
    - for non-parity tuning, full-energy runs mainly add runtime and statistics
      rather than exposing a fundamentally different algorithmic path.
-6. Recommended default tuning ladder:
+5. Recommended default tuning ladder:
    - primary latency lane: `small`, single energy, `EAngleRotation=[0, 0, 0]`,
    - secondary latency lane: `medium`, single energy, `EAngleRotation=[0, 0, 0]`,
    - rotation-focused lane: `medium`, single energy, limited or dense angle
      sweep to isolate rotation/accumulation cost,
    - memory / throughput guardrail lane: `large`, single energy, dense angle
      sweep when needed.
-7. If a single-energy lane is too fast or too noisy to rank consistently,
+6. When chasing a hotspot, narrow `--timing-segments` to the relevant subset
+   instead of recording everything on every run.
+   - current evidence makes Segments `B` and `D` the first sensible focal
+     points,
+   - re-expand to `all` when checking for regression spillover into neighboring
+     stages.
+7. Do not add `cyrsoxs` timing lanes to the default optimization harness.
+   `cyrsoxs` timing is not part of the current optimization loop.
+8. Use `--include-full-small-check` only as an occasional expensive checkpoint
+   for the full rotation path.
+9. If a single-energy lane is too fast or too noisy to rank consistently,
    repeat it enough times to stabilize the comparison rather than escalating
    directly to full-energy runs.
-8. Full-energy runs should be reserved for:
-   - milestone confirmation after accepted optimization changes,
-   - final comparison graphics,
-   - and maintained parity / correctness rechecks.
-9. Future optimization guidance should be treated as open-ended. Many more
+10. Full-energy runs should be reserved for:
+    - milestone confirmation after accepted optimization changes,
+    - final comparison graphics if they are later needed,
+    - and maintained parity / correctness rechecks.
+11. Future optimization guidance should be treated as open-ended. Many more
    opportunities likely exist beyond the ones already enumerated or tried. The
    document should not be read as an exhaustive list of remaining ideas.
 
@@ -827,10 +859,19 @@ recover:
      intermediates are moved to GPU,
    - therefore it must be measured before being promoted into recommended
      architecture.
-5. Resume rule for a fresh optimization context:
-   - start from the current accepted `opt04`-equivalent behavior,
-   - repair and standardize timing first,
+5. Export timing / host-conversion timing remains intentionally deferred as
+   Segment `G`.
+6. Per-stage memory instrumentation remains deferred; the existing coarse peak
+   memory monitoring is enough for the current pass.
+7. Resume rule for a fresh optimization context:
+   - start from the current accepted `opt04`-equivalent behavior plus the
+     repaired timing apparatus in this repo state,
+   - use `tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py`
+     as the default inner-loop harness,
+   - begin with the primary lane:
+     `/home/deand/mambaforge/envs/nrss-dev/bin/python tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py --label <label> --size-labels small --timing-segments all`,
+   - narrow `--timing-segments` when focusing on a specific segment,
    - use the single-energy benchmark ladder for inner-loop tuning,
-   - validate promising changes against the ad hoc baselines,
-   - rerun maintained parity checks and the full-energy comparison harness only
-     at milestone points.
+   - rerun maintained parity checks after promising optimization changes,
+   - treat the legacy full-energy backend-comparison harness as optional
+     historical context rather than a required step in the default loop.

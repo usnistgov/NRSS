@@ -247,6 +247,15 @@ class Morphology:
     def backend_timings(self):
         return dict(self._backend_timings)
 
+    def _set_private_backend_timing_segments(self, segments):
+        unique_segments = tuple(dict.fromkeys(str(segment) for segment in segments))
+        self._backend_runtime_state["_private_backend_timing_segments"] = unique_segments
+        self._backend_timings = {}
+
+    def _clear_private_backend_timing_segments(self):
+        self._backend_runtime_state.pop("_private_backend_timing_segments", None)
+        self._backend_timings = {}
+
     def release_runtime(self):
         if hasattr(self._backend_runtime, "release"):
             self._backend_runtime.release(self)

@@ -436,6 +436,95 @@ def test_cyrsoxs_morphology_normalizes_cupy_inputs_to_host_contract():
         _release_cupy_memory()
 
 
+@pytest.mark.gpu
+def test_cupy_private_segment_timing_is_opt_in_and_subsettable():
+    """Ensure cupy-rsoxs segment timing is disabled by default and records only requested segments."""
+    cp = _import_cupy_required()
+    shape = (2, 4, 4)
+    energies = [285.0]
+    zeros = cp.zeros(shape, dtype=cp.float32)
+
+    def build_morphology():
+        mat1 = Material(
+            materialID=1,
+            Vfrac=cp.ones(shape, dtype=cp.float32),
+            S=zeros.copy(),
+            theta=zeros.copy(),
+            psi=zeros.copy(),
+            energies=energies,
+            opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+            name="vacuum_1",
+        )
+        mat2 = Material(
+            materialID=2,
+            Vfrac=zeros.copy(),
+            S=zeros.copy(),
+            theta=zeros.copy(),
+            psi=zeros.copy(),
+            energies=energies,
+            opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+            name="vacuum_2",
+        )
+        config = {
+            "CaseType": 0,
+            "MorphologyType": 0,
+            "Energies": energies,
+            "EAngleRotation": [0.0, 0.0, 0.0],
+            "RotMask": 0,
+            "WindowingType": 0,
+            "AlgorithmType": 0,
+            "ReferenceFrame": 1,
+            "EwaldsInterpolation": 1,
+        }
+        return Morphology(
+            2,
+            materials={1: mat1, 2: mat2},
+            PhysSize=5.0,
+            config=config,
+            backend="cupy-rsoxs",
+            input_policy="strict",
+            ownership_policy="borrow",
+            create_cy_object=True,
+        )
+
+    morph = None
+    timed = None
+    try:
+        morph = build_morphology()
+        result = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.Stream.null.synchronize()
+        assert list(result.to_backend_array().shape) == [1, 4, 4]
+        assert morph.backend_timings == {}
+        morph.release_runtime()
+
+        timed = build_morphology()
+        timed._set_private_backend_timing_segments(("B", "D", "F"))
+        timed_result = timed.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.Stream.null.synchronize()
+        assert list(timed_result.to_backend_array().shape) == [1, 4, 4]
+        timings = timed.backend_timings
+        assert timings["measurement"] == "cuda_event"
+        assert timings["selected_segments"] == ["B", "D", "F"]
+        assert set(timings["segment_seconds"]) == {"B", "D", "F"}
+        assert all(float(value) >= 0.0 for value in timings["segment_seconds"].values())
+    finally:
+        if timed is not None:
+            try:
+                timed._clear_private_backend_timing_segments()
+            except Exception:
+                pass
+            try:
+                timed.release_runtime()
+            except Exception:
+                pass
+        if morph is not None:
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
 @pytest.mark.backend_agnostic_contract
 def test_tiny_deterministic_white_noise_kernel():
     """Check deterministic numeric fingerprint for a tiny white-noise smoothing kernel."""

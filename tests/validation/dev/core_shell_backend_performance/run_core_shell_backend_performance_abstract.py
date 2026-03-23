@@ -665,8 +665,9 @@ def _summary_text_lines(summary: dict[str, Any]) -> list[str]:
     speed_cases = summary.get("speed_cases", {})
     memory_cases = summary.get("memory_cases", {})
     lines = [
-        "CoreShell backend performance comparison",
+        "Legacy CoreShell backend performance comparison",
         "",
+        "Historical harness only. Not authoritative for current optimization timing.",
         "Timing metric: build + backend run + xarray export",
         f"Full baseline: {summary['full_energy_count']} energies",
         "EAngleRotation unique-state sweep: 1, 12, 24, 72 angles",
@@ -1213,8 +1214,8 @@ def run_study(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Development-only full-energy CoreShell backend comparison runner and "
-            "graphical-abstract generator."
+            "Legacy development-only full-energy CoreShell backend comparison runner "
+            "and graphical-abstract generator."
         )
     )
     parser.add_argument("--label", default=None, help="Output subdirectory label under test-reports.")
