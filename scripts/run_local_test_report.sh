@@ -30,9 +30,9 @@ Environment overrides:
 Behavior:
   By default, the standard local report runs four steps:
     1. Environment Snapshot
-    2. Smoke Tests (CPU Fast) (Command: python -m pytest tests/smoke -m 'not gpu' -v)
-    3. Smoke Tests (GPU) (Command: python -m pytest tests/smoke -m gpu -v)
-    4. Physics Validation Tests (Command: python scripts/run_physics_validation_suite.py)
+    2. Smoke Tests (CPU Fast)
+    3. Smoke Tests (GPU)
+    4. Physics Validation Tests
   Physics Validation Tests also harvest any generated graphical-abstract PNGs
   into the per-run report directory and write graphical-abstracts.zip.
   Any explicit --cmd commands are appended afterward.
@@ -54,6 +54,7 @@ Examples:
              --zip-path \"test-reports/$(date -u +%Y%m%dT%H%M%SZ)/graphical-abstracts.zip\""
              
 Other Examples:
+  CUDA_VISIBLE_DEVICES=1 scripts/run_local_test_report.sh -e nrss_dev
   NRSS_TEST_ENV=mar2025 scripts/run_local_test_report.sh
   scripts/run_local_test_report.sh -e nrss-dev \\
     --cyrsoxs-cli-dir /path/to/cyrsoxs/build \\
