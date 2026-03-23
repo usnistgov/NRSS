@@ -34,6 +34,8 @@ class BackendInfo:
     supports_reference_parity: bool
     supports_device_input: bool
     supports_backend_native_output: bool
+    default_resident_mode: str
+    supported_resident_modes: tuple[str, ...]
     default_dtype: str
     supported_dtypes: tuple[str, ...]
     supported_backend_options: tuple[str, ...]
@@ -64,6 +66,8 @@ def _detect_cyrsoxs() -> BackendInfo:
             supports_reference_parity=True,
             supports_device_input=False,
             supports_backend_native_output=False,
+            default_resident_mode=contract["default_resident_mode"],
+            supported_resident_modes=contract["supported_resident_modes"],
             default_dtype=contract["default_dtype"],
             supported_dtypes=contract["supported_dtypes"],
             supported_backend_options=contract["supported_backend_options"],
@@ -80,6 +84,8 @@ def _detect_cyrsoxs() -> BackendInfo:
         supports_reference_parity=True,
         supports_device_input=False,
         supports_backend_native_output=False,
+        default_resident_mode=contract["default_resident_mode"],
+        supported_resident_modes=contract["supported_resident_modes"],
         default_dtype=contract["default_dtype"],
         supported_dtypes=contract["supported_dtypes"],
         supported_backend_options=contract["supported_backend_options"],
@@ -101,6 +107,8 @@ def _detect_cupy_rsoxs() -> BackendInfo:
             supports_reference_parity=True,
             supports_device_input=True,
             supports_backend_native_output=True,
+            default_resident_mode=contract["default_resident_mode"],
+            supported_resident_modes=contract["supported_resident_modes"],
             default_dtype=contract["default_dtype"],
             supported_dtypes=contract["supported_dtypes"],
             supported_backend_options=contract["supported_backend_options"],
@@ -119,6 +127,8 @@ def _detect_cupy_rsoxs() -> BackendInfo:
             supports_reference_parity=True,
             supports_device_input=True,
             supports_backend_native_output=True,
+            default_resident_mode=contract["default_resident_mode"],
+            supported_resident_modes=contract["supported_resident_modes"],
             default_dtype=contract["default_dtype"],
             supported_dtypes=contract["supported_dtypes"],
             supported_backend_options=contract["supported_backend_options"],
@@ -135,6 +145,8 @@ def _detect_cupy_rsoxs() -> BackendInfo:
         supports_reference_parity=True,
         supports_device_input=True,
         supports_backend_native_output=True,
+        default_resident_mode=contract["default_resident_mode"],
+        supported_resident_modes=contract["supported_resident_modes"],
         default_dtype=contract["default_dtype"],
         supported_dtypes=contract["supported_dtypes"],
         supported_backend_options=contract["supported_backend_options"],

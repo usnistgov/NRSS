@@ -6,7 +6,10 @@ from typing import Any
 
 import numpy as np
 
-from .contracts import resolve_backend_array_contract
+from .contracts import (
+    resolve_backend_array_contract,
+    resolve_backend_runtime_contract,
+)
 
 
 try:
@@ -90,9 +93,49 @@ def assess_array_for_backend(
     field_name: str,
     material_id: int | None = None,
     backend_options: Mapping[str, Any] | None = None,
+    resident_mode: str | None = None,
 ) -> ArrayPlan:
     info = inspect_array(arr)
-    contract = resolve_backend_array_contract(backend_name, backend_options)
+    contract = resolve_backend_array_contract(
+        backend_name,
+        backend_options,
+        resident_mode=resident_mode,
+    )
+    return _assess_array_against_contract(
+        arr=arr,
+        field_name=field_name,
+        material_id=material_id,
+        contract=contract,
+        info=info,
+    )
+
+
+def assess_array_for_backend_runtime(
+    arr: Any,
+    backend_name: str,
+    field_name: str,
+    material_id: int | None = None,
+    backend_options: Mapping[str, Any] | None = None,
+) -> ArrayPlan:
+    info = inspect_array(arr)
+    contract = resolve_backend_runtime_contract(backend_name, backend_options)
+    return _assess_array_against_contract(
+        arr=arr,
+        field_name=field_name,
+        material_id=material_id,
+        contract=contract,
+        info=info,
+    )
+
+
+def _assess_array_against_contract(
+    *,
+    arr: Any,
+    field_name: str,
+    material_id: int | None,
+    contract: Mapping[str, Any],
+    info: Mapping[str, Any],
+) -> ArrayPlan:
     target_namespace = contract["namespace"]
     target_device = contract["device"]
     target_dtype = contract["dtype"]
@@ -187,6 +230,12 @@ def coerce_array_for_backend(arr: Any, plan: ArrayPlan):
         return None
     if not plan.supported:
         raise TypeError(plan.reason)
+    if (
+        plan.transfer == "none"
+        and not plan.requires_dtype_cast
+        and not plan.requires_layout_copy
+    ):
+        return arr
 
     if plan.target_namespace == "numpy":
         np_dtype = np.dtype(plan.target_dtype)

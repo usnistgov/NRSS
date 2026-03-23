@@ -73,12 +73,24 @@ class BenchmarkCase:
     energies_ev: tuple[float, ...]
     eangle_rotation: tuple[float, float, float]
     field_namespace: str
+    resident_mode: str | None
     input_policy: str
     ownership_policy: str | None
     timing_segments: tuple[str, ...] = ()
     create_cy_object: bool = True
     validation_baseline_name: str | None = None
     notes: str | None = None
+
+
+@dataclass(frozen=True)
+class ResidentVariantSpec:
+    key: str
+    label_suffix: str
+    field_namespace: str
+    resident_mode: str
+    input_policy: str
+    ownership_policy: str | None
+    notes: str
 
 
 SIZE_SPECS = {
@@ -88,12 +100,46 @@ SIZE_SPECS = {
 }
 
 
+RESIDENT_VARIANTS = {
+    "host": ResidentVariantSpec(
+        key="host",
+        label_suffix="host",
+        field_namespace="numpy",
+        resident_mode="host",
+        input_policy="strict",
+        ownership_policy="borrow",
+        notes="Default public-workflow lane with host-resident authoritative morphology fields.",
+    ),
+    "device": ResidentVariantSpec(
+        key="device",
+        label_suffix="device",
+        field_namespace="cupy",
+        resident_mode="device",
+        input_policy="strict",
+        ownership_policy="borrow",
+        notes="Opt-in device-resident borrowed lane for direct CuPy morphology workflows.",
+    ),
+}
+
+
 def _timestamp() -> str:
     return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
 
 
 def _parse_csv_labels(raw: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _parse_resident_modes(raw: str) -> tuple[str, ...]:
+    requested = tuple(dict.fromkeys(part.strip().lower() for part in raw.split(",") if part.strip()))
+    unknown = tuple(mode for mode in requested if mode not in RESIDENT_VARIANTS)
+    if unknown:
+        raise SystemExit(
+            f"Unsupported resident_modes {unknown!r}. Valid values: {tuple(RESIDENT_VARIANTS)!r}."
+        )
+    if not requested:
+        raise SystemExit("resident_modes must select at least one variant.")
+    return requested
 
 
 def _parse_timing_segments(raw: str) -> tuple[str, ...]:
@@ -155,7 +201,10 @@ def _load_core_shell_optics(energies_ev: tuple[float, ...]) -> dict[int, Optical
 
 def _convert_fields_namespace(fields: dict[str, np.ndarray], field_namespace: str) -> dict[str, Any]:
     if field_namespace == "numpy":
-        return fields
+        return {
+            key: np.ascontiguousarray(np.asarray(value, dtype=np.float32))
+            for key, value in fields.items()
+        }
     if field_namespace != "cupy":
         raise AssertionError(f"Unsupported field namespace: {field_namespace}")
 
@@ -357,6 +406,7 @@ def build_scaled_core_shell_morphology(
     eangle_rotation: tuple[float, float, float],
     backend: str,
     field_namespace: str,
+    resident_mode: str | None,
     input_policy: str,
     ownership_policy: str | None,
     create_cy_object: bool,
@@ -375,6 +425,7 @@ def build_scaled_core_shell_morphology(
         config=config,
         create_cy_object=create_cy_object,
         backend=backend,
+        resident_mode=resident_mode,
         input_policy=input_policy,
         ownership_policy=ownership_policy,
     )
@@ -387,7 +438,9 @@ def _case_note(case: BenchmarkCase) -> str:
     if case.family == "core_shell":
         return (
             f"CoreShell {case.shape_label} {size_spec.shape} PhysSize={size_spec.phys_size_nm} "
-            f"EAngleRotation={list(case.eangle_rotation)} energies={list(case.energies_ev)}"
+            f"EAngleRotation={list(case.eangle_rotation)} energies={list(case.energies_ev)} "
+            f"resident_mode={case.resident_mode} field_namespace={case.field_namespace} "
+            f"input_policy={case.input_policy} ownership_policy={case.ownership_policy}"
         )
     raise AssertionError(f"Unsupported benchmark family for the timing harness: {case.family}")
 
@@ -429,6 +482,7 @@ def _construct_morphology_for_timing_case(case: BenchmarkCase, prepared: dict[st
         config=prepared["config"],
         create_cy_object=case.create_cy_object,
         backend=case.backend,
+        resident_mode=case.resident_mode,
         input_policy=case.input_policy,
         ownership_policy=case.ownership_policy,
     )
@@ -447,6 +501,10 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         "family": case.family,
         "backend": case.backend,
         "shape_label": case.shape_label,
+        "resident_mode": case.resident_mode,
+        "field_namespace": case.field_namespace,
+        "input_policy": case.input_policy,
+        "ownership_policy": case.ownership_policy,
         "energies_ev": list(case.energies_ev),
         "eangle_rotation": list(case.eangle_rotation),
         "timing_segments_requested": list(case.timing_segments),
@@ -568,59 +626,67 @@ def _run_case_subprocess(
 
 def _timing_cases(
     *,
+    resident_modes: tuple[str, ...],
     size_labels: tuple[str, ...],
     timing_segments: tuple[str, ...],
+    include_triple_limited: bool,
     include_full_small_check: bool,
 ) -> list[BenchmarkCase]:
     cases: list[BenchmarkCase] = []
-    for size_label in size_labels:
-        cases.append(
-            BenchmarkCase(
-                label=f"core_shell_{size_label}_single_no_rotation_cupy_borrow",
-                family="core_shell",
-                backend="cupy-rsoxs",
-                shape_label=size_label,
-                energies_ev=CORE_SHELL_SINGLE_ENERGIES,
-                eangle_rotation=EANGLE_OFF,
-                field_namespace="cupy",
-                input_policy="strict",
-                ownership_policy="borrow",
-                timing_segments=timing_segments,
-                notes="Primary no-rotation tuning lane.",
+    for mode in resident_modes:
+        variant = RESIDENT_VARIANTS[mode]
+        for size_label in size_labels:
+            cases.append(
+                BenchmarkCase(
+                    label=f"core_shell_{size_label}_single_no_rotation_{variant.label_suffix}",
+                    family="core_shell",
+                    backend="cupy-rsoxs",
+                    shape_label=size_label,
+                    energies_ev=CORE_SHELL_SINGLE_ENERGIES,
+                    eangle_rotation=EANGLE_OFF,
+                    field_namespace=variant.field_namespace,
+                    resident_mode=variant.resident_mode,
+                    input_policy=variant.input_policy,
+                    ownership_policy=variant.ownership_policy,
+                    timing_segments=timing_segments,
+                    notes=f"{variant.notes} Primary no-rotation tuning lane.",
+                )
             )
-        )
-        cases.append(
-            BenchmarkCase(
-                label=f"core_shell_{size_label}_triple_limited_rotation_cupy_borrow",
-                family="core_shell",
-                backend="cupy-rsoxs",
-                shape_label=size_label,
-                energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
-                eangle_rotation=EANGLE_LIMITED,
-                field_namespace="cupy",
-                input_policy="strict",
-                ownership_policy="borrow",
-                timing_segments=timing_segments,
-                notes="Primary limited-EAngle tuning lane.",
-            )
-        )
+            if include_triple_limited:
+                cases.append(
+                    BenchmarkCase(
+                        label=f"core_shell_{size_label}_triple_limited_rotation_{variant.label_suffix}",
+                        family="core_shell",
+                        backend="cupy-rsoxs",
+                        shape_label=size_label,
+                        energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
+                        eangle_rotation=EANGLE_LIMITED,
+                        field_namespace=variant.field_namespace,
+                        resident_mode=variant.resident_mode,
+                        input_policy=variant.input_policy,
+                        ownership_policy=variant.ownership_policy,
+                        timing_segments=timing_segments,
+                        notes=f"{variant.notes} Secondary limited-EAngle checkpoint lane.",
+                    )
+                )
 
-    if include_full_small_check and "small" in size_labels:
-        cases.append(
-            BenchmarkCase(
-                label="core_shell_small_triple_full_rotation_cupy_borrow",
-                family="core_shell",
-                backend="cupy-rsoxs",
-                shape_label="small",
-                energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
-                eangle_rotation=EANGLE_FULL,
-                field_namespace="cupy",
-                input_policy="strict",
-                ownership_policy="borrow",
-                timing_segments=timing_segments,
-                notes="Occasional expensive checkpoint for the full parity-style rotation loop.",
+        if include_full_small_check and "small" in size_labels:
+            cases.append(
+                BenchmarkCase(
+                    label=f"core_shell_small_triple_full_rotation_{variant.label_suffix}",
+                    family="core_shell",
+                    backend="cupy-rsoxs",
+                    shape_label="small",
+                    energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
+                    eangle_rotation=EANGLE_FULL,
+                    field_namespace=variant.field_namespace,
+                    resident_mode=variant.resident_mode,
+                    input_policy=variant.input_policy,
+                    ownership_policy=variant.ownership_policy,
+                    timing_segments=timing_segments,
+                    notes=f"{variant.notes} Occasional expensive checkpoint for the full parity-style rotation loop.",
+                )
             )
-        )
     return cases
 
 
@@ -634,6 +700,7 @@ def run_matrix(args: argparse.Namespace) -> int:
         raise SystemExit("No visible NVIDIA GPU found for the cupy-rsoxs optimization study.")
 
     run_label = args.label or _timestamp()
+    resident_modes = _parse_resident_modes(args.resident_modes)
     size_labels = _parse_csv_labels(args.size_labels)
     unknown = [label for label in size_labels if label not in SIZE_SPECS]
     if unknown:
@@ -649,7 +716,9 @@ def run_matrix(args: argparse.Namespace) -> int:
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
         "timing_boundary": PRIMARY_TIMING_BOUNDARY,
         "timing_segments": list(timing_segments),
+        "resident_modes": list(resident_modes),
         "size_labels": list(size_labels),
+        "include_triple_limited": bool(args.include_triple_limited),
         "segment_g_status": "Reserved for future export timing. Not recorded in this pass.",
         "timing_cases": {},
     }
@@ -658,8 +727,10 @@ def run_matrix(args: argparse.Namespace) -> int:
 
     print("Running cupy-rsoxs timing cases...", flush=True)
     for case in _timing_cases(
+        resident_modes=resident_modes,
         size_labels=size_labels,
         timing_segments=timing_segments,
+        include_triple_limited=args.include_triple_limited,
         include_full_small_check=args.include_full_small_check,
     ):
         result = _run_case_subprocess(case=case, output_dir=output_dir)
@@ -675,14 +746,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Development-only cupy-rsoxs timing matrix for optimization work. "
+            "Default run is the small host-resident single-energy no-rotation lane. "
             "Primary timing starts at Morphology(...) construction and ends after "
             "synchronized run(return_xarray=False) completion."
         )
     )
     parser.add_argument("--label", default=None, help="Output subdirectory label under test-reports.")
     parser.add_argument(
+        "--resident-modes",
+        default="host",
+        help="Comma-separated resident-mode variants to run. Supported values: host,device.",
+    )
+    parser.add_argument(
         "--size-labels",
-        default="small,medium,large",
+        default="small",
         help="Comma-separated subset of size labels to run, for example 'small,medium'.",
     )
     parser.add_argument(
@@ -691,9 +768,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated timing segments to record, or 'all'. Supported segments: A-F.",
     )
     parser.add_argument(
+        "--include-triple-limited",
+        action="store_true",
+        help="Include the limited-rotation three-energy CoreShell lane for the selected resident-mode variants.",
+    )
+    parser.add_argument(
         "--include-full-small-check",
         action="store_true",
-        help="Include the expensive full-rotation small CoreShell cupy case.",
+        help="Include the expensive full-rotation small CoreShell case for the selected resident-mode variants.",
     )
     parser.add_argument("--worker-case-path", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--worker-result-path", default=None, help=argparse.SUPPRESS)

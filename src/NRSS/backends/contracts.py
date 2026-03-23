@@ -10,19 +10,43 @@ class BackendOptionError(ValueError):
     """Raised when backend options are invalid for the selected backend."""
 
 
+class ResidentModeError(ValueError):
+    """Raised when resident_mode is invalid for the selected backend."""
+
+
 _BACKEND_ARRAY_CONTRACTS = {
     "cyrsoxs": {
-        "namespace": "numpy",
-        "device": "cpu",
+        "default_resident_mode": "host",
+        "supported_resident_modes": ("host",),
+        "resident_modes": {
+            "host": {
+                "namespace": "numpy",
+                "device": "cpu",
+            },
+        },
+        "runtime_namespace": "numpy",
+        "runtime_device": "cpu",
         "default_dtype": "float32",
         "supported_dtypes": ("float32",),
         "supported_backend_options": ("dtype",),
     },
     "cupy-rsoxs": {
-        "namespace": "cupy",
-        "device": "gpu",
+        "default_resident_mode": "host",
+        "supported_resident_modes": ("host", "device"),
+        "resident_modes": {
+            "host": {
+                "namespace": "numpy",
+                "device": "cpu",
+            },
+            "device": {
+                "namespace": "cupy",
+                "device": "gpu",
+            },
+        },
+        "runtime_namespace": "cupy",
+        "runtime_device": "gpu",
         "default_dtype": "float32",
-        "supported_dtypes": ("float16", "float32"),
+        "supported_dtypes": ("float32",),
         "supported_backend_options": ("dtype",),
     },
 }
@@ -44,6 +68,29 @@ def normalize_dtype_name(dtype: Any) -> str:
         raise BackendOptionError(
             f"Unsupported backend dtype option {dtype!r}."
         ) from exc
+
+
+def normalize_resident_mode(
+    backend_name: str,
+    resident_mode: str | None = None,
+) -> str:
+    spec = _backend_contract_spec(backend_name)
+    if resident_mode is None:
+        return spec["default_resident_mode"]
+
+    normalized = str(resident_mode).strip().lower()
+    aliases = {
+        "cpu": "host",
+        "gpu": "device",
+    }
+    normalized = aliases.get(normalized, normalized)
+
+    if normalized not in spec["supported_resident_modes"]:
+        raise ResidentModeError(
+            f"Unsupported resident_mode {resident_mode!r} for backend {backend_name!r}. "
+            f"Supported resident modes: {', '.join(spec['supported_resident_modes'])}."
+        )
+    return normalized
 
 
 def normalize_backend_options(
@@ -73,9 +120,44 @@ def normalize_backend_options(
 def resolve_backend_array_contract(
     backend_name: str,
     backend_options: Mapping[str, Any] | None = None,
+    resident_mode: str | None = None,
 ) -> dict[str, Any]:
     spec = deepcopy(_backend_contract_spec(backend_name))
     normalized_options = normalize_backend_options(backend_name, backend_options)
-    spec["dtype"] = normalized_options["dtype"]
-    spec["options"] = normalized_options
-    return spec
+    normalized_resident_mode = normalize_resident_mode(
+        backend_name,
+        resident_mode,
+    )
+    resident_spec = spec["resident_modes"][normalized_resident_mode]
+    return {
+        "namespace": resident_spec["namespace"],
+        "device": resident_spec["device"],
+        "resident_mode": normalized_resident_mode,
+        "default_resident_mode": spec["default_resident_mode"],
+        "supported_resident_modes": spec["supported_resident_modes"],
+        "default_dtype": spec["default_dtype"],
+        "supported_dtypes": spec["supported_dtypes"],
+        "supported_backend_options": spec["supported_backend_options"],
+        "dtype": normalized_options["dtype"],
+        "options": normalized_options,
+    }
+
+
+def resolve_backend_runtime_contract(
+    backend_name: str,
+    backend_options: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    spec = deepcopy(_backend_contract_spec(backend_name))
+    normalized_options = normalize_backend_options(backend_name, backend_options)
+    return {
+        "namespace": spec["runtime_namespace"],
+        "device": spec["runtime_device"],
+        "resident_mode": "runtime-compute",
+        "default_resident_mode": spec["default_resident_mode"],
+        "supported_resident_modes": spec["supported_resident_modes"],
+        "default_dtype": spec["default_dtype"],
+        "supported_dtypes": spec["supported_dtypes"],
+        "supported_backend_options": spec["supported_backend_options"],
+        "dtype": normalized_options["dtype"],
+        "options": normalized_options,
+    }

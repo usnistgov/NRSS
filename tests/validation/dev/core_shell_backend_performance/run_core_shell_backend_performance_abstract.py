@@ -61,6 +61,7 @@ class PathSpec:
     key: str
     label: str
     backend: str
+    resident_mode: str | None
     input_policy: str
     ownership_policy: str | None
     field_namespace: str
@@ -88,6 +89,7 @@ class PerformanceCase:
     eangle_rotation: tuple[float, float, float]
     num_angles: int
     backend: str
+    resident_mode: str | None
     input_policy: str
     ownership_policy: str | None
     field_namespace: str
@@ -99,6 +101,7 @@ PATH_SPECS = (
         key="cyrsoxs_numpy",
         label="numpy -> cyrsoxs",
         backend="cyrsoxs",
+        resident_mode=None,
         input_policy="coerce",
         ownership_policy=None,
         field_namespace="numpy",
@@ -108,8 +111,9 @@ PATH_SPECS = (
     ),
     PathSpec(
         key="cupy_coerce_numpy",
-        label="numpy -> cupy-rsoxs (coerce)",
+        label="numpy -> cupy-rsoxs (host/coerce)",
         backend="cupy-rsoxs",
+        resident_mode="host",
         input_policy="coerce",
         ownership_policy=None,
         field_namespace="numpy",
@@ -119,8 +123,9 @@ PATH_SPECS = (
     ),
     PathSpec(
         key="cupy_borrow_cupy",
-        label="cupy -> cupy-rsoxs (borrow)",
+        label="cupy -> cupy-rsoxs (device/borrow)",
         backend="cupy-rsoxs",
+        resident_mode="device",
         input_policy="strict",
         ownership_policy="borrow",
         field_namespace="cupy",
@@ -217,6 +222,7 @@ def _build_speed_cases(size_labels: tuple[str, ...]) -> list[PerformanceCase]:
                         eangle_rotation=angle.eangle_rotation,
                         num_angles=angle.num_angles,
                         backend=path.backend,
+                        resident_mode=path.resident_mode,
                         input_policy=path.input_policy,
                         ownership_policy=path.ownership_policy,
                         field_namespace=path.field_namespace,
@@ -243,6 +249,7 @@ def _build_memory_cases(size_labels: tuple[str, ...]) -> list[PerformanceCase]:
                     eangle_rotation=angle.eangle_rotation,
                     num_angles=angle.num_angles,
                     backend=path.backend,
+                    resident_mode=path.resident_mode,
                     input_policy=path.input_policy,
                     ownership_policy=path.ownership_policy,
                     field_namespace=path.field_namespace,
@@ -412,6 +419,7 @@ def _worker_main(case_path: Path, result_path: Path, awedge_path: Path | None) -
         "eangle_rotation": list(case.eangle_rotation),
         "num_angles": case.num_angles,
         "backend": case.backend,
+        "resident_mode": case.resident_mode,
         "input_policy": case.input_policy,
         "ownership_policy": case.ownership_policy,
         "field_namespace": case.field_namespace,
@@ -430,6 +438,7 @@ def _worker_main(case_path: Path, result_path: Path, awedge_path: Path | None) -
             eangle_rotation=case.eangle_rotation,
             backend=case.backend,
             field_namespace=case.field_namespace,
+            resident_mode=case.resident_mode,
             input_policy=case.input_policy,
             ownership_policy=case.ownership_policy,
             create_cy_object=True,

@@ -13,8 +13,10 @@ from .backends import (
     get_backend_info,
     inspect_array,
     normalize_backend_options,
+    normalize_resident_mode,
     resolve_backend_name,
     resolve_backend_array_contract,
+    resolve_backend_runtime_contract,
     to_python_bool,
 )
 from .backends.cyrsoxs import (
@@ -77,6 +79,10 @@ def _validate_output_policy(policy):
             "Supported policies are 'numpy', 'backend-native', and alias 'backend'."
         )
     return normalized
+
+
+def _validate_resident_mode(policy, backend_name):
+    return normalize_resident_mode(backend_name, policy)
 
 
 def _validate_ownership_policy(policy, backend_name):
@@ -153,6 +159,7 @@ class Morphology:
                  create_cy_object=True,
                  backend=None,
                  backend_options=None,
+                 resident_mode=None,
                  input_policy='coerce',
                  output_policy='numpy',
                  ownership_policy=None):
@@ -163,8 +170,14 @@ class Morphology:
         self._backend = resolve_backend_name(backend)
         self._backend_info = get_backend_info(self._backend)
         self._backend_runtime = get_backend_runtime(self._backend)
+        self._resident_mode = _validate_resident_mode(resident_mode, self._backend)
         self._backend_options = normalize_backend_options(self._backend, backend_options)
         self._backend_array_contract = resolve_backend_array_contract(
+            self._backend,
+            self._backend_options,
+            resident_mode=self._resident_mode,
+        )
+        self._runtime_compute_contract = resolve_backend_runtime_contract(
             self._backend,
             self._backend_options,
         )
@@ -178,6 +191,7 @@ class Morphology:
         self.input_compatibility_report = []
         self.construction_backend_coercion_report = []
         self.last_backend_coercion_report = []
+        self.last_runtime_staging_report = []
         self.inputData = None
         self.OpticalConstants = None
         self.voxelData = None
@@ -242,6 +256,10 @@ class Morphology:
     @property
     def ownership_policy(self):
         return self._ownership_policy
+
+    @property
+    def resident_mode(self):
+        return self._resident_mode
 
     @property
     def backend_timings(self):
@@ -413,7 +431,15 @@ class Morphology:
 
     @property
     def backend_array_contract(self):
+        return self.authoritative_array_contract
+
+    @property
+    def authoritative_array_contract(self):
         return dict(self._backend_array_contract)
+
+    @property
+    def runtime_compute_contract(self):
+        return dict(self._runtime_compute_contract)
 
     @property
     def backend_dtype(self):
@@ -459,6 +485,11 @@ class Morphology:
         self._backend_array_contract = resolve_backend_array_contract(
             self.backend,
             self._backend_options,
+            resident_mode=self.resident_mode,
+        )
+        self._runtime_compute_contract = resolve_backend_runtime_contract(
+            self.backend,
+            self._backend_options,
         )
 
     def _collect_backend_assessment(self):
@@ -472,6 +503,7 @@ class Morphology:
                         field_name=field_name,
                         material_id=material_id,
                         backend_options=self.backend_options,
+                        resident_mode=self.resident_mode,
                     )
                 )
         return reports
@@ -490,13 +522,15 @@ class Morphology:
             if not strict
             else (
                 f"Morphology backend input normalization would require coercion under "
-                f"input_policy='strict' for backend {self.backend!r}."
+                f"input_policy='strict' for backend {self.backend!r} with "
+                f"resident_mode={self.resident_mode!r}."
             )
         )
-        if strict and self.backend == "cupy-rsoxs":
+        if strict:
+            namespace_label = "NumPy" if self._backend_array_contract["namespace"] == "numpy" else "CuPy"
             header += (
-                " Expected direct CuPy inputs to be ZYX-shaped, C-contiguous, float32 arrays "
-                "for each material field."
+                f" Expected {self.resident_mode}-resident {namespace_label} inputs to be "
+                f"ZYX-shaped, C-contiguous, {self.backend_dtype} arrays for each material field."
             )
         details = []
         for plan in plans:
@@ -542,6 +576,7 @@ class Morphology:
                     field_name=field_name,
                     material_id=material_id,
                     backend_options=self.backend_options,
+                    resident_mode=self.resident_mode,
                 )
                 normalized_reports.append(plan)
                 if getattr(mat, field_name) is not None:
@@ -557,6 +592,7 @@ class Morphology:
             field_name=field_name,
             material_id=material_id,
             backend_options=self.backend_options,
+            resident_mode=self.resident_mode,
         )
         self.last_backend_coercion_report.append(plan)
         if value is None:
@@ -594,6 +630,7 @@ class Morphology:
         create_cy_object=False,
         backend=None,
         backend_options=None,
+        resident_mode=None,
         input_policy='coerce',
         output_policy='numpy',
         ownership_policy=None,
@@ -624,6 +661,7 @@ class Morphology:
             create_cy_object=create_cy_object,
             backend=backend,
             backend_options=backend_options,
+            resident_mode=resident_mode,
             input_policy=input_policy,
             output_policy=output_policy,
             ownership_policy=ownership_policy,
@@ -845,6 +883,7 @@ class Morphology:
                     field_name=name,
                     material_id=i,
                     backend_options=self.backend_options,
+                    resident_mode=self.resident_mode,
                 )
                 if not plan.supported:
                     raise AssertionError(plan.reason)
@@ -869,6 +908,7 @@ class Morphology:
                 field_name='Vfrac',
                 material_id=i,
                 backend_options=self.backend_options,
+                resident_mode=self.resident_mode,
             )
             coerced_vfracs.append(coerce_array_for_backend(mat.Vfrac, vfrac_plan))
 

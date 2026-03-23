@@ -36,13 +36,20 @@ WRITE_VALIDATION_PLOTS = os.environ.get("NRSS_WRITE_VALIDATION_PLOTS", "").strip
 
 
 @lru_cache(maxsize=8)
-def _baseline_awedge(backend: str, input_policy: str, ownership_policy: str | None, field_namespace: str):
+def _baseline_awedge(
+    backend: str,
+    resident_mode: str | None,
+    input_policy: str,
+    ownership_policy: str | None,
+    field_namespace: str,
+):
     if backend == "cyrsoxs":
         scattering = run_core_shell_pybind(scenario="baseline")
     else:
         scattering, _ = run_core_shell_backend(
             scenario="baseline",
             backend=backend,
+            resident_mode=resident_mode,
             input_policy=input_policy,
             ownership_policy=ownership_policy,
             field_namespace=field_namespace,
@@ -72,6 +79,7 @@ def test_core_shell_experimental_reference_pybind(nrss_backend):
 
     awedge = _baseline_awedge(
         nrss_backend,
+        None,
         "coerce",
         None,
         "numpy",
@@ -111,6 +119,7 @@ def test_core_shell_sim_regression_pybind(nrss_backend):
 
     awedge = _baseline_awedge(
         nrss_backend,
+        None,
         "coerce",
         None,
         "numpy",
@@ -154,6 +163,7 @@ def test_core_shell_sim_regression_cupy_borrow_strict(nrss_backend):
 
     awedge = _baseline_awedge(
         "cupy-rsoxs",
+        "device",
         "strict",
         "borrow",
         "cupy",

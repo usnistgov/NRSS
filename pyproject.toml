@@ -50,6 +50,7 @@ version_scheme = "no-guess-dev"
 local_scheme = "no-local-version"
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = [
     "smoke: fast smoke tests for environment and basic runtime sanity",
     "cpu: CPU-safe smoke tests for validator, I/O, and basic contract behavior",

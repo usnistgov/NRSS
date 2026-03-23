@@ -271,10 +271,12 @@ Current prep implementation status:
   - `dtype` for `cyrsoxs`
   - `dtype` for `cupy-rsoxs`
 - current contract table:
-  - `cyrsoxs`: namespace `numpy`, device `cpu`, default dtype `float32`,
+  - `cyrsoxs`: authoritative/runtime namespace `numpy`, device `cpu`,
+    default dtype `float32`, supported dtypes `float32`
+  - `cupy-rsoxs`: default authoritative namespace `numpy` in
+    `resident_mode='host'`, runtime namespace `cupy`, optional authoritative
+    namespace `cupy` in `resident_mode='device'`, default dtype `float32`,
     supported dtypes `float32`
-  - `cupy-rsoxs`: namespace `cupy`, device `gpu`, default dtype `float32`,
-    supported dtypes `float16`, `float32`
 
 These contracts are prep scaffolding, not a claim that future backends should
 share the same option set. The important design point is that backend-specific
@@ -284,7 +286,8 @@ of being spread implicitly through `Morphology`.
 Implementation-phase direction now locked:
 
 - phase-1 `cupy-rsoxs` parity uses `float32` morphology/runtime normalization by
-  default; `float16` is deferred until after parity.
+  default; `float16` is deferred until after parity and is currently disabled
+  in the public backend option contract.
 - add an explicit `ownership_policy` surface in v1 with `borrow` and `copy`
   modes.
 - `cupy-rsoxs` development/parity work should use `ownership_policy='borrow'`
@@ -692,11 +695,13 @@ Planning decisions additionally locked after the prep milestone:
   - host-resident staged mode is the default guidance for public workflows
   - device-resident direct mode is an opt-in path for already-CuPy morphology
     fields
+- the implemented public API name for this control is `resident_mode`
 - resident mode is a separate concept from `input_policy` and
   `ownership_policy`; these should not be conflated in docs or benchmarks
 - parity output remains xarray-compatible; backend-native/on-device output is a
   later extension
-- `float16` is deferred until after parity
+- `float16` is deferred until after parity and is currently disabled in the
+  backend option contract
 - future `cupy-rsoxs` runtime state should be per-morphology/per-session rather
   than a singleton backend adapter
 
@@ -721,9 +726,23 @@ Planning decisions additionally locked after the prep milestone:
     `cupy-rsoxs` via CUDA events, and Segment `G` is deferred
   - when timing is not enabled, `backend_timings` stays empty and the timing
     event path is skipped
-- the current contract-clean CuPy benchmark should not be treated as a true
-  end-to-end GPU-native morphology-generation benchmark because fields were
+- the default optimization harness now targets the common host-resident public
+  workflow first:
+  - `resident_mode='host'`,
+  - single energy,
+  - `EAngleRotation=[0, 0, 0]`,
+  - NumPy authoritative fields generated directly in contract shape/dtype
+- the opt-in device-resident benchmark should not be treated as a true
+  end-to-end GPU-native morphology-generation benchmark because fields are
   still created in NumPy before preconversion to CuPy
+- in that opt-in device-resident lane, the harness synchronizes the default
+  stream before starting the timer so upstream CuPy preparation is excluded
+- the limited-rotation triple-energy checkpoint remains available as an opt-in
+  lane for either resident-mode variant, but it is not part of the default
+  optimization loop
+- in the default host-resident lane, host-to-device staging is included in the
+  primary wall-clock metric but is not yet isolated as a separate named timing
+  segment inside the current `A-F` breakdown
 - current optimization tuning should default to single-energy lanes; full-energy
   studies are legacy/historical comparison artifacts or milestone confirmation
 
@@ -841,9 +860,8 @@ Remaining intentionally deferred or unresolved items:
 - serialization and write helpers remain effectively NumPy/CyRSoXS-oriented,
   which is acceptable for prep but will need review once a non-CyRSoXS runtime
   starts emitting backend-native arrays
-- resident-mode control is now an official planning direction, but the final
-  public API surface for choosing host-resident vs device-resident behavior is
-  still open
+- resident-mode control now ships as the public `resident_mode` API surface for
+  choosing host-resident vs device-resident authoritative morphology behavior
 - package/dependency policy for CuPy is improved but not perfectly expressible
   in standard metadata:
   - the default conda env now pins `cupy-cuda12x` in `environment.yml`

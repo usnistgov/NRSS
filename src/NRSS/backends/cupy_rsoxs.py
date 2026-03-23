@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from .arrays import assess_array_for_backend_runtime, coerce_array_for_backend
 from .registry import BackendUnavailableError
 from .runtime import BackendRuntime
 
@@ -21,6 +22,16 @@ class _RecordedEventRange:
     segment: str
     start: Any
     stop: Any
+
+
+@dataclass(frozen=True)
+class _RuntimeMaterialView:
+    materialID: int
+    opt_constants: dict[float, list[float]]
+    Vfrac: Any
+    S: Any
+    theta: Any
+    psi: Any
 
 
 class _NullSegmentRecorder:
@@ -147,21 +158,30 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         morphology._backend_timings = {}
 
         energies = tuple(float(energy) for energy in morphology.Energies)
+        runtime_materials = self._runtime_material_views(morphology)
         projections = []
-        window = recorder.measure("C", lambda: self._window_tensor(morphology, cp))
+        window = None
+        try:
+            window = recorder.measure("C", lambda: self._window_tensor(morphology, cp))
 
-        for energy in energies:
-            projection = self._run_single_energy(
-                morphology=morphology,
-                energy=energy,
-                cp=cp,
-                ndimage=ndimage,
-                window=window,
-                recorder=recorder,
-            )
-            projections.append(projection)
+            for energy in energies:
+                projection = self._run_single_energy(
+                    morphology=morphology,
+                    runtime_materials=runtime_materials,
+                    energy=energy,
+                    cp=cp,
+                    ndimage=ndimage,
+                    window=window,
+                    recorder=recorder,
+                )
+                projections.append(projection)
 
-        result_data = recorder.measure("F", lambda: cp.stack(projections, axis=0))
+            result_data = recorder.measure("F", lambda: cp.stack(projections, axis=0))
+        finally:
+            projections.clear()
+            if window is not None:
+                del window
+            del runtime_materials
         result = CupyScatteringResult(
             data=result_data,
             energies=energies,
@@ -251,9 +271,43 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         wx = cp.asarray(np.hanning(x), dtype=cp.float32)[None, None, :]
         return wz * wy * wx
 
-    def _run_single_energy(self, morphology, energy, cp, ndimage, window, recorder):
+    def _runtime_material_views(self, morphology):
+        staging_reports = []
+        runtime_materials = []
+        for material_id, material in morphology.materials.items():
+            staged_fields = {}
+            for field_name in ("Vfrac", "S", "theta", "psi"):
+                value = getattr(material, field_name)
+                plan = assess_array_for_backend_runtime(
+                    value,
+                    backend_name=self.name,
+                    field_name=field_name,
+                    material_id=material_id,
+                    backend_options=morphology.backend_options,
+                )
+                staging_reports.append(plan)
+                staged_fields[field_name] = coerce_array_for_backend(value, plan)
+
+            runtime_materials.append(
+                _RuntimeMaterialView(
+                    materialID=material_id,
+                    opt_constants=material.opt_constants,
+                    Vfrac=staged_fields["Vfrac"],
+                    S=staged_fields["S"],
+                    theta=staged_fields["theta"],
+                    psi=staged_fields["psi"],
+                )
+            )
+
+        morphology.last_runtime_staging_report = staging_reports
+        return tuple(runtime_materials)
+
+    def _run_single_energy(self, morphology, runtime_materials, energy, cp, ndimage, window, recorder):
         num_angles = self._num_angles(morphology)
-        nt = recorder.measure("B", lambda: self._compute_nt_components(morphology, energy, cp))
+        nt = recorder.measure(
+            "B",
+            lambda: self._compute_nt_components(runtime_materials, energy, cp),
+        )
         fft_nt = recorder.measure("C", lambda: self._compute_fft_nt_components(nt=nt, cp=cp, window=window))
         proj_x, proj_y, proj_xy = recorder.measure(
             "D",
@@ -368,11 +422,11 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         nper = np.complex64(complex(1.0 - float(d_perp), float(b_perp)))
         return npar, nper
 
-    def _compute_nt_components(self, morphology, energy, cp):
-        shape = tuple(int(v) for v in morphology.NumZYX)
+    def _compute_nt_components(self, runtime_materials, energy, cp):
+        shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
         nt = cp.zeros((5, *shape), dtype=cp.complex64)
 
-        for material in morphology.materials.values():
+        for material in runtime_materials:
             npar, nper = self._material_optics(material, energy)
             nsum_sq = np.complex64((npar + 2.0 * nper) ** 2)
             npar_sq = np.complex64(npar * npar)
@@ -536,7 +590,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         proj_xy = proj_xy - proj_x - proj_y
         return proj_x, proj_y, proj_xy
 
-    def _project_from_direct_polarization(self, morphology, energy, cp, ndimage, window, num_angles):
+    def _project_from_direct_polarization(self, morphology, runtime_materials, energy, cp, ndimage, window, num_angles):
         projection_average = None
         valid_counts = None
         use_rot_mask = bool(morphology.RotMask)
@@ -544,7 +598,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             self._angles_radians(morphology),
             self._rotation_transforms(morphology, cp),
         ):
-            p_x, p_y, p_z = self._compute_direct_polarization(morphology, energy, angle, cp)
+            p_x, p_y, p_z = self._compute_direct_polarization(runtime_materials, energy, angle, cp)
             projection = self._projection_from_polarization(
                 morphology=morphology,
                 energy=energy,
@@ -582,15 +636,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         p_z = (nt[2] * mx + nt[4] * my) * self._one_by_four_pi
         return p_x, p_y, p_z
 
-    def _compute_direct_polarization(self, morphology, energy, angle, cp):
-        shape = tuple(int(v) for v in morphology.NumZYX)
+    def _compute_direct_polarization(self, runtime_materials, energy, angle, cp):
+        shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
         p_x = cp.zeros(shape, dtype=cp.complex64)
         p_y = cp.zeros(shape, dtype=cp.complex64)
         p_z = cp.zeros(shape, dtype=cp.complex64)
         mx = np.float32(math.cos(angle))
         my = np.float32(math.sin(angle))
 
-        for material in morphology.materials.values():
+        for material in runtime_materials:
             npar, nper = self._material_optics(material, energy)
             nsum_sq = np.complex64((npar + 2.0 * nper) ** 2)
             npar_sq = np.complex64(npar * npar)

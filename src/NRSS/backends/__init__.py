@@ -1,6 +1,7 @@
 from .arrays import (
     ArrayPlan,
     assess_array_for_backend,
+    assess_array_for_backend_runtime,
     coerce_array_for_backend,
     get_namespace_module,
     inspect_array,
@@ -8,9 +9,12 @@ from .arrays import (
 )
 from .contracts import (
     BackendOptionError,
+    ResidentModeError,
     normalize_backend_options,
     normalize_dtype_name,
+    normalize_resident_mode,
     resolve_backend_array_contract,
+    resolve_backend_runtime_contract,
 )
 from .registry import (
     BackendInfo,
@@ -28,10 +32,12 @@ __all__ = [
     "ArrayPlan",
     "BackendInfo",
     "BackendOptionError",
+    "ResidentModeError",
     "BackendSelectionError",
     "BackendUnavailableError",
     "UnknownBackendError",
     "assess_array_for_backend",
+    "assess_array_for_backend_runtime",
     "available_backends",
     "coerce_array_for_backend",
     "format_backend_availability",
@@ -41,7 +47,9 @@ __all__ = [
     "known_backends",
     "normalize_backend_options",
     "normalize_dtype_name",
+    "normalize_resident_mode",
     "resolve_backend_array_contract",
+    "resolve_backend_runtime_contract",
     "resolve_backend_name",
     "to_python_bool",
 ]

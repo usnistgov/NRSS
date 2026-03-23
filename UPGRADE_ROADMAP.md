@@ -625,9 +625,15 @@ recover:
    - no new `cyrsoxs` timing lanes should be added to the default optimization
      loop.
 6. Current development artifacts that should be treated as the authoritative
-   resumable timing record are:
+   resumable timing record root are:
    - `test-reports/cupy-rsoxs-optimization-dev/`
-   - especially `test-reports/cupy-rsoxs-optimization-dev/verify_cli_small_postcleanup/summary.json`
+   - the current harness writes fresh per-run `summary.json` files under that
+     root using host/device resident-mode labels such as
+     `core_shell_small_single_no_rotation_host`
+   - historical snapshots such as
+     `test-reports/cupy-rsoxs-optimization-dev/verify_cli_small_postcleanup/summary.json`
+     remain useful for context, but they predate the resident-mode/default-lane
+     refactor and should not be treated as the naming or workflow authority
 7. Maintained parity and physics guardrails still live in the official test
    suite. The dev harnesses above are for optimization and comparison work, not
    for replacing the maintained parity suite.
@@ -680,10 +686,19 @@ recover:
 2. Historical full-energy `cyrsoxs` comparison reports remain useful as context
    for what was explored, but they are no longer the authoritative timing basis
    for resumed optimization work.
-3. The first authoritative post-cleanup timing snapshot is:
+3. The first post-cleanup timing snapshot remains:
    - `test-reports/cupy-rsoxs-optimization-dev/verify_cli_small_postcleanup/summary.json`
-4. That snapshot confirms the repaired timing boundary and current segment
-   profile on the accepted backend state:
+4. That snapshot is still useful as historical evidence that the repaired
+   timing boundary was working, but it predates the current resident-mode
+   strategy and current case naming.
+   - it uses older labels such as
+     `core_shell_small_single_no_rotation_cupy_borrow`
+   - the current harness now emits resident-mode-explicit labels such as
+     `core_shell_small_single_no_rotation_host`,
+     `core_shell_small_single_no_rotation_device`,
+     and opt-in limited-rotation cases for either variant
+5. Historical timing numbers from that old post-cleanup snapshot are still
+   worth keeping as rough context for the then-accepted device-resident lane:
    - `core_shell_small_single_no_rotation_cupy_borrow`
      - `primary_seconds`: about `0.2363s`,
      - Segment `A`: about `0.0028s`,
@@ -691,28 +706,32 @@ recover:
      - Segment `C`: about `0.0122s`,
      - Segment `D`: about `0.0694s`,
      - Segment `E`: about `0.0034s`,
-     - Segment `F`: about `0.00047s`.
-5. The same snapshot also provides a post-cleanup limited-rotation checkpoint:
+     - Segment `F`: about `0.00047s`
    - `core_shell_small_triple_limited_rotation_cupy_borrow`
      - `primary_seconds`: about `0.4480s`,
      - Segment `B`: about `0.1936s`,
      - Segment `D`: about `0.2001s`,
-     - Segment `E`: about `0.0153s`.
+     - Segment `E`: about `0.0153s`
 6. Current interpretation from the repaired timing apparatus:
    - on the primary small single-energy lane, current latency is dominated by
      Segments `B` and `D`,
    - Segment `C` is visible but materially smaller,
    - Segments `A`, `E`, and `F` are currently minor contributors in that lane.
-7. Important benchmark caveat:
-   - the current `cupy -> cupy-rsoxs (borrow/strict)` path is contract-clean at
+7. Important benchmark caveats for the harness going forward:
+   - the default host-resident lane is meant to resemble the most common public
+     workflow and therefore includes host-resident morphology handling in the
+     primary wall-clock metric,
+   - in host mode, host-to-device staging happens inside `run()` and is counted
+     in total wall time,
+   - that staging is not yet isolated as its own named timing segment in the
+     current `A-F` breakdown.
+8. Additional caveat for the opt-in device-resident lane:
+   - the `cupy -> cupy-rsoxs (device/borrow/strict)` path is contract-clean at
      the `Morphology` boundary,
    - but it is not a true end-to-end GPU-native morphology-generation
      benchmark,
    - the current CoreShell builder still creates fields in NumPy and then
      preconverts them to CuPy before `Morphology(...)` timing starts.
-8. Consequence of that caveat:
-   - current timings isolate backend speed, not morphology generation speed,
-   - this is intentional for the present optimization campaign.
 9. Maintained parity remains a post-optimization check through the test suite
    rather than through a `cyrsoxs` timing harness.
 
@@ -742,16 +761,18 @@ recover:
      contract,
    - `ownership_policy='borrow'` means incoming material objects are not copied,
    - none of those concepts alone imply end-to-end zero-copy execution.
-5. Public API naming for resident-mode control does not need to be finalized in
-   this document, but the conceptual split and the CPU-default policy are now
-   considered official guidance.
+5. The implemented public API name for resident-mode control is
+   `resident_mode`.
+   - `resident_mode='host'` keeps authoritative morphology fields on CPU,
+   - `resident_mode='device'` keeps authoritative morphology fields on GPU
+     when the backend supports that mode.
 
 ### 18.5 Optimization campaign strategy going forward
 
 1. The optimization goal is to make `cupy-rsoxs` materially faster while
    preserving physics parity through the maintained test suite.
 2. The default inner-loop timing command is now:
-   - `/home/deand/mambaforge/envs/nrss-dev/bin/python tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py --label <label> --size-labels small --timing-segments all`
+   - `/home/deand/mambaforge/envs/nrss-dev/bin/python tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py --label <label> --size-labels small --resident-modes host --timing-segments all`
 3. Future optimization campaigns should focus on one segment at a time using
    the segmentation defined in Section 18.2 rather than trying to optimize the
    whole backend at once.
@@ -762,11 +783,18 @@ recover:
      rather than exposing a fundamentally different algorithmic path.
 5. Recommended default tuning ladder:
    - primary latency lane: `small`, single energy, `EAngleRotation=[0, 0, 0]`,
+     `resident_mode='host'`, with morphology fields generated directly as the
+     host-resident authoritative NumPy contract before timing starts,
    - secondary latency lane: `medium`, single energy, `EAngleRotation=[0, 0, 0]`,
-   - rotation-focused lane: `medium`, single energy, limited or dense angle
-     sweep to isolate rotation/accumulation cost,
-   - memory / throughput guardrail lane: `large`, single energy, dense angle
-     sweep when needed.
+     `resident_mode='host'`, with the same direct NumPy contract generation,
+   - device-regression lane: selected `small` or `medium`, single energy,
+     `EAngleRotation=[0, 0, 0]`, `resident_mode='device'`, with morphology
+     fields preconverted to the CuPy contract and the default stream
+     synchronized before the timer starts,
+   - rotation-focused lane: opt-in `--include-triple-limited` on either or
+     both resident-mode variants,
+   - memory / throughput guardrail lane: `large`, single energy, selected
+     resident mode, dense angle sweep when needed.
 6. When chasing a hotspot, narrow `--timing-segments` to the relevant subset
    instead of recording everything on every run.
    - current evidence makes Segments `B` and `D` the first sensible focal
@@ -775,16 +803,18 @@ recover:
      stages.
 7. Do not add `cyrsoxs` timing lanes to the default optimization harness.
    `cyrsoxs` timing is not part of the current optimization loop.
-8. Use `--include-full-small-check` only as an occasional expensive checkpoint
+8. Use `--include-triple-limited` only when rotation-sensitive behavior needs a
+   checkpoint outside the default no-rotation loop.
+9. Use `--include-full-small-check` only as an occasional expensive checkpoint
    for the full rotation path.
-9. If a single-energy lane is too fast or too noisy to rank consistently,
+10. If a single-energy lane is too fast or too noisy to rank consistently,
    repeat it enough times to stabilize the comparison rather than escalating
    directly to full-energy runs.
-10. Full-energy runs should be reserved for:
+11. Full-energy runs should be reserved for:
     - milestone confirmation after accepted optimization changes,
     - final comparison graphics if they are later needed,
     - and maintained parity / correctness rechecks.
-11. Future optimization guidance should be treated as open-ended. Many more
+12. Future optimization guidance should be treated as open-ended. Many more
    opportunities likely exist beyond the ones already enumerated or tried. The
    document should not be read as an exhaustive list of remaining ideas.
 
@@ -869,9 +899,13 @@ recover:
    - use `tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py`
      as the default inner-loop harness,
    - begin with the primary lane:
-     `/home/deand/mambaforge/envs/nrss-dev/bin/python tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py --label <label> --size-labels small --timing-segments all`,
+     `/home/deand/mambaforge/envs/nrss-dev/bin/python tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py --label <label> --size-labels small --resident-modes host --timing-segments all`,
    - narrow `--timing-segments` when focusing on a specific segment,
    - use the single-energy benchmark ladder for inner-loop tuning,
+   - recheck `--resident-modes device` periodically as a regression lane for
+     direct-CuPy workflows,
+   - add `--include-triple-limited` only when rotation-sensitive behavior needs
+     confirmation,
    - rerun maintained parity checks after promising optimization changes,
    - treat the legacy full-energy backend-comparison harness as optional
      historical context rather than a required step in the default loop.
