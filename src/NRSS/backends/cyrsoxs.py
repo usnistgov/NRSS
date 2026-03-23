@@ -71,6 +71,7 @@ class CyrsoxsBackendRuntime(BackendRuntime):
             )
 
         morphology._simulated = True
+        morphology._lock_results()
         if return_xarray:
             return morphology.scattering_to_xarray(
                 return_xarray=return_xarray,
@@ -94,3 +95,9 @@ class CyrsoxsBackendRuntime(BackendRuntime):
         assert voxel_check, 'CyRSoXS object voxelData validation has failed'
         if not quiet:
             print('All objects have been validated successfully. You can run your simulation')
+
+    def release(self, morphology) -> None:
+        morphology.scatteringPattern = None
+        morphology.voxelData = None
+        morphology.OpticalConstants = None
+        morphology.inputData = None

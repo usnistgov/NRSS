@@ -252,6 +252,9 @@ class Morphology:
         self._backend_result = None
         self.scatteringPattern = None
         self._simulated = False
+        self._backend_timings = {}
+        if hasattr(self, "scattering_data"):
+            self.scattering_data = None
 
     @property
     def ownership_policy(self):
@@ -275,8 +278,12 @@ class Morphology:
         self._backend_timings = {}
 
     def release_runtime(self):
-        if hasattr(self._backend_runtime, "release"):
-            self._backend_runtime.release(self)
+        try:
+            if hasattr(self._backend_runtime, "release"):
+                self._backend_runtime.release(self)
+        finally:
+            self._backend_runtime_state.clear()
+            self._reset_result_state()
 
     @property
     def CaseType(self):

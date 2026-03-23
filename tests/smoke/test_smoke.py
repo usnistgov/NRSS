@@ -729,6 +729,95 @@ def test_cupy_private_segment_timing_is_opt_in_and_subsettable():
         _release_cupy_memory()
 
 
+@pytest.mark.gpu
+def test_cupy_release_runtime_unlocks_mutation_and_allows_rerun():
+    """Ensure release_runtime clears cupy-rsoxs transient state and permits rerun after mutation."""
+    cp = _import_cupy_required()
+    shape = (2, 4, 4)
+    energies = [285.0]
+    zeros = np.zeros(shape, dtype=np.float32)
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=np.ones(shape, dtype=np.float32),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="vacuum_1",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=zeros.copy(),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="vacuum_2",
+    )
+    config = {
+        "CaseType": 0,
+        "MorphologyType": 0,
+        "Energies": energies,
+        "EAngleRotation": [0.0, 0.0, 0.0],
+        "RotMask": 0,
+        "WindowingType": 0,
+        "AlgorithmType": 0,
+        "ReferenceFrame": 1,
+        "EwaldsInterpolation": 1,
+    }
+
+    morph = None
+    try:
+        morph = Morphology(
+            2,
+            materials={1: mat1, 2: mat2},
+            PhysSize=5.0,
+            config=config,
+            backend="cupy-rsoxs",
+            input_policy="strict",
+            create_cy_object=True,
+        )
+        result = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.Stream.null.synchronize()
+
+        assert list(result.to_backend_array().shape) == [1, 4, 4]
+        assert morph.simulated
+        assert morph._results_locked
+
+        with pytest.raises(RuntimeError, match="Cannot mutate Morphology\\.PhysSize"):
+            morph.PhysSize = 6.0
+        with pytest.raises(RuntimeError, match="Cannot mutate Material\\.S"):
+            morph.materials[1].S = np.full(shape, 0.25, dtype=np.float32)
+
+        morph.release_runtime()
+
+        assert not morph.simulated
+        assert not morph._results_locked
+        assert morph.scatteringPattern is None
+        assert morph._backend_result is None
+        assert morph.backend_timings == {}
+
+        morph.PhysSize = 6.0
+        morph.materials[1].S = np.full(shape, 0.25, dtype=np.float32)
+
+        rerun = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.Stream.null.synchronize()
+
+        assert list(rerun.to_backend_array().shape) == [1, 4, 4]
+        assert morph.simulated
+        assert morph._results_locked
+    finally:
+        if morph is not None:
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
 @pytest.mark.backend_agnostic_contract
 def test_tiny_deterministic_white_noise_kernel():
     """Check deterministic numeric fingerprint for a tiny white-noise smoothing kernel."""
@@ -847,6 +936,99 @@ def test_pybind_morphology_object_lifecycle_smoke():
     assert morph.inputData.validate()
     assert morph.OpticalConstants.validate()
     assert morph.voxelData.validate()
+
+
+@pytest.mark.gpu
+@pytest.mark.cyrsoxs_only
+def test_cyrsoxs_release_runtime_unlocks_mutation_and_rebuilds_pybind_objects():
+    """Ensure release_runtime clears pybind runtime state and permits clean reruns after mutation."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for pybind lifecycle reset smoke test.")
+
+    energies = [285.0]
+    shape = (1, 8, 8)
+    zeros = np.zeros(shape, dtype=np.float32)
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=np.ones(shape, dtype=np.float32),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [1e-4, 2e-4, 1e-4, 2e-4]},
+        name="poly",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=zeros.copy(),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="vacuum",
+    )
+    config = {
+        "CaseType": 0,
+        "MorphologyType": 0,
+        "Energies": energies,
+        "EAngleRotation": [0.0, 0.0, 0.0],
+        "RotMask": 1,
+        "WindowingType": 0,
+        "AlgorithmType": 0,
+        "ReferenceFrame": 1,
+        "EwaldsInterpolation": 1,
+    }
+
+    morph = Morphology(
+        2,
+        materials={1: mat1, 2: mat2},
+        PhysSize=5.0,
+        config=config,
+        backend="cyrsoxs",
+        create_cy_object=True,
+    )
+    try:
+        scattering = morph.run(stdout=False, stderr=False, return_xarray=True)
+
+        assert scattering.shape == (1, 8, 8)
+        assert morph.simulated
+        assert morph._results_locked
+        assert morph.scatteringPattern is not None
+        assert morph.inputData is not None
+        assert morph.OpticalConstants is not None
+        assert morph.voxelData is not None
+
+        with pytest.raises(RuntimeError, match="Cannot mutate Morphology\\.PhysSize"):
+            morph.PhysSize = 6.0
+        with pytest.raises(RuntimeError, match="Cannot mutate Material\\.S"):
+            morph.materials[1].S = np.full(shape, 0.25, dtype=np.float32)
+
+        morph.release_runtime()
+
+        assert not morph.simulated
+        assert not morph._results_locked
+        assert morph.scatteringPattern is None
+        assert morph.inputData is None
+        assert morph.OpticalConstants is None
+        assert morph.voxelData is None
+        assert morph.backend_timings == {}
+
+        morph.PhysSize = 6.0
+        morph.materials[1].S = np.full(shape, 0.25, dtype=np.float32)
+
+        rerun = morph.run(stdout=False, stderr=False, return_xarray=True)
+
+        assert rerun.shape == (1, 8, 8)
+        assert morph.simulated
+        assert morph._results_locked
+        assert morph.scatteringPattern is not None
+        assert morph.inputData is not None
+        assert morph.OpticalConstants is not None
+        assert morph.voxelData is not None
+    finally:
+        morph.release_runtime()
 
 
 @pytest.mark.cyrsoxs_only
