@@ -688,6 +688,12 @@ Planning decisions additionally locked after the prep milestone:
   both algorithm paths are supported
 - `ownership_policy` should be exposed in v1 with `borrow` and `copy`, and
   `cupy-rsoxs` parity work should use `borrow`
+- `cupy-rsoxs` should support controllable resident modes:
+  - host-resident staged mode is the default guidance for public workflows
+  - device-resident direct mode is an opt-in path for already-CuPy morphology
+    fields
+- resident mode is a separate concept from `input_policy` and
+  `ownership_policy`; these should not be conflated in docs or benchmarks
 - parity output remains xarray-compatible; backend-native/on-device output is a
   later extension
 - `float16` is deferred until after parity
@@ -704,6 +710,14 @@ Planning decisions additionally locked after the prep milestone:
   - a NumPy-input contract case using `input_policy='coerce'`
   - a CuPy-native borrowed case using `ownership_policy='borrow'` and
     `input_policy='strict'`
+- future optimization timing should be measured from immediately before
+  `Morphology(...)` construction to synchronized `run(return_xarray=False)`
+  completion, excluding upstream field generation and export
+- the current contract-clean CuPy benchmark should not be treated as a true
+  end-to-end GPU-native morphology-generation benchmark because fields were
+  still created in NumPy before preconversion to CuPy
+- future optimization tuning should default to single-energy lanes; full-energy
+  studies are for milestone confirmation and comparison artifacts
 
 - Stage 4: complete for the current test suite routing scope
   - `tests/conftest.py` now supports `--nrss-backend` and `NRSS_BACKEND`
@@ -803,16 +817,17 @@ Important note:
 
 Remaining intentionally deferred or unresolved items:
 
-- `cupy-rsoxs` compute/runtime implementation is still not started in this prep
-  milestone
-- the runtime adapter seam now exists, but only the `cyrsoxs` adapter is
-  implemented so far
-- no `src/NRSS/backends/cupy_rsoxs.py` runtime module or stub exists yet
+- `cupy-rsoxs` compute/runtime implementation now exists; the current open work
+  is measurement cleanup, resident-mode refinement, and further optimization.
+  See `UPGRADE_ROADMAP.md` for the current detailed state.
 - backend-native result/output policy is still scaffolding only; current run
-  behavior remains numpy/xarray-oriented through the `cyrsoxs` path
+  behavior remains xarray/NumPy-oriented for parity and comparison workflows
 - serialization and write helpers remain effectively NumPy/CyRSoXS-oriented,
   which is acceptable for prep but will need review once a non-CyRSoXS runtime
   starts emitting backend-native arrays
+- resident-mode control is now an official planning direction, but the final
+  public API surface for choosing host-resident vs device-resident behavior is
+  still open
 - package/dependency policy for CuPy is improved but not perfectly expressible
   in standard metadata:
   - the default conda env now pins `cupy-cuda12x` in `environment.yml`

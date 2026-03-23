@@ -447,9 +447,22 @@ Phase-1 parity lock-in:
 ## 12. Runtime Observability and Safety Rails
 
 1. Log explicit host<->device transfers at NRSS-controlled boundaries.
-2. Add strict mode warnings for policy-driven conversions.
-3. Record per-stage timings and peak memory for benchmark/parity runs.
-4. Best-effort only for third-party implicit copies; complete interception may not be possible.
+2. Add strict mode warnings for policy-driven conversions and make resident-mode
+   assumptions visible in dev diagnostics.
+3. Define the primary optimization wall metric as:
+   - start immediately before `Morphology(...)` construction, after upstream
+     field arrays already exist,
+   - end immediately after synchronized `run(return_xarray=False)` completion.
+4. The primary optimization wall metric must exclude:
+   - morph-field generation before object creation,
+   - result export such as `to_xarray()`,
+   - downstream A-wedge generation, plotting, or analysis.
+5. If upstream arrays are already on GPU, force a device synchronize
+   immediately before the start timestamp so unfinished upstream GPU work is not
+   counted inside morphology timing.
+6. Record per-stage timings and peak memory for benchmark/parity runs.
+7. Best-effort only for third-party implicit copies; complete interception may
+   not be possible.
 
 Additional phase-1 requirements:
 
@@ -457,15 +470,27 @@ Additional phase-1 requirements:
 2. Memory observability should cover both:
    - post-run cleanup behavior,
    - peak and per-stage resident usage during compute, especially around polarization, FFT, and Ewald/result stages.
-3. The parity implementation should prefer structural memory control first:
+3. Stage-level timing and memory work should be organized around the following
+   serial optimization segments:
+   - Segment A: `Morphology` construction, contract normalization, and data staging,
+   - Segment B: n-field / tensor-character assembly,
+   - Segment C: FFT, reorder, scratch reuse, and plan behavior,
+   - Segment D: Ewald / scatter / projection math,
+   - Segment E: rotation and angle accumulation,
+   - Segment F: result-buffer assembly and retention,
+   - Segment G: export and host conversion as a separate non-primary metric.
+4. The parity implementation should prefer structural memory control first:
    - reuse scratch buffers,
    - delete/release intermediates as soon as they are dead,
    - only use allocator/pool trimming as an explicit lifecycle action, not as a hot-path substitute for sound ownership.
-4. For large morphologies, phase-1 behavior should follow current CyRSoXS
+5. When interpreting peak GPU usage, treat resident morphology fields and
+   live compute tensors as distinct from allocator/pool retention. Device-side
+   residency can be an intentional policy choice rather than an allocator bug.
+6. For large morphologies, phase-1 behavior should follow current CyRSoXS
    policy first; large-box-specific chunking or alternate projection strategies
    are optimization-stage follow-up work rather than parity-stage policy
    changes.
-5. Optical constants may remain host-oriented in the public API for parity, but
+7. Optical constants may remain host-oriented in the public API for parity, but
    the backend should materialize the small per-energy tensors onto device when
    needed for device-side math.
 
@@ -528,260 +553,284 @@ The following are now considered locked unless later planning explicitly reopens
 4. Phase-1 parity is single-GPU only.
 5. Start with literal rotation and angle-accumulation semantics for parity; any leaner/faster alternatives are optimization-track follow-ups only.
 6. Low-memory path may be implemented first, but parity is not declared complete until both algorithm paths are supported.
-7. Parity output contract is xarray-compatible and NumPy/PyHyperScattering-friendly.
-8. Backend-native/on-device result access is deferred until after parity, but the result abstraction should preserve that path.
-9. `float16` is deferred until after parity; parity-sensitive compute remains `float32/complex64`.
-10. Runtime instrumentation for timing/memory is desirable in development but must be fully disableable.
-11. Large-box behavior should initially mirror current CyRSoXS policy during parity.
-12. Phase-1 should prefer freezing morphology mutation after result creation until an explicit invalidation contract exists.
-13. The mutation freeze should begin at successful `run()` completion.
-14. Public optical constants may remain host-oriented for parity; backend staging to CuPy happens when math requires it.
-15. Preferred direct-CuPy morphology contract for parity is ZYX-shaped, C-contiguous, `float32` arrays for each material field.
-16. Initial `cupy-rsoxs` parity validation should include both:
+7. `cupy-rsoxs` should expose controllable resident modes.
+8. Host-resident staged mode is the default guidance for public workflows.
+9. Device-resident direct mode is an opt-in path for already-CuPy morphology
+   fields and is expected to use more GPU memory.
+10. Resident mode, `input_policy`, and `ownership_policy` are distinct concepts
+    and should remain separately documented.
+11. Parity output contract is xarray-compatible and NumPy/PyHyperScattering-friendly.
+12. Backend-native/on-device result access is deferred until after parity, but the result abstraction should preserve that path.
+13. `float16` is deferred until after parity; parity-sensitive compute remains `float32/complex64`.
+14. Runtime instrumentation for timing/memory is desirable in development but must be fully disableable.
+15. The primary optimization wall metric starts immediately before `Morphology(...)` construction and ends immediately after synchronized `run(return_xarray=False)` completion.
+16. Large-box behavior should initially mirror current CyRSoXS policy during parity.
+17. Phase-1 should prefer freezing morphology mutation after result creation until an explicit invalidation contract exists.
+18. The mutation freeze should begin at successful `run()` completion.
+19. Public optical constants may remain host-oriented for parity; backend staging to CuPy happens when math requires it.
+20. Preferred direct-CuPy morphology contract for parity is ZYX-shaped, C-contiguous, `float32` arrays for each material field.
+21. Initial `cupy-rsoxs` parity validation should include both:
     - a NumPy-input contract case using `input_policy='coerce'`,
     - a CuPy-native borrowed case using `ownership_policy='borrow'` and `input_policy='strict'`.
 
-## 18. Post-Parity Optimization Inventory For `cupy-rsoxs`
+## 18. Post-Parity Optimization Guidance And Ledger For `cupy-rsoxs`
 
-This section records the current accuracy-preserving optimization inventory for
-the implemented parity backend. It is meant to be resumable in a fresh context
-after parity and before any tuning work begins.
+This section replaces the earlier optimization-inventory framing with a more
+resumable guidance-and-ledger record. It is intended to let a fresh context
+recover:
+- the current accepted backend state,
+- the measurement caveats,
+- the official resident-mode guidance,
+- the optimization campaign strategy,
+- and the work that has already been tried, accepted, or rejected.
 
-### 18.1 Measurement baseline
+### 18.1 Current state and authoritative artifacts
 
-1. The figures below come from the current single-GPU CoreShell parity lane in
-   the implemented `cupy-rsoxs` backend.
-2. Representative timings:
-   - `cyrsoxs`: build `1.39s`, run `220.20s`, total `221.59s`,
-   - `cupy-rsoxs` with NumPy `coerce`: build `1.03s`, run `18.11s`, total `19.15s`,
-   - `cupy-rsoxs` with CuPy `borrow`/`strict`: run `17.92s`.
-3. The current `coerce` lane is already materially faster than `cyrsoxs`, so
-   the next optimization stage is not about basic viability. It is about:
-   - more GPU memory headroom,
-   - lower peak working set,
-   - removing avoidable staging/temporary allocations,
-   - extracting more speed without changing math semantics.
-4. Current synchronized stage timings for the parity backend:
-   - `_compute_nt_components`: `4.39s`,
-   - `_compute_fft_nt_components`: `1.09s`,
-   - `_projection_coefficients_from_fft_nt`: `5.14s`,
-   - `_project_from_fft_nt`: `13.73s`,
-   - derived rotation / angle-accumulation remainder: about `8.59s`.
-5. Current unsynchronized helper-call profile:
-   - `_apply_affine_transform`: `36461` calls, about `5.21s`,
-   - `_compute_scatter3d`: `303` calls, about `4.76s`,
-   - `_project_scatter3d`: about `0.26s`.
-6. Representative live-size intuition for morphology shape `(32, 512, 512)`:
-   - one `complex64` 3D component: about `64 MiB`,
-   - `Nt` with 5 components: about `320 MiB`,
-   - `Nt` with 6 components: about `384 MiB`,
-   - `Nt + fft_nt` with 5 components: about `640 MiB`,
-   - `Nt + fft_nt` with 6 components: about `768 MiB`,
-   - one `scatter3d` `float32` volume: about `32 MiB`,
-   - one detector panel `(512, 512)` `float32`: about `1 MiB`,
-   - `101` detector panels: about `101 MiB`.
-7. Important implementation note for later tuning:
-   - the NumPy-to-CuPy `coerce` path happens during morphology normalization,
-     not inside backend `run()`,
-   - backend-stage optimization and input-contract optimization should therefore
-     be measured separately.
+1. The current accepted tuned backend state is the behavior reached after the
+   first optimization campaign:
+   - dead `Nt[5]` removed from the supported Euler-only / `PARTIAL` path,
+   - FFT storage reused so separate `fft_nt` residency is reduced,
+   - Igor reorder implemented with a cached `RawKernel`.
+2. The reusable optimization harness lives at:
+   - `tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py`
+   - supporting notes at `tests/validation/dev/cupy_rsoxs_optimization/README.md`
+3. The reusable full-energy backend-comparison harness lives at:
+   - `tests/validation/dev/core_shell_backend_performance/run_core_shell_backend_performance_abstract.py`
+   - supporting notes at `tests/validation/dev/core_shell_backend_performance/README.md`
+4. Current development artifacts that should be treated as the authoritative
+   resumable record are:
+   - `test-reports/cupy-rsoxs-optimization-dev/`
+   - `test-reports/core-shell-backend-performance-dev/full_energy_all/`
+5. Maintained parity and physics guardrails still live in the official test
+   suite. The dev harnesses above are for optimization and comparison work, not
+   for replacing the maintained parity suite.
 
-### 18.2 Generality and size specificity
+### 18.2 Highest-priority next step: fix timing before ranking more optimizations
 
-1. Most of the optimization opportunities below are generic to the current
-   Euler-only, `ScatterApproach::PARTIAL`, single-GPU math path. They are not
-   model-class-specific.
-2. Prefer one generic kernel family for arbitrary `ZYX` sizes and tune launch
-   configuration by size rather than maintaining separate kernels for different
-   morphology classes.
-3. The only likely special-path candidates worth considering later are:
-   - `z == 1`,
-   - `num_angles == 1`.
-4. Separate kernels for exact box dimensions are not currently justified by the
-   evidence; size-tuned launch parameters are the preferred first step.
+1. The most critical next step is to fix and standardize the wall-timing
+   apparatus before using further optimization results to rank ideas.
+2. The primary optimization wall metric must be:
+   - start immediately before `Morphology(...)` construction,
+   - end immediately after synchronized `run(return_xarray=False)` completion.
+3. The primary optimization wall metric must exclude:
+   - field generation before object creation,
+   - result export such as `to_xarray()`,
+   - downstream A-wedge generation, plotting, and analysis.
+4. For CuPy-native upstream workflows, force a device synchronize immediately
+   before the start timestamp so unfinished upstream GPU work is not counted in
+   the morphology-to-run interval.
+5. Export timing is still useful, but it is a separate metric and should not be
+   mixed into the primary optimization score.
+6. Stage-level timing should be recorded, when enabled, against the following
+   serial optimization segments:
+   - Segment A: morphology construction, contract normalization, and staging,
+   - Segment B: n-field / tensor-character assembly,
+   - Segment C: FFT, reorder, scratch reuse, and plan behavior,
+   - Segment D: Ewald / scatter / projection math,
+   - Segment E: rotation and angle accumulation,
+   - Segment F: result-buffer assembly and retention,
+   - Segment G: export / host conversion as a separate non-primary metric.
+7. Stage-level timing and memory instrumentation must remain fully disableable
+   so production runs do not pay synchronization overhead from development
+   observability.
 
-### 18.3 Highest-value exact speed and memory opportunities
+### 18.3 Current evidence summary from the accepted backend state
 
-These are the highest-priority opportunities that should preserve current
-results and current math semantics.
+1. The first optimization campaign retained three changes and rejected four
+   first-pass implementations. See Section 18.6 for the ledger.
+2. The current full-energy backend comparison was run from the accepted tuned
+   state using:
+   - three scaled CoreShell boxes:
+     - `small`: `(32, 512, 512)`,
+     - `medium`: `(64, 1024, 1024)`,
+     - `large`: `(96, 1536, 1536)`,
+   - full `101`-energy baseline,
+   - unique-state `EAngleRotation` ladders at `1`, `12`, `24`, and `72`
+     angles,
+   - three algorithmic paths:
+     - `numpy -> cyrsoxs`,
+     - `numpy -> cupy-rsoxs (coerce)`,
+     - `cupy -> cupy-rsoxs (borrow/strict)`.
+3. Current full-energy crossover summary:
+   - `cyrsoxs` still wins the `1`-angle latency regime for all three sizes,
+   - `cupy-rsoxs` crosses over by `24` angles for `small`,
+   - `cupy-rsoxs` crosses over by `12` angles for `medium` and `large`,
+   - at `72` angles:
+     - `small`: `cyrsoxs 45.809s`, `coerce 11.585s (3.95x)`, `borrow 14.196s (3.23x)`,
+     - `medium`: `cyrsoxs 361.479s`, `coerce 61.407s (5.89x)`, `borrow 61.291s (5.90x)`,
+     - `large`: `cyrsoxs 1340.967s`, `coerce 200.617s (6.68x)`, `borrow 200.449s (6.69x)`.
+4. Current no-rotation / latency summary from the same full-energy study:
+   - `small`: `cyrsoxs 2.599s`, `coerce 10.023s`, `borrow 10.181s`,
+   - `medium`: `cyrsoxs 17.878s`, `coerce 58.563s`, `borrow 58.412s`,
+   - `large`: `cyrsoxs 59.949s`, `coerce 194.502s`, `borrow 195.369s`.
+5. Physics-parity summary from the full-energy comparison overlay case
+   (`large`, `72` angles, `cyrsoxs` vs fastest CuPy path):
+   - `A(E)` relative RMSE: about `0.0037%`,
+   - `A(q)` relative RMSE at `284.7 eV`: about `0.0058%`,
+   - `A(q)` relative RMSE at `285.2 eV`: about `0.0015%`.
+6. Current monitored `72`-angle peak GPU-memory summary:
+   - `small`: `cyrsoxs 763 MiB`, `cupy-rsoxs 1705 MiB`,
+   - `medium`: `cyrsoxs 4805 MiB`, `cupy-rsoxs 12401 MiB`,
+   - `large`: `cyrsoxs 15767 MiB`, `cupy-rsoxs 41437 MiB`.
+7. The higher CuPy footprint should not currently be interpreted as allocator
+   retention alone. It also reflects:
+   - resident morphology fields on device in device-resident workflows,
+   - explicit live intermediate tensors in the current CuPy implementation.
+8. Important benchmark caveat:
+   - the current `cupy -> cupy-rsoxs (borrow/strict)` path is contract-clean at
+     the `Morphology` boundary,
+   - but it is not a true end-to-end GPU-native morphology-generation
+     benchmark,
+   - the current CoreShell builder still creates fields in NumPy and then
+     preconverts them to CuPy before `Morphology(...)` timing starts.
+9. Consequence of that caveat:
+   - the current near-equality between `coerce` and `borrow/strict` should not
+     be read as evidence that direct-CuPy workflows offer no value,
+   - it only shows that the present harness did not isolate an end-to-end
+     device-native field-generation advantage.
 
-1. Drop dead `Nt[5]` in the currently supported parity configuration.
-   - In the current Euler-only / `PARTIAL` path, `Nt[5]` is written but never
-     read.
-   - Removing it should cut one `complex64` live volume from `Nt` and one from
-     `fft_nt`, which is about `128 MiB` of combined live-set reduction at
-     `(32, 512, 512)`, while also reducing unnecessary compute.
-2. Make the FFT path effectively in-place.
-   - The current implementation keeps both `nt` and `fft_nt` live.
-   - Reworking the path around in-place cuFFT or tightly reused scratch storage
-     should remove a major transient memory spike and reduce allocation churn.
-3. Replace the current `_igor_shift` advanced-indexing path with an exact
-   Igor-style reorder kernel.
-   - The current approach is convenient but allocates/indexes more than
-     necessary.
-   - A dedicated kernel should preserve semantics while reducing temporary
-     traffic.
-4. Port `computeNtEulerAngles` math from Python/CuPy expression assembly to a
-   `RawKernel` or `ElementwiseKernel`.
-   - This should reduce Python dispatch overhead and eliminate some temporary
-     expression arrays while preserving the same formulas.
-5. Fuse projection-coefficient image generation.
-   - The current path builds full intermediate basis arrays and then combines
-     them.
-   - A fused coefficient path should avoid materializing unnecessary 3D
-     temporaries while keeping the projection math identical.
-6. Port the CyRSoXS partial Ewald/projection behavior more directly so
-   `scatter3d` does not need to be fully materialized.
-   - This is one of the strongest exact memory-headroom opportunities because
-     it can eliminate a whole 3D stage allocation.
-7. Replace the per-angle affine loop with a leaner exact implementation.
-   - Candidate directions are an NPP-equivalent path or a custom exact bilinear
-     accumulate kernel.
-   - This is likely the largest remaining exact speed opportunity after the
-     easier dead-storage removals.
-8. Make angle accumulation fully in-place and reuse
-   `cupyx.scipy.ndimage.affine_transform(output=...)` scratch/output buffers.
-   - The current path can be made leaner by reusing rotation outputs and
-     accumulation targets instead of allocating fresh arrays at each step.
+### 18.4 Official resident-mode guidance
 
-### 18.4 Major exact memory-headroom opportunities
+1. Official guidance for `cupy-rsoxs` is now to support controllable resident
+   modes, with CPU / host-resident behavior as the default.
+2. Host-resident staged mode is the default guidance for public workflows.
+   - authoritative morphology fields remain on CPU,
+   - the backend materializes temporary CuPy arrays when math requires them,
+   - temporary device arrays should be deleted or replaced aggressively as the
+     pipeline advances,
+   - this mode is expected to lower GPU memory pressure at the cost of at least
+     one host-to-device transfer.
+3. Device-resident direct mode is an opt-in path for already-CuPy morphology
+   fields.
+   - authoritative morphology fields already satisfy the backend-preferred
+     CuPy contract,
+   - the backend may borrow and use those arrays directly,
+   - this mode is expected to use more GPU memory but may help GPU-native
+     workflows or later on-device chaining.
+4. Resident mode must be documented separately from `input_policy` and
+   `ownership_policy`.
+   - `input_policy='strict'` means no coercion is allowed under the chosen
+     contract,
+   - `input_policy='coerce'` means coercion is allowed under the chosen
+     contract,
+   - `ownership_policy='borrow'` means incoming material objects are not copied,
+   - none of those concepts alone imply end-to-end zero-copy execution.
+5. Public API naming for resident-mode control does not need to be finalized in
+   this document, but the conceptual split and the CPU-default policy are now
+   considered official guidance.
 
-1. Preallocate the final `(energy, y, x)` result array instead of appending to
-   a Python list and finishing with `cp.stack`.
-2. Reuse scratch buffers across energies wherever shapes/dtypes are stable.
-3. Fold constant scaling such as `1 / (4*pi)` into fused kernels instead of
-   creating separately scaled 3D basis arrays.
-4. When parity output is requested as xarray and device retention is not
-   needed, allow a staged policy that streams completed energy panels to host
-   instead of keeping the entire detector stack resident until the end.
-5. Continue to treat explicit `del`, Python GC, and CuPy pool trimming as
-   lifecycle tools rather than substitutes for sound live-range control.
-   Structural buffer reuse and earlier death of intermediates remain the first
-   priority.
+### 18.5 Optimization campaign strategy going forward
 
-### 18.5 Secondary exact opportunities
+1. The optimization goal is not merely to preserve the current large-angle win.
+   The goal is to make `cupy-rsoxs` beat `cyrsoxs` everywhere if possible, or
+   at minimum approach speed parity in the regimes where it still loses while
+   maintaining physics parity.
+2. The immediate performance target is the latency-dominated regime where
+   `cupy-rsoxs` currently loses:
+   - `small`, no rotation,
+   - `medium`, no rotation.
+3. Large many-angle wins must be preserved while latency-focused work proceeds.
+4. Future optimization campaigns should focus on one segment at a time using
+   the segmentation defined in Section 18.2 rather than trying to optimize the
+   whole backend at once.
+5. The default optimization benchmark ladder should use single-energy cases
+   rather than full-energy runs.
+   - energy iteration mostly wraps the same loop structure,
+   - for non-parity tuning, full-energy runs mainly add runtime and statistics
+     rather than exposing a fundamentally different algorithmic path.
+6. Recommended default tuning ladder:
+   - primary latency lane: `small`, single energy, `EAngleRotation=[0, 0, 0]`,
+   - secondary latency lane: `medium`, single energy, `EAngleRotation=[0, 0, 0]`,
+   - rotation-focused lane: `medium`, single energy, limited or dense angle
+     sweep to isolate rotation/accumulation cost,
+   - memory / throughput guardrail lane: `large`, single energy, dense angle
+     sweep when needed.
+7. If a single-energy lane is too fast or too noisy to rank consistently,
+   repeat it enough times to stabilize the comparison rather than escalating
+   directly to full-energy runs.
+8. Full-energy runs should be reserved for:
+   - milestone confirmation after accepted optimization changes,
+   - final comparison graphics,
+   - and maintained parity / correctness rechecks.
+9. Future optimization guidance should be treated as open-ended. Many more
+   opportunities likely exist beyond the ones already enumerated or tried. The
+   document should not be read as an exhaustive list of remaining ideas.
 
-1. Use batched in-place cuFFT planning instead of component-by-component FFT
-   dispatch from Python.
-2. Cache metadata during `prepare`:
-   - q axes,
-   - Igor-order metadata,
-   - angle radians/trigonometric tables,
-   - xarray coordinate scaffolding.
-3. Precompute small optical scalar coefficients per material/energy on the host
-   before device-side math.
-4. Reduce repeated assessment/coercion passes during morphology normalization,
-   especially in mixed NumPy/CuPy workflows.
-5. Preserve sub-stage timing data in the normal backend timing output.
-   - The current helper methods can write detailed timings, but `run()` replaces
-     the timing dictionary at the end.
-   - This is observability debt rather than a direct speed gain, but it matters
-     because optimization work will be much harder to rank without durable
-     measurements.
+### 18.6 Campaign ledger from work already done
 
-### 18.6 Exact throughput modes that trade memory for speed
+1. Current accepted optimization state:
+   - `opt01_drop_nt5`
+     - removed dead `Nt[5]` from the supported Euler-only / `PARTIAL` path,
+     - improved run time by about `6.8%` to `32.3%` versus the first matrix
+       baseline,
+     - improved large limited-rotation free memory after run from about
+       `0.66 GiB` to `4.04 GiB`.
+   - `opt02_fft_reuse`
+     - reused `nt` storage for FFT output and removed the separate `fft_nt`
+       live set,
+     - improved run time by an additional `0.8%` to `6.7%` versus `opt01`,
+     - improved large limited-rotation free memory after run from about
+       `4.04 GiB` to `6.99 GiB`,
+     - reduced large limited-rotation pool total from about `43.24 GiB` to
+       `40.29 GiB`.
+   - `opt04_igor_kernel`
+     - replaced the advanced-indexing Igor reorder with a cached `RawKernel`,
+     - improved run time by an additional `1.1%` to `5.6%` versus `opt03`,
+     - improved run time by about `12.8%` to `36.4%` versus the original matrix
+       baseline,
+     - preserved the ad hoc validation metrics already seen in the baseline
+       run,
+     - this is the current accepted code state for resumed optimization work.
+2. Explored but not accepted in the first campaign:
+   - `opt03_prealloc_result_scratch`
+     - mixed result: about `-2.3%` to `+0.4%` versus `opt02`,
+     - no meaningful memory-headroom improvement in the measured matrix,
+     - rejected and reverted.
+   - `opt05_proj_coeff_fuse`
+     - preserved validation, but regressed run time by about `5.7%` to `38.6%`
+       versus `opt04`,
+     - rejected and reverted.
+   - `opt06_stream_projection`
+     - preserved validation, but regressed run time heavily versus the accepted
+       state and did not produce a practical memory-headroom win in this
+       matrix,
+     - rejected and reverted.
+   - `opt07_texture_affine`
+     - implemented a `cupyx.scipy.ndimage.affine_transform(...,
+       texture_memory=True)` candidate using a homogeneous transform in texture
+       mode,
+     - full-matrix result was effectively flat to slightly worse:
+       about `+0.07%` to `+1.9%` versus `opt04`,
+     - large-case memory footprint was unchanged relative to `opt04`,
+     - ad hoc validation remained within the same tolerance band,
+     - rejected and reverted because it did not clear the significant-gain
+       bar.
+3. Interpretation rule for the ledger:
+   - an accepted item has demonstrated a material win under measured conditions
+     and remains part of the current baseline,
+   - a rejected item means that specific implementation did not clear the bar,
+     not that the whole idea class is permanently closed.
 
-These modes are still accuracy-preserving, but they should not be the default
-early optimization direction because they spend additional memory headroom.
+### 18.7 Explicit experiments and deferred directions
 
-1. Cache geometry-derived fields across energies.
-2. Batch multiple energies together.
-3. Keep the CuPy memory pool warm across repeated runs to reduce allocator
-   overhead.
-
-### 18.7 Recommended implementation order
-
-1. Remove dead `Nt[5]`.
-2. Rework the FFT/live-range path so `nt` and `fft_nt` do not coexist longer
-   than necessary.
-3. Preallocate result storage and introduce scratch-buffer reuse across
-   energies.
-4. Replace `_igor_shift` with an exact reorder kernel.
-5. Fuse projection-coefficient generation and constant scaling.
-6. Remove the need to materialize `scatter3d` where exact partial-projection
-   semantics permit it.
-7. Revisit rotation/application cost with a custom exact kernel or equivalent
-   library path.
-
-This order is intentionally memory-first because larger-box viability is a core
-project goal.
-
-### 18.8 Items explicitly deferred from this exact-tuning track
-
-The following ideas may still be useful later, but they should not be counted
-as current accuracy-safe optimization work for the first tuning phase:
-
-1. `float16` or mixed-precision shortcuts.
-2. Reduced angle sampling.
-3. Alternate interpolation rules.
-4. Multi-GPU fan-out.
-5. Detector/projection shortcuts that change current warp semantics.
-
-### 18.9 First optimization campaign results
-
-The first post-parity optimization campaign has now been run with the reusable
-development harness at
-`tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py`.
-Artifacts live under `test-reports/cupy-rsoxs-optimization-dev/`.
-
-The timing matrix used:
-- scaled CoreShell morphologies at `(32, 512, 512)`, `(64, 1024, 1024)`, and
-  `(96, 1536, 1536)`,
-- one no-rotation / one-energy lane,
-- one limited-rotation / three-energy lane with
-  `EAngleRotation=[0, 15, 165]`,
-- ad hoc sphere validation cases against saved `cyrsoxs` baselines.
-
-Current accepted optimized backend state:
-- `opt01_drop_nt5`
-  - removed dead `Nt[5]` from the supported Euler-only / `PARTIAL` parity path,
-  - improved run time by about `6.8%` to `32.3%` versus the matrix baseline,
-  - improved large limited-rotation free memory after run from about
-    `0.66 GiB` to `4.04 GiB`.
-- `opt02_fft_reuse`
-  - reused `nt` storage for FFT output and removed the separate `fft_nt` live
-    set,
-  - improved run time by an additional `0.8%` to `6.7%` versus `opt01`,
-  - improved large limited-rotation free memory after run from about
-    `4.04 GiB` to `6.99 GiB`,
-  - reduced large limited-rotation pool total from about `43.24 GiB` to
-    `40.29 GiB`.
-- `opt04_igor_kernel`
-  - replaced the advanced-indexing Igor reorder with a cached `RawKernel`,
-  - improved run time by an additional `1.1%` to `5.6%` versus `opt03`,
-  - improved run time by about `12.8%` to `36.4%` versus the original matrix
-    baseline,
-  - preserved the ad hoc validation metrics already seen in the baseline run,
-  - this is the final accepted code state from the first tuning campaign.
-
-Rejected opportunities from the first tuning campaign:
-- `opt03_prealloc_result_scratch`
-  - mixed result: about `-2.3%` to `+0.4%` versus `opt02`,
-  - no meaningful memory-headroom improvement in the measured matrix,
-  - rejected and reverted.
-- `opt05_proj_coeff_fuse`
-  - preserved validation, but regressed run time by about `5.7%` to `38.6%`
-    versus `opt04`,
-  - rejected and reverted.
-- `opt06_stream_projection`
-  - preserved validation, but regressed run time heavily versus the accepted
-    state and did not produce a practical memory-headroom win in this matrix,
-  - rejected and reverted.
-- `opt07_texture_affine`
-  - implemented a `cupyx.scipy.ndimage.affine_transform(..., texture_memory=True)`
-    candidate using a homogeneous transform in texture mode,
-  - full-matrix result was effectively flat to slightly worse:
-    about `+0.07%` to `+1.9%` versus `opt04`,
-  - large-case memory footprint was unchanged relative to `opt04`,
-  - ad hoc validation remained within the same tolerance band,
-  - rejected and reverted because it did not clear the significant-gain bar.
-
-Resulting recommendation for any future optimization pass:
-1. Start from the current accepted state (`opt04` behavior):
-   dead `Nt[5]` removed, FFT storage reused, Igor reorder kernel retained.
-2. Treat the first implementations of preallocated result scratch, fused
-   projection coefficients, streamed projection, and texture-memory affine as
-   explored but not accepted.
-3. If further work resumes, the remaining high-value directions are the ones
-   still listed in this section that have not yet shown a material win under
-   measurement.
+1. `float16` and mixed-precision work remain deferred until after the next
+   speed campaigns; parity-sensitive compute remains `float32/complex64`.
+2. Reduced angle sampling, alternate interpolation rules, and multi-GPU fan-out
+   remain outside the current exact-tuning track.
+3. Host-resident staged mode creates room for explicit experiments with deeper
+   CPU-side precompute, including testing whether some early field math is
+   faster on CPU before transfer.
+4. Deeper CPU-side precompute should be treated as an explicit experiment, not
+   as the default plan.
+   - it may help some host-resident workflows,
+   - but it may also become transfer-dominated if large per-energy
+     intermediates are moved to GPU,
+   - therefore it must be measured before being promoted into recommended
+     architecture.
+5. Resume rule for a fresh optimization context:
+   - start from the current accepted `opt04`-equivalent behavior,
+   - repair and standardize timing first,
+   - use the single-energy benchmark ladder for inner-loop tuning,
+   - validate promising changes against the ad hoc baselines,
+   - rerun maintained parity checks and the full-energy comparison harness only
+     at milestone points.
