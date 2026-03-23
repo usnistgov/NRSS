@@ -540,3 +540,248 @@ The following are now considered locked unless later planning explicitly reopens
 16. Initial `cupy-rsoxs` parity validation should include both:
     - a NumPy-input contract case using `input_policy='coerce'`,
     - a CuPy-native borrowed case using `ownership_policy='borrow'` and `input_policy='strict'`.
+
+## 18. Post-Parity Optimization Inventory For `cupy-rsoxs`
+
+This section records the current accuracy-preserving optimization inventory for
+the implemented parity backend. It is meant to be resumable in a fresh context
+after parity and before any tuning work begins.
+
+### 18.1 Measurement baseline
+
+1. The figures below come from the current single-GPU CoreShell parity lane in
+   the implemented `cupy-rsoxs` backend.
+2. Representative timings:
+   - `cyrsoxs`: build `1.39s`, run `220.20s`, total `221.59s`,
+   - `cupy-rsoxs` with NumPy `coerce`: build `1.03s`, run `18.11s`, total `19.15s`,
+   - `cupy-rsoxs` with CuPy `borrow`/`strict`: run `17.92s`.
+3. The current `coerce` lane is already materially faster than `cyrsoxs`, so
+   the next optimization stage is not about basic viability. It is about:
+   - more GPU memory headroom,
+   - lower peak working set,
+   - removing avoidable staging/temporary allocations,
+   - extracting more speed without changing math semantics.
+4. Current synchronized stage timings for the parity backend:
+   - `_compute_nt_components`: `4.39s`,
+   - `_compute_fft_nt_components`: `1.09s`,
+   - `_projection_coefficients_from_fft_nt`: `5.14s`,
+   - `_project_from_fft_nt`: `13.73s`,
+   - derived rotation / angle-accumulation remainder: about `8.59s`.
+5. Current unsynchronized helper-call profile:
+   - `_apply_affine_transform`: `36461` calls, about `5.21s`,
+   - `_compute_scatter3d`: `303` calls, about `4.76s`,
+   - `_project_scatter3d`: about `0.26s`.
+6. Representative live-size intuition for morphology shape `(32, 512, 512)`:
+   - one `complex64` 3D component: about `64 MiB`,
+   - `Nt` with 5 components: about `320 MiB`,
+   - `Nt` with 6 components: about `384 MiB`,
+   - `Nt + fft_nt` with 5 components: about `640 MiB`,
+   - `Nt + fft_nt` with 6 components: about `768 MiB`,
+   - one `scatter3d` `float32` volume: about `32 MiB`,
+   - one detector panel `(512, 512)` `float32`: about `1 MiB`,
+   - `101` detector panels: about `101 MiB`.
+7. Important implementation note for later tuning:
+   - the NumPy-to-CuPy `coerce` path happens during morphology normalization,
+     not inside backend `run()`,
+   - backend-stage optimization and input-contract optimization should therefore
+     be measured separately.
+
+### 18.2 Generality and size specificity
+
+1. Most of the optimization opportunities below are generic to the current
+   Euler-only, `ScatterApproach::PARTIAL`, single-GPU math path. They are not
+   model-class-specific.
+2. Prefer one generic kernel family for arbitrary `ZYX` sizes and tune launch
+   configuration by size rather than maintaining separate kernels for different
+   morphology classes.
+3. The only likely special-path candidates worth considering later are:
+   - `z == 1`,
+   - `num_angles == 1`.
+4. Separate kernels for exact box dimensions are not currently justified by the
+   evidence; size-tuned launch parameters are the preferred first step.
+
+### 18.3 Highest-value exact speed and memory opportunities
+
+These are the highest-priority opportunities that should preserve current
+results and current math semantics.
+
+1. Drop dead `Nt[5]` in the currently supported parity configuration.
+   - In the current Euler-only / `PARTIAL` path, `Nt[5]` is written but never
+     read.
+   - Removing it should cut one `complex64` live volume from `Nt` and one from
+     `fft_nt`, which is about `128 MiB` of combined live-set reduction at
+     `(32, 512, 512)`, while also reducing unnecessary compute.
+2. Make the FFT path effectively in-place.
+   - The current implementation keeps both `nt` and `fft_nt` live.
+   - Reworking the path around in-place cuFFT or tightly reused scratch storage
+     should remove a major transient memory spike and reduce allocation churn.
+3. Replace the current `_igor_shift` advanced-indexing path with an exact
+   Igor-style reorder kernel.
+   - The current approach is convenient but allocates/indexes more than
+     necessary.
+   - A dedicated kernel should preserve semantics while reducing temporary
+     traffic.
+4. Port `computeNtEulerAngles` math from Python/CuPy expression assembly to a
+   `RawKernel` or `ElementwiseKernel`.
+   - This should reduce Python dispatch overhead and eliminate some temporary
+     expression arrays while preserving the same formulas.
+5. Fuse projection-coefficient image generation.
+   - The current path builds full intermediate basis arrays and then combines
+     them.
+   - A fused coefficient path should avoid materializing unnecessary 3D
+     temporaries while keeping the projection math identical.
+6. Port the CyRSoXS partial Ewald/projection behavior more directly so
+   `scatter3d` does not need to be fully materialized.
+   - This is one of the strongest exact memory-headroom opportunities because
+     it can eliminate a whole 3D stage allocation.
+7. Replace the per-angle affine loop with a leaner exact implementation.
+   - Candidate directions are an NPP-equivalent path or a custom exact bilinear
+     accumulate kernel.
+   - This is likely the largest remaining exact speed opportunity after the
+     easier dead-storage removals.
+8. Make angle accumulation fully in-place and reuse
+   `cupyx.scipy.ndimage.affine_transform(output=...)` scratch/output buffers.
+   - The current path can be made leaner by reusing rotation outputs and
+     accumulation targets instead of allocating fresh arrays at each step.
+
+### 18.4 Major exact memory-headroom opportunities
+
+1. Preallocate the final `(energy, y, x)` result array instead of appending to
+   a Python list and finishing with `cp.stack`.
+2. Reuse scratch buffers across energies wherever shapes/dtypes are stable.
+3. Fold constant scaling such as `1 / (4*pi)` into fused kernels instead of
+   creating separately scaled 3D basis arrays.
+4. When parity output is requested as xarray and device retention is not
+   needed, allow a staged policy that streams completed energy panels to host
+   instead of keeping the entire detector stack resident until the end.
+5. Continue to treat explicit `del`, Python GC, and CuPy pool trimming as
+   lifecycle tools rather than substitutes for sound live-range control.
+   Structural buffer reuse and earlier death of intermediates remain the first
+   priority.
+
+### 18.5 Secondary exact opportunities
+
+1. Use batched in-place cuFFT planning instead of component-by-component FFT
+   dispatch from Python.
+2. Cache metadata during `prepare`:
+   - q axes,
+   - Igor-order metadata,
+   - angle radians/trigonometric tables,
+   - xarray coordinate scaffolding.
+3. Precompute small optical scalar coefficients per material/energy on the host
+   before device-side math.
+4. Reduce repeated assessment/coercion passes during morphology normalization,
+   especially in mixed NumPy/CuPy workflows.
+5. Preserve sub-stage timing data in the normal backend timing output.
+   - The current helper methods can write detailed timings, but `run()` replaces
+     the timing dictionary at the end.
+   - This is observability debt rather than a direct speed gain, but it matters
+     because optimization work will be much harder to rank without durable
+     measurements.
+
+### 18.6 Exact throughput modes that trade memory for speed
+
+These modes are still accuracy-preserving, but they should not be the default
+early optimization direction because they spend additional memory headroom.
+
+1. Cache geometry-derived fields across energies.
+2. Batch multiple energies together.
+3. Keep the CuPy memory pool warm across repeated runs to reduce allocator
+   overhead.
+
+### 18.7 Recommended implementation order
+
+1. Remove dead `Nt[5]`.
+2. Rework the FFT/live-range path so `nt` and `fft_nt` do not coexist longer
+   than necessary.
+3. Preallocate result storage and introduce scratch-buffer reuse across
+   energies.
+4. Replace `_igor_shift` with an exact reorder kernel.
+5. Fuse projection-coefficient generation and constant scaling.
+6. Remove the need to materialize `scatter3d` where exact partial-projection
+   semantics permit it.
+7. Revisit rotation/application cost with a custom exact kernel or equivalent
+   library path.
+
+This order is intentionally memory-first because larger-box viability is a core
+project goal.
+
+### 18.8 Items explicitly deferred from this exact-tuning track
+
+The following ideas may still be useful later, but they should not be counted
+as current accuracy-safe optimization work for the first tuning phase:
+
+1. `float16` or mixed-precision shortcuts.
+2. Reduced angle sampling.
+3. Alternate interpolation rules.
+4. Multi-GPU fan-out.
+5. Detector/projection shortcuts that change current warp semantics.
+
+### 18.9 First optimization campaign results
+
+The first post-parity optimization campaign has now been run with the reusable
+development harness at
+`tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py`.
+Artifacts live under `test-reports/cupy-rsoxs-optimization-dev/`.
+
+The timing matrix used:
+- scaled CoreShell morphologies at `(32, 512, 512)`, `(64, 1024, 1024)`, and
+  `(96, 1536, 1536)`,
+- one no-rotation / one-energy lane,
+- one limited-rotation / three-energy lane with
+  `EAngleRotation=[0, 15, 165]`,
+- ad hoc sphere validation cases against saved `cyrsoxs` baselines.
+
+Current accepted optimized backend state:
+- `opt01_drop_nt5`
+  - removed dead `Nt[5]` from the supported Euler-only / `PARTIAL` parity path,
+  - improved run time by about `6.8%` to `32.3%` versus the matrix baseline,
+  - improved large limited-rotation free memory after run from about
+    `0.66 GiB` to `4.04 GiB`.
+- `opt02_fft_reuse`
+  - reused `nt` storage for FFT output and removed the separate `fft_nt` live
+    set,
+  - improved run time by an additional `0.8%` to `6.7%` versus `opt01`,
+  - improved large limited-rotation free memory after run from about
+    `4.04 GiB` to `6.99 GiB`,
+  - reduced large limited-rotation pool total from about `43.24 GiB` to
+    `40.29 GiB`.
+- `opt04_igor_kernel`
+  - replaced the advanced-indexing Igor reorder with a cached `RawKernel`,
+  - improved run time by an additional `1.1%` to `5.6%` versus `opt03`,
+  - improved run time by about `12.8%` to `36.4%` versus the original matrix
+    baseline,
+  - preserved the ad hoc validation metrics already seen in the baseline run,
+  - this is the final accepted code state from the first tuning campaign.
+
+Rejected opportunities from the first tuning campaign:
+- `opt03_prealloc_result_scratch`
+  - mixed result: about `-2.3%` to `+0.4%` versus `opt02`,
+  - no meaningful memory-headroom improvement in the measured matrix,
+  - rejected and reverted.
+- `opt05_proj_coeff_fuse`
+  - preserved validation, but regressed run time by about `5.7%` to `38.6%`
+    versus `opt04`,
+  - rejected and reverted.
+- `opt06_stream_projection`
+  - preserved validation, but regressed run time heavily versus the accepted
+    state and did not produce a practical memory-headroom win in this matrix,
+  - rejected and reverted.
+- `opt07_texture_affine`
+  - implemented a `cupyx.scipy.ndimage.affine_transform(..., texture_memory=True)`
+    candidate using a homogeneous transform in texture mode,
+  - full-matrix result was effectively flat to slightly worse:
+    about `+0.07%` to `+1.9%` versus `opt04`,
+  - large-case memory footprint was unchanged relative to `opt04`,
+  - ad hoc validation remained within the same tolerance band,
+  - rejected and reverted because it did not clear the significant-gain bar.
+
+Resulting recommendation for any future optimization pass:
+1. Start from the current accepted state (`opt04` behavior):
+   dead `Nt[5]` removed, FFT storage reused, Igor reorder kernel retained.
+2. Treat the first implementations of preallocated result scratch, fused
+   projection coefficients, streamed projection, and texture-memory affine as
+   explored but not accepted.
+3. If further work resumes, the remaining high-value directions are the ones
+   still listed in this section that have not yet shown a material win under
+   measurement.

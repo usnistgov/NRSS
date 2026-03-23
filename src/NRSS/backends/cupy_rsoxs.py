@@ -12,6 +12,8 @@ import xarray as xr
 from .registry import BackendUnavailableError
 from .runtime import BackendRuntime
 
+_CUPY_KERNEL_CACHE: dict[str, Any] = {}
+
 
 def require_cupy_modules():
     errors = []
@@ -191,16 +193,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         num_angles = self._num_angles(morphology)
         angle_start = time.perf_counter()
         nt = self._compute_nt_components(morphology, energy, cp)
-        fft_nt = self._compute_fft_nt_components(nt=nt, cp=cp, window=window)
         angle_projections = self._project_from_fft_nt(
             morphology=morphology,
             energy=energy,
             cp=cp,
             ndimage=ndimage,
-            fft_nt=fft_nt,
+            fft_nt=self._compute_fft_nt_components(nt=nt, cp=cp, window=window),
             num_angles=num_angles,
         )
-        del fft_nt, nt
+        del nt
         cp.cuda.Stream.null.synchronize()
         timings["angle_loop_seconds"] = timings.get("angle_loop_seconds", 0.0) + (
             time.perf_counter() - angle_start
@@ -299,7 +300,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
     def _compute_nt_components(self, morphology, energy, cp):
         start = time.perf_counter()
         shape = tuple(int(v) for v in morphology.NumZYX)
-        nt = cp.zeros((6, *shape), dtype=cp.complex64)
+        nt = cp.zeros((5, *shape), dtype=cp.complex64)
 
         for material in morphology.materials.values():
             npar, nper = self._material_optics(material, energy)
@@ -328,9 +329,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 npar_sq * sy * sy + nper_sq * (sx * sx + sz * sz)
             ) + (phi_ui * nsum_sq) / np.float32(9.0) - vfrac
             nt[4] += phi_a * (npar_sq - nper_sq) * sy * sz
-            nt[5] += phi_a * (
-                npar_sq * sz * sz + nper_sq * (sx * sx + sy * sy)
-            ) + (phi_ui * nsum_sq) / np.float32(9.0) - vfrac
 
             del phi_a, phi_ui, sin_theta, sx, sy, sz
 
@@ -379,16 +377,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
 
     def _compute_fft_nt_components(self, nt, cp, window):
-        fft_nt = cp.empty_like(nt)
         for idx in range(nt.shape[0]):
             component = nt[idx]
             if window is not None:
-                component = component * window
+                cp.multiply(component, window, out=component)
             fft_component = cp.fft.fftn(component)
             self._replace_dc_component(fft_component)
-            fft_nt[idx] = self._igor_shift(fft_component, cp)
+            self._igor_shift(fft_component, cp, out=nt[idx])
             del component, fft_component
-        return fft_nt
+        return nt
 
     def _project_from_fft_nt(self, morphology, energy, cp, ndimage, fft_nt, num_angles):
         proj_x, proj_y, proj_xy = self._projection_coefficients_from_fft_nt(
@@ -623,6 +620,64 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             neighbors.extend([arr[1, 0, 0], arr[z - 1, 0, 0]])
         arr[0, 0, 0] = sum(neighbors) / np.float32(len(neighbors))
 
+    def _igor_shift_kernel(self, cp):
+        kernel = _CUPY_KERNEL_CACHE.get("igor_shift_complex64")
+        if kernel is None:
+            kernel = cp.RawKernel(
+                r"""
+                extern "C" __global__
+                void igor_shift_complex64(
+                    const float2* input,
+                    float2* output,
+                    const int* z_order,
+                    const int* y_order,
+                    const int* x_order,
+                    const int zdim,
+                    const int ydim,
+                    const int xdim,
+                    const unsigned long long total
+                ) {
+                    const unsigned long long idx =
+                        (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                        + (unsigned long long)threadIdx.x;
+                    if (idx >= total) {
+                        return;
+                    }
+
+                    const int x = (int)(idx % (unsigned long long)xdim);
+                    const unsigned long long tmp = idx / (unsigned long long)xdim;
+                    const int y = (int)(tmp % (unsigned long long)ydim);
+                    const int z = (int)(tmp / (unsigned long long)ydim);
+
+                    const int in_z = z_order[z];
+                    const int in_y = y_order[y];
+                    const int in_x = x_order[x];
+
+                    const unsigned long long input_idx =
+                        ((unsigned long long)in_z * (unsigned long long)ydim
+                         + (unsigned long long)in_y) * (unsigned long long)xdim
+                        + (unsigned long long)in_x;
+                    output[idx] = input[input_idx];
+                }
+                """,
+                "igor_shift_complex64",
+            )
+            _CUPY_KERNEL_CACHE["igor_shift_complex64"] = kernel
+        return kernel
+
+    def _igor_axis_orders(self, shape, cp):
+        cache = getattr(self, "_igor_order_cache", None)
+        if cache is None:
+            cache = {}
+            self._igor_order_cache = cache
+
+        key = tuple(int(v) for v in shape)
+        orders = cache.get(key)
+        if orders is None:
+            orders = tuple(self._igor_axis_order(int(length), cp) for length in key)
+            cache[key] = orders
+        return orders
+
     def _igor_axis_order(self, n, cp):
         mid = n // 2
         left = cp.arange(mid, -1, -1, dtype=cp.int32)
@@ -631,11 +686,29 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         right = cp.arange(n - 1, mid, -1, dtype=cp.int32)
         return cp.concatenate((left, right))
 
-    def _igor_shift(self, arr, cp):
-        z_order = self._igor_axis_order(arr.shape[0], cp)
-        y_order = self._igor_axis_order(arr.shape[1], cp)
-        x_order = self._igor_axis_order(arr.shape[2], cp)
-        return arr[z_order][:, y_order][:, :, x_order]
+    def _igor_shift(self, arr, cp, out=None):
+        if out is None:
+            out = cp.empty_like(arr)
+        z_order, y_order, x_order = self._igor_axis_orders(arr.shape, cp)
+        total = int(arr.size)
+        threads = 256
+        blocks = (total + threads - 1) // threads
+        self._igor_shift_kernel(cp)(
+            (blocks,),
+            (threads,),
+            (
+                arr,
+                out,
+                z_order,
+                y_order,
+                x_order,
+                np.int32(arr.shape[0]),
+                np.int32(arr.shape[1]),
+                np.int32(arr.shape[2]),
+                np.uint64(total),
+            ),
+        )
+        return out
 
     def _compute_scatter3d(self, morphology, energy, cp, p_x, p_y, p_z):
         z, y, x = map(int, morphology.NumZYX)
