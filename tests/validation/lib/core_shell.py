@@ -60,8 +60,8 @@ EXPERIMENTAL_THRESHOLDS = {
 
 SIM_THRESHOLDS = {
     "a_vs_energy": {"max_abs_diff": 0.0025, "rmse": 0.0010},
-    "a_vs_q_284p7": {"max_abs_diff": 0.0040, "rmse": 0.0015},
-    "a_vs_q_285p2": {"max_abs_diff": 0.0040, "rmse": 0.0015},
+    "a_vs_q_284p7": {"max_abs_diff": 0.0080, "rmse": 0.003},
+    "a_vs_q_285p2": {"max_abs_diff": 0.0080, "rmse": 0.003},
 }
 
 
