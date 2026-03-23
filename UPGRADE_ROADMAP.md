@@ -214,25 +214,34 @@ Recommended implementation order:
 2. PyTorch: good GPU kernel ecosystem and deployment maturity for later integration.
 3. JAX: strong for compiled/fused workflows, but higher complexity for this parity-first migration.
 
+Important backend variant(s):
+approximate but accelerated computation could be done by computing a 3D model up to the point of the 3D p-fields, then collapsing the Z-axis by sum or mean (Z-axis projection), then continuing on the 2D FFT computation track to results. This may be accurate enough for many users and could be significantly faster for some jobs. The legacy cyrsoxs engine does not have this capability. Ideally, this could be incorporated into the above implementations with a flag that is ignored with warning by backends that don't support it (like cyrsoxs)
+
 TensorFlow is deprioritized for this project.
 
 ## 8. Test-First Program (Highest Priority)
 
 ### 8.1 Immediate objective
 
-Convert `tests/validation/` legacy scripts into robust pytest suites using pybind CyRSoXS execution where applicable (no CLI serialization bottleneck).
+Convert `tests/validation/` legacy scripts into robust pytest suites using pybind CyRSoXS execution where applicable (no CLI serialization bottleneck), while establishing a first stable physics-validation lane before backend refactors.
 
-### 8.2 Canonical initial cases
+### 8.2 Maintained validation cases
 
-1. Projected sphere.
-2. Core-shell.
-3. Circle lattice.
+1. Analytical sphere form factor.
+2. Sphere contrast scaling.
+3. Sphere orientational contrast scaling.
+4. Analytical 2D disk form factor.
+5. 2D disk contrast scaling.
+6. 2D and 3D Bragg lattice peak-position validation.
+7. Core-shell.
+8. MWCNT.
 
 ### 8.3 Required test qualities
 
 1. Deterministic fixtures and fixed RNG seeds if randomness appears anywhere.
 2. Explicit metadata capture (versions, geometry, dtype, parameter hashes, backend flags).
 3. Machine-readable golden references generated from trusted pybind runs.
+4. CPU smoke is intentionally limited to validator, I/O, and API-contract behavior; it is not a CPU physics-parity lane.
 
 ### 8.4 Parity metrics (layered)
 
@@ -251,30 +260,129 @@ Initial threshold table is intentionally provisional; calibrate from empirical b
 
 ### 8.6 Analytical guardrail track (projected sphere)
 
-1. Maintain a separate analytical comparison track for sphere form factor behavior.
-2. Treat this as a guardrail rather than strict equality because voxel discretization and finite resolution perturb high-q behavior.
-3. Use higher-resolution runs to tighten agreement when generating/validating this track.
-4. Capture notebook methodology and then codify it into scriptable test artifacts.
+1. This track is now implemented as `tests/validation/test_analytical_sphere_form_factor.py`.
+2. Current implementation uses pybind execution plus PyHyperScattering reduction, compares against a flat-detector analytical reference, and evaluates both pointwise agreement and all-minima alignment.
+3. Geometry is currently fixed at `512^3`, `PhysSize = 1.0 nm`, diameters `70 nm` and `128 nm`, with optional superresolution support retained for future follow-up.
+4. Treat this as a guardrail rather than strict equality because discretization and finite resolution still perturb high-q behavior.
 
 ### 8.7 Implemented smoke harness (March 17, 2026)
 
 1. Added `tests/smoke/test_smoke.py` for deterministic environment/import checks, morphology validation checks, pybind runtime coverage, PyHyperScattering integration, CLI-vs-pybind parity smoke, and GPU config/E-angle semantics smoke.
 2. Added `scripts/run_local_test_report.sh` to standardize local execution and emit timestamped metadata/log/summary artifacts under `test-reports/`.
-3. Added pytest marker declarations in `pyproject.toml` for `smoke`, `cpu`, `gpu`, `slow`, and `phase0`.
+   - Default conda env is now `nrss-dev` unless overridden with `-e/--env` or `NRSS_TEST_ENV`.
+   - Standard lanes can be skipped with `--skip-defaults`.
+   - Explicit `--cmd` entries can be repeated with `--repeat N` for brittleness sweeps and injected-build validation.
+3. Added pytest marker declarations in `pyproject.toml` for `smoke`, `cpu`, `gpu`, `slow`, `physics_validation`, `experimental_validation`, and `toolchain_validation`.
+4. Added `tests/conftest.py` to default tests to a single visible GPU when the environment is otherwise unset, improving reproducibility and avoiding known CyRSoXS multi-GPU instability during energy fan-out.
 
 Latest run evidence:
 
-1. Command: `scripts/run_local_test_report.sh`
-2. Timestamp (UTC): `20260317T170618Z`
-3. Result: `3/3` steps passed
+1. Command: `bash scripts/run_local_test_report.sh --stop-on-fail`
+2. Timestamp (UTC): `20260320T134227Z`
+3. Result: `4/4` steps passed
 4. CPU smoke: `12 passed, 10 deselected`
-5. GPU smoke: `10 passed, 12 deselected` (with one non-failing upstream `PyHyperScattering` deprecation warning)
+5. GPU smoke: `10 passed, 12 deselected`
+6. Physics validation: this early snapshot is superseded by the later expanded lane below.
 
-### 8.8 Remaining Phase 0 test-hardening gaps
+### 8.8 Implemented physics validation layer (March 20, 2026)
 
-1. Complete migration of legacy `tests/validation/` workflows to fixture-driven pytest modules.
-2. Establish golden/analytical parity artifacts with explicitly versioned tolerances.
-3. Add CI gating policy for CPU smoke and GPU smoke/parity lanes.
+1. Added `tests/validation/test_analytical_sphere_form_factor.py`:
+   - flat-detector analytical sphere comparison through the pybind-to-PyHyper workflow,
+   - pointwise and minima-alignment metrics with fixed empirical thresholds,
+   - explicit sphere-versus-vacuum morphology,
+   - optional plot writing gated by `NRSS_WRITE_VALIDATION_PLOTS=1`.
+2. Added `tests/validation/test_sphere_contrast_scaling.py`:
+   - one-morph, multi-energy contrast-scaling validation,
+   - 24 close-energy scenarios covering beta-only, delta-only, mixed, and split-material families,
+   - integrated-intensity checks over a fixed q window with fixed empirical thresholds.
+3. Added `tests/validation/lib/orientational_contrast.py`:
+   - reusable tensor-based helper that turns para/perp delta/beta channels plus Euler angles and `S` into inspectable effective indices, induced polarization vectors, and Eq. 15/16-style far-field contrast predictions,
+   - explicitly documents the How-to-RSoXS citation plus the rotation / far-field projection path used for expectations.
+4. Added `tests/validation/test_sphere_orientational_contrast_scaling.py`:
+   - one-morph, multi-energy orientational-contrast validation for a sphere in vacuum,
+   - `128 x 128 x 128`, `PhysSize = 2.0 nm`, `Diameter = 32 nm`,
+   - close-energy pure-delta, pure-beta, and mixed dichroic families,
+   - high-symmetry `theta` and `psi` coverage, low-symmetry coupled Euler cases, and an `S` series including `S=0`,
+   - helper-driven expected ratios plus direct detector-annulus observed ratios,
+   - optional plot writing through `NRSS_WRITE_VALIDATION_PLOTS=1`.
+5. Added `tests/validation/test_analytical_2d_disk_form_factor.py`:
+   - direct analytical 2D disk comparison through the pybind-to-PyHyper workflow,
+   - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`, diameters `70 nm` and `128 nm`,
+   - pointwise and minima-alignment metrics with fixed empirical thresholds,
+   - explicit disk-versus-vacuum morphology,
+   - fixed `sr=1` only, mirroring the sphere test’s assertion anchor while avoiding extra 2D-path variability,
+   - optional plot writing gated by `NRSS_WRITE_VALIDATION_PLOTS=1`.
+6. Added `tests/validation/test_2d_disk_contrast_scaling.py`:
+   - one-morph, multi-energy contrast-scaling validation for the 2D pathway,
+   - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
+   - 24 close-energy scenarios covering beta-only, delta-only, mixed, and split-material families,
+   - integrated-intensity checks over a fixed q window with fixed empirical thresholds.
+7. Added `tests/validation/lib/bragg.py`:
+   - shared deterministic lattice builders and reciprocal-space prediction helpers for Bragg validation,
+   - supports square/hexagonal 2D disk lattices and simple-cubic/HCP 3D sphere lattices,
+   - keeps explicit vacuum as the second material and uses float-center local stamping for morphology construction.
+8. Added `tests/validation/test_bragg_2d_lattice.py`:
+   - deterministic square (`a = 30 nm`) and hexagonal (`a = 45 nm`) disk lattices at `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
+   - validates detector-peak locations and quasi-powder shell locations through the pybind-to-PyHyper workflow,
+   - includes verbose diagnostic plots with full predicted-shell overlays.
+9. Added `tests/validation/test_bragg_3d_lattice.py`:
+   - deterministic simple-cubic (`a = 30 nm`) and ideal HCP (`a = 45 nm`) sphere lattices at `256 x 1024 x 1024`, `PhysSize = 1.0 nm`,
+   - validates detector-visible 3D Bragg peak locations plus azimuthally averaged shell locations,
+   - uses explicit flat-detector geometry handling for shell prediction and includes verbose diagnostic plots with visibility-class overlays.
+10. Added `tests/validation/lib/core_shell.py` plus `tests/validation/test_core_shell_reference.py`:
+   - maintained CoreShell baseline workflow through pybind + PyHyperScattering `WPIntegrator` + manual A-wedge reduction,
+   - experimental PGN RSoXS golden as the scientific gate,
+   - parallel sim-derived golden as a tight regression guard,
+   - `experimental_validation` marker applied to the experimental-reference test,
+   - falsification/subterfuge scenarios intentionally kept only in the development diagnostic, not in the principal `tests/validation` surface.
+11. Added `tests/validation/lib/mwcnt.py` plus `tests/validation/test_mwcnt_reference.py`:
+   - maintained deterministic MWCNT workflow through pybind + PyHyperScattering `WPIntegrator` + anisotropy-observable reduction,
+   - periodic field construction is now the maintained default and the legacy field path remains available as an explicit switch,
+   - maintained simulation defaults are `WindowingType=0` and `EAngleRotation=[0, 20, 340]`,
+   - experimental reduced `A(E)` / `A(q)` observables derived from the tutorial/manuscript workflow are the scientific gate,
+   - `experimental_validation` marker applied to the official MWCNT test,
+   - manuscript Table I provenance plus realized fixed-seed geometry statistics are exposed in the maintained validation plots and helper metadata,
+   - development-only MWCNT falsification/threshold probes stay under `tests/validation/dev/`, not in the principal `tests/validation` surface.
+12. Archived one-off exploratory validation code under `scripts/validation_diagnostics/` so it remains available for future archaeology without polluting pytest collection.
+    - this directory now also holds `orientational_contrast_tiny_diagnostic.py`, the development-only preserved `64^3` probe that preceded the official orientational test,
+    - and `sphere_orientational_contrast_diagnostic.py`, an opt-in artifact generator that writes orientational ratio plots plus TSV summaries under `test-reports/sphere-orientational-contrast-dev/`.
+    - and `core_shell_reference_diagnostic.py`, the opt-in CoreShell artifact generator that also owns the falsification/subterfuge comparisons.
+13. Extended `scripts/run_local_test_report.sh` to include the marker-based `physics_validation` lane in the standard local report, while also supporting `--skip-defaults` plus repeated explicit `--cmd` runs for targeted validation and stochastic-failure checks. Newly added physics modules are therefore included automatically.
+    - physics-test report summaries now retain full docstring descriptions rather than only the first line,
+    - and targeted custom physics commands now resolve per-test statuses in the markdown report instead of falling back to `DESELECTED`.
+    - the report now also captures imported NRSS module resolution plus a hashed manifest of vendored validation-reference artifacts under `tests/validation/data/`.
+14. Targeted local validation against an injected fixed CyRSoXS pybind build removed the prior same-process 2D analytical disk stochastic failure in local testing:
+   - one-process back-to-back `70 nm` then `128 nm` analytical 2D disk validation passed `20/20` repeated runs on a single visible GPU,
+   - the shipped pytest module also passed cleanly against the injected build,
+   - interpret this as local evidence that the 2D-path failure was upstream to NRSS rather than a remaining deterministic NRSS harness issue.
+15. Latest default local report evidence for the expanded suite:
+   - command: `CUDA_VISIBLE_DEVICES=0 bash scripts/run_local_test_report.sh --stop-on-fail`,
+   - timestamp/report: `20260322T140310Z` / `test-reports/20260322T140310Z`,
+   - result: `4/4` steps passed,
+   - physics-validation lane inside the report: `14 passed`, including both CoreShell tests and the new MWCNT experimental test,
+   - the generated markdown summary lists both experimental-reference tests with their `experimental_validation` markers and full scientific citation blocks.
+16. A targeted local CoreShell-only run confirmed the new official module passes cleanly on its own:
+   - command: `CUDA_VISIBLE_DEVICES=0 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_core_shell_reference.py -v`,
+   - result: `2 passed`.
+17. A targeted local MWCNT-only run confirmed the new official module passes cleanly on its own:
+   - command: `CUDA_VISIBLE_DEVICES=0 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_mwcnt_reference.py -v`,
+   - result: `1 passed`,
+   - a development-only threshold probe showed that nearby radius falsifications fail the maintained thresholds while a moderate orientation broadening can still pass, so no threshold tightening was applied.
+18. A targeted installed-build report run also confirmed that the new orientational module is described correctly in `summary.md`:
+   - command: `bash scripts/run_local_test_report.sh --skip-defaults --cmd "python -m pytest tests/validation/test_sphere_orientational_contrast_scaling.py -m physics_validation -v"`,
+   - timestamp/report: `20260321T190619Z` / `test-reports/20260321T190619Z`,
+   - result: `1 passed`,
+   - the “Physics Tests” section now includes the full orientational test description and a `PASSED` status.
+19. Installed-package cross-check for the earlier Bragg coverage also passed:
+   - command: `CUDA_VISIBLE_DEVICES=1 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_bragg_2d_lattice.py tests/validation/test_bragg_3d_lattice.py -v`,
+   - result: `4 passed in 126.03s`,
+   - installed package resolved to `CyRSoXS 1.1.8.0`, patch `9d45790`.
+
+### 8.9 Remaining test-hardening gaps
+
+1. Add CI gating policy for CPU smoke and GPU smoke/parity/physics lanes.
+2. Keep the CPU smoke lane focused on validator, I/O, and API-contract behavior rather than CPU physics parity.
+3. Add backend-contract tests only when alternate backend implementation work begins.
 
 ## 9. Input/Output Contract and Compatibility
 
@@ -339,14 +447,14 @@ Rationale:
 
 ## 14. Phased Delivery Plan
 
-1. Phase 0: Test hardening + pybind golden baselines + deterministic harness.
+1. Test-hardening milestone: pybind golden baselines + deterministic harness.
 2. Phase 1: CuPy backend that mimics CyRSoXS algorithmic flow.
 3. Phase 2: Internal math cleanup (tensor-character refactor) while preserving parity tests.
 4. Phase 3: Additional backends behind shared backend contract.
 
 Independent success criterion:
 
-1. Completion of Phase 0 is a meaningful modernization outcome even if backend phases are delayed.
+1. Completion of the test-hardening milestone is a meaningful modernization outcome even if backend phases are delayed.
 
 ## 15. Explicit Non-Goals (Initial Phases)
 

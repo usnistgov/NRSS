@@ -16,6 +16,8 @@ import time
 import matplotlib.pyplot as plt
 plt.rcParams.update({'font.size':14})
 
+DATA_DIR = pathlib.Path(__file__).resolve().parents[3] / 'tests' / 'validation' / 'data' / 'core_shell'
+
 #Generates Euler morphology from scratch
 def coreshell_spheres_decay_euler(basePath, r=512,d=32,vx_size=2.5,ra=4,t=2.94,phi_iso=0.46,decay_order=0.42,numMaterial=3,
                                   filename="coreshelltest.hdf5",mformat='ZYX', 
@@ -47,7 +49,7 @@ def coreshell_spheres_decay_euler(basePath, r=512,d=32,vx_size=2.5,ra=4,t=2.94,p
     b_zi = cp.zeros([d, r, r])  # shell
 
     #read list of coordinates
-    l = genfromtxt('./lib/CoreShell/LoG_coord.csv', delimiter=',', skip_header=1)
+    l = genfromtxt(DATA_DIR / 'LoG_coord.csv', delimiter=',', skip_header=1)
 
     z,y,x = cp.ogrid[0:d:1,0:r:1, 0:r:1]
 
@@ -149,10 +151,10 @@ def coreshell_spheres_decay_euler(basePath, r=512,d=32,vx_size=2.5,ra=4,t=2.94,p
     time_now = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     folder_name = 'CoreShelltest_' + time_now
     os.mkdir(folder_name)
-    subprocess.run(["cp","./lib/CoreShell/Material1.txt",f"./{folder_name}"])
-    subprocess.run(["cp","./lib/CoreShell/Material2.txt",f"./{folder_name}"])
-    subprocess.run(["cp","./lib/CoreShell/Material3.txt",f"./{folder_name}"])
-    subprocess.run(["cp","./lib/CoreShell/config.txt",f"./{folder_name}"])
+    subprocess.run(["cp",str(DATA_DIR / "Material1.txt"),f"./{folder_name}"])
+    subprocess.run(["cp",str(DATA_DIR / "Material2.txt"),f"./{folder_name}"])
+    subprocess.run(["cp",str(DATA_DIR / "Material3.txt"),f"./{folder_name}"])
+    subprocess.run(["cp",str(DATA_DIR / "config.txt"),f"./{folder_name}"])
     subprocess.run(["mv",f"{filename}",f"./{folder_name}"])
 
     if slurm_file == 1:
@@ -191,7 +193,7 @@ def test_vs_reference(folder_path,cyrsoxs_version='latest', savepng=False):
     
     A = xr.DataArray(A_np, dims=['energy','q'],coords={'q':remeshed.q,'energy':np.round(np.arange(280.0,290.01,0.1),1)}).sortby('energy')
     
-    A_reference = xr.open_dataarray('/home/pjd1/CyRSoXS-Processing/pete/test_directory/lib/CoreShell/CS_reference.nc')
+    A_reference = xr.open_dataarray(DATA_DIR / 'CS_reference.nc')
     A_reference = A_reference.interp(energy=np.round(np.arange(280.0,290.01,0.1),1)).sortby('energy')
     if savepng:
         plt.figure()
