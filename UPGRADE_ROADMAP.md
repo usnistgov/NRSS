@@ -628,17 +628,25 @@ recover:
    - Segment `A1` is measured in the harness and Segments `A2-F` are measured
      in `cupy-rsoxs`,
    - Segment `G` remains reserved for future export timing.
-4. The reusable full-energy backend-comparison harness lives at:
+4. The backend comparison dev library now has a principal cross-backend
+   primary-time comparison entry point at:
+   - `tests/validation/dev/core_shell_backend_performance/run_primary_backend_speed_comparison.py`
+   - supporting notes at `tests/validation/dev/core_shell_backend_performance/README.md`
+   - output artifacts:
+     - `primary_backend_speed_comparison_summary.json`
+     - `primary_backend_speed_comparison_table.tsv`
+     - `primary_backend_speed_comparison_table.png`
+5. The reusable full-energy backend-comparison harness still lives at:
    - `tests/validation/dev/core_shell_backend_performance/run_core_shell_backend_performance_abstract.py`
    - supporting notes at `tests/validation/dev/core_shell_backend_performance/README.md`
-5. The full-energy backend-comparison harness is now legacy/historical only for
+6. The full-energy backend-comparison harness is now legacy/historical only for
    optimization work:
    - it is not the authoritative timing harness,
    - its old mixed workflow metric should not be used to rank current speed
      work,
    - no new `cyrsoxs` timing lanes should be added to the default optimization
      loop.
-6. Current development artifacts that should be treated as the authoritative
+7. Current development artifacts that should be treated as the authoritative
    resumable timing record root are:
    - `test-reports/cupy-rsoxs-optimization-dev/`
    - the current harness writes fresh per-run `summary.json` files under that
@@ -1454,5 +1462,8 @@ Precision and option-surface notes for this campaign:
    - otherwise use `--rotation-specs` and `--energy-lists` to benchmark the
      exact angle or energy sets under discussion,
    - rerun maintained parity checks after promising optimization changes,
+   - use
+     `tests/validation/dev/core_shell_backend_performance/run_primary_backend_speed_comparison.py`
+     when a principal cross-backend primary-time snapshot is needed,
    - treat the legacy full-energy backend-comparison harness as optional
      historical context rather than a required step in the default loop.

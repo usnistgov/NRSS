@@ -2,6 +2,12 @@ This directory is for development-only `cupy-rsoxs` optimization studies.
 
 Nothing here is part of the maintained pytest validation surface.
 
+For the principal cross-backend comparison panel, use:
+
+- `tests/validation/dev/core_shell_backend_performance/run_primary_backend_speed_comparison.py`
+  - that orchestrator consumes this harness for the `cupy-rsoxs` host/device
+    comparison rows and writes the combined summary, TSV, and PNG table.
+
 Current contents:
 
 - `run_cupy_rsoxs_optimization_matrix.py`

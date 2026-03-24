@@ -883,6 +883,10 @@ Remaining intentionally deferred or unresolved items:
   refinement, segment-targeted optimization, export timing, and deeper memory
   instrumentation follow-up. See `UPGRADE_ROADMAP.md` for the current detailed
   state.
+- the principal cross-backend primary-time comparison now lives at
+  `tests/validation/dev/core_shell_backend_performance/run_primary_backend_speed_comparison.py`
+  and emits a combined summary, TSV, and PNG table for the fixed single-energy
+  CoreShell comparison panel
 - the legacy full-energy backend-comparison harness under
   `tests/validation/dev/core_shell_backend_performance/` is no longer the
   authoritative timing harness for optimization work

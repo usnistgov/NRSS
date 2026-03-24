@@ -310,6 +310,157 @@ def test_cupy_optimization_harness_isotropic_comparison_retains_cuda_prewarm_met
 
 
 @pytest.mark.backend_agnostic_contract
+def test_cyrsoxs_timing_harness_parser_accepts_cuda_prewarm_mode():
+    """Ensure the dev cyrsoxs timing harness accepts the CUDA prewarm option surface."""
+    from tests.validation.dev.cyrsoxs_timing.run_cyrsoxs_timing_matrix import build_parser
+
+    args = build_parser().parse_args(["--cuda-prewarm", "before_prepare_inputs"])
+    assert args.cuda_prewarm == "before_prepare_inputs"
+
+
+@pytest.mark.backend_agnostic_contract
+def test_cyrsoxs_timing_harness_default_case_uses_host_borrow_contract():
+    """Ensure the default cyrsoxs timing case mirrors the host-style cupy dev contract."""
+    from tests.validation.dev.cyrsoxs_timing.run_cyrsoxs_timing_matrix import _timing_cases
+
+    cases = _timing_cases(
+        isotropic_representations=("legacy_zero_array",),
+        cuda_prewarm_mode="off",
+        size_labels=("small",),
+        include_triple_no_rotation=False,
+        include_triple_limited=False,
+        include_full_small_check=False,
+        no_rotation_energy_counts=(),
+        rotation_specs=(),
+        energy_lists=(),
+    )
+
+    assert len(cases) == 1
+    case = cases[0]
+    assert case.label == "core_shell_small_single_no_rotation_host_cyrsoxs"
+    assert case.backend == "cyrsoxs"
+    assert case.resident_mode == "host"
+    assert case.field_namespace == "numpy"
+    assert case.input_policy == "strict"
+    assert case.ownership_policy == "borrow"
+
+
+@pytest.mark.backend_agnostic_contract
+def test_cyrsoxs_timing_harness_isotropic_comparison_retains_cuda_prewarm_metadata():
+    """Ensure paired cyrsoxs isotropic comparison summaries preserve the prewarm metadata."""
+    from tests.validation.dev.cyrsoxs_timing.run_cyrsoxs_timing_matrix import (
+        _build_isotropic_representation_comparisons,
+    )
+
+    comparisons = _build_isotropic_representation_comparisons(
+        {
+            "core_shell_small_single_no_rotation_host_cyrsoxs_legacy_zero_array": {
+                "label": "core_shell_small_single_no_rotation_host_cyrsoxs_legacy_zero_array",
+                "status": "ok",
+                "resident_mode": "host",
+                "shape_label": "small",
+                "energies_ev": [285.0],
+                "eangle_rotation": [0.0, 0.0, 0.0],
+                "isotropic_representation": "legacy_zero_array",
+                "cuda_prewarm_requested_mode": "before_prepare_inputs",
+                "cuda_prewarm_applied_mode": "before_prepare_inputs",
+                "primary_seconds": 2.0,
+            },
+            "core_shell_small_single_no_rotation_host_cyrsoxs_enum_contract": {
+                "label": "core_shell_small_single_no_rotation_host_cyrsoxs_enum_contract",
+                "status": "ok",
+                "resident_mode": "host",
+                "shape_label": "small",
+                "energies_ev": [285.0],
+                "eangle_rotation": [0.0, 0.0, 0.0],
+                "isotropic_representation": "enum_contract",
+                "cuda_prewarm_requested_mode": "before_prepare_inputs",
+                "cuda_prewarm_applied_mode": "before_prepare_inputs",
+                "primary_seconds": 1.5,
+            },
+        }
+    )
+
+    comparison = comparisons["core_shell_small_single_no_rotation_host_cyrsoxs"]
+    assert comparison["cuda_prewarm_mode"] == "before_prepare_inputs"
+    assert comparison["cuda_prewarm_applied_mode"] == "before_prepare_inputs"
+
+
+@pytest.mark.backend_agnostic_contract
+def test_primary_backend_speed_comparison_parser_accepts_plot_only():
+    """Ensure the principal cross-backend comparison script supports plot-only regeneration."""
+    from tests.validation.dev.core_shell_backend_performance.run_primary_backend_speed_comparison import (
+        build_parser,
+    )
+
+    args = build_parser().parse_args(["--label", "demo", "--plot-only"])
+    assert args.label == "demo"
+    assert args.plot_only is True
+
+
+@pytest.mark.backend_agnostic_contract
+def test_primary_backend_speed_comparison_rows_use_matching_legacy_baselines():
+    """Ensure host rows use matching legacy startup baselines and device rows appear only on pre-warm rows."""
+    from tests.validation.dev.core_shell_backend_performance.run_primary_backend_speed_comparison import (
+        _build_row_records,
+    )
+
+    def make_summary(legacy_cold, legacy_warm, host_cold, host_warm, device):
+        timing_cases = {}
+        for lane in ("small", "medium", "large"):
+            for fragment in ("single_no_rotation", "single_rot_0_15_165"):
+                timing_cases[f"core_shell_{lane}_{fragment}_host_cyrsoxs"] = {
+                    "status": "ok",
+                    "primary_seconds": legacy_cold if fragment == "single_no_rotation" else legacy_warm,
+                }
+                timing_cases[f"core_shell_{lane}_{fragment}_host_tensor_coeff"] = {
+                    "status": "ok",
+                    "primary_seconds": host_cold if fragment == "single_no_rotation" else host_warm,
+                }
+                timing_cases[f"core_shell_{lane}_{fragment}_device_tensor_coeff"] = {
+                    "status": "ok",
+                    "primary_seconds": device,
+                }
+        return {"label": "synthetic", "timing_cases": timing_cases}
+
+    rows = _build_row_records(
+        legacy_cold=make_summary(10.0, 20.0, 0.0, 0.0, 0.0),
+        legacy_prewarm=make_summary(4.0, 8.0, 0.0, 0.0, 0.0),
+        cupy_host_and_device_cold=make_summary(0.0, 0.0, 5.0, 10.0, 2.0),
+        cupy_host_prewarm=make_summary(0.0, 0.0, 2.0, 4.0, 2.0),
+    )
+
+    cold_no_rotation = rows[0]
+    cold_some_rotation = rows[1]
+    warm_no_rotation = rows[2]
+    warm_some_rotation = rows[3]
+
+    assert cold_no_rotation["startup"] == "cold"
+    assert cold_no_rotation["legacy_cyrsoxs_primary_seconds"] == 10.0
+    assert cold_no_rotation["cupy_rsoxs_host_primary_seconds"] == 5.0
+    assert cold_no_rotation["cupy_rsoxs_host_speedup_vs_legacy"] == 2.0
+    assert cold_no_rotation["cupy_rsoxs_device_primary_seconds"] is None
+
+    assert cold_some_rotation["legacy_cyrsoxs_primary_seconds"] == 20.0
+    assert cold_some_rotation["cupy_rsoxs_host_primary_seconds"] == 10.0
+    assert cold_some_rotation["cupy_rsoxs_host_speedup_vs_legacy"] == 2.0
+    assert cold_some_rotation["cupy_rsoxs_device_primary_seconds"] is None
+
+    assert warm_no_rotation["startup"] == "pre-warm"
+    assert warm_no_rotation["legacy_cyrsoxs_primary_seconds"] == 4.0
+    assert warm_no_rotation["cupy_rsoxs_host_primary_seconds"] == 2.0
+    assert warm_no_rotation["cupy_rsoxs_host_speedup_vs_legacy"] == 2.0
+    assert warm_no_rotation["cupy_rsoxs_device_primary_seconds"] == 2.0
+    assert warm_no_rotation["cupy_rsoxs_device_speedup_vs_legacy_prewarm"] == 2.0
+
+    assert warm_some_rotation["legacy_cyrsoxs_primary_seconds"] == 8.0
+    assert warm_some_rotation["cupy_rsoxs_host_primary_seconds"] == 4.0
+    assert warm_some_rotation["cupy_rsoxs_host_speedup_vs_legacy"] == 2.0
+    assert warm_some_rotation["cupy_rsoxs_device_primary_seconds"] == 2.0
+    assert warm_some_rotation["cupy_rsoxs_device_speedup_vs_legacy_prewarm"] == 4.0
+
+
+@pytest.mark.backend_agnostic_contract
 def test_required_imports():
     """Verify core runtime dependencies import without forcing backend imports."""
     for name in (
