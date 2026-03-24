@@ -740,17 +740,36 @@ Planning decisions additionally locked after the prep milestone:
   still created in NumPy before preconversion to CuPy
 - in that opt-in device-resident lane, the harness synchronizes the default
   stream before starting the timer so upstream CuPy preparation is excluded
+- the live dev optimization harness now also supports optional untimed CUDA
+  prewarm for host-resident steady-state studies:
+  - `--cuda-prewarm off` preserves the default cold subprocess behavior
+  - `--cuda-prewarm before_prepare_inputs` performs a tiny NumPy -> CuPy
+    staging touch inside the worker before `_prepare_core_shell_case_inputs(...)`
+  - this models many-morph single-process workflows without changing backend
+    allocator/pool refresh behavior
+  - device-resident cases record the mode as redundant because that lane
+    already touches CuPy before `primary_start`
 - the limited-rotation triple-energy checkpoint remains available as an opt-in
   lane for either resident-mode variant, but it is not part of the default
   optimization loop
 - in the default host-resident lane, host-to-device staging is included in the
   primary wall-clock metric and is now isolated as private Segment `A2`
+- fresh host-resident `A2` measurements may still include first-touch
+  CUDA/CuPy bring-up, so cold-process `A2` should not be overinterpreted as
+  pure transfer cost
 - Segment `A` is now nominally complete for the common workflow:
   - Segment `A1` constructor work is already small,
   - the accepted host-resident Segment `A2` staging improvement is in place,
   - workflows that intentionally keep morphology fields on GPU should use
     `resident_mode='device'` and are expected to be faster because Segment
     `A2` largely disappears in that use case
+- the authoritative isotropic fast path is now the explicit
+  `SFieldMode.ISOTROPIC` material contract:
+  - named `vacuum` always resolves to that contract
+  - supplied `theta` / `psi` are ignored with warning under that contract
+  - no inferred all-zero scan remains in Segment `A2`
+  - legacy zero-array isotropic inputs remain supported for compatibility but
+    do not receive inferred isotropic optimization
 - default future speed work should focus on Segments `B` and `D`
 - repeated-run host-resident staging reuse is recorded only as a low-priority
   niche possibility; if persistent GPU residency is the real use case, prefer

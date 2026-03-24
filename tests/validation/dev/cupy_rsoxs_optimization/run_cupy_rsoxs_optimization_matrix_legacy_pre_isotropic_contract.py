@@ -32,14 +32,8 @@ if str(SRC_PATH) not in sys.path:
 os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
-from NRSS import SFieldMode
 from NRSS.morphology import Material, Morphology, OpticalConstants
-from NRSS.backends import (
-    assess_array_for_backend_runtime,
-    coerce_array_for_backend,
-    normalize_backend_options,
-    resolve_backend_runtime_contract,
-)
+from NRSS.backends import normalize_backend_options
 from tests.validation.lib.core_shell import has_visible_gpu
 from tests.validation.lib.core_shell import release_runtime_memory
 
@@ -65,8 +59,6 @@ TIMING_SEGMENTS = ("A1", "A2", "B", "C", "D", "E", "F")
 TIMING_SEGMENT_ALIASES = {
     "A": ("A1", "A2"),
 }
-ISOTROPIC_MATERIAL_REPRESENTATIONS = ("legacy_zero_array", "enum_contract")
-CUDA_PREWARM_MODES = ("off", "before_prepare_inputs")
 
 
 @dataclass(frozen=True)
@@ -86,8 +78,6 @@ class BenchmarkCase:
     energies_ev: tuple[float, ...]
     eangle_rotation: tuple[float, float, float]
     field_namespace: str
-    isotropic_representation: str
-    cuda_prewarm_mode: str
     resident_mode: str | None
     input_policy: str
     ownership_policy: str | None
@@ -251,38 +241,6 @@ def _parse_execution_paths(raw: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(normalized))
 
 
-def _parse_isotropic_material_representations(raw: str) -> tuple[str, ...]:
-    cleaned = raw.strip().lower()
-    if cleaned == "both":
-        return ISOTROPIC_MATERIAL_REPRESENTATIONS
-
-    requested = tuple(dict.fromkeys(part.strip().lower() for part in raw.split(",") if part.strip()))
-    if not requested:
-        raise SystemExit(
-            "isotropic_material_representation must select at least one representation."
-        )
-    unknown = tuple(
-        representation
-        for representation in requested
-        if representation not in ISOTROPIC_MATERIAL_REPRESENTATIONS
-    )
-    if unknown:
-        raise SystemExit(
-            "Unsupported isotropic material representation(s) "
-            f"{unknown!r}. Valid values: {ISOTROPIC_MATERIAL_REPRESENTATIONS!r} or 'both'."
-        )
-    return requested
-
-
-def _parse_cuda_prewarm_mode(raw: str) -> str:
-    cleaned = str(raw).strip().lower()
-    if cleaned not in CUDA_PREWARM_MODES:
-        raise SystemExit(
-            f"Unsupported cuda_prewarm {raw!r}. Valid values: {CUDA_PREWARM_MODES!r}."
-        )
-    return cleaned
-
-
 def _resolve_core_shell_energy(value: float, *, available: tuple[float, ...]) -> float:
     closest = min(available, key=lambda candidate: abs(candidate - value))
     if not math.isclose(float(closest), float(value), rel_tol=0.0, abs_tol=1e-6):
@@ -356,16 +314,6 @@ def _energy_list_label_fragment(energies_ev: tuple[float, ...]) -> str:
     digest_input = ",".join(np.format_float_positional(float(value), trim="-") for value in energies_ev)
     digest = hashlib.sha1(digest_input.encode("ascii")).hexdigest()[:8]
     return f"elist_{len(energies_ev)}_{tokens[0]}_{tokens[-1]}_{digest}"
-
-
-def _isotropic_representation_label_suffix(
-    isotropic_representation: str,
-    *,
-    include_suffix: bool,
-) -> str:
-    if not include_suffix and isotropic_representation == "legacy_zero_array":
-        return ""
-    return f"_{isotropic_representation}"
 
 
 def _subset_optical_constants(
@@ -608,37 +556,17 @@ def build_scaled_core_shell_materials(
     size_spec: SizeSpec,
     energies_ev: tuple[float, ...],
     field_namespace: str,
-    isotropic_representation: str = "legacy_zero_array",
 ) -> dict[int, Material]:
     optics = _load_core_shell_optics(tuple(map(float, energies_ev)))
     fields = _convert_fields_namespace(_build_scaled_core_shell_fields(size_spec), field_namespace)
-
-    if isotropic_representation == "legacy_zero_array":
-        mat1_s = fields["mat1_s"]
-        mat1_theta = fields["mat1_theta"]
-        mat1_psi = fields["mat1_psi"]
-        mat3_s = fields["mat3_s"]
-        mat3_theta = fields["mat3_theta"]
-        mat3_psi = fields["mat3_psi"]
-    elif isotropic_representation == "enum_contract":
-        mat1_s = SFieldMode.ISOTROPIC
-        mat1_theta = None
-        mat1_psi = None
-        mat3_s = SFieldMode.ISOTROPIC
-        mat3_theta = None
-        mat3_psi = None
-    else:
-        raise AssertionError(
-            f"Unsupported isotropic representation for the timing harness: {isotropic_representation!r}"
-        )
 
     return {
         1: Material(
             materialID=1,
             Vfrac=fields["mat1_vfrac"],
-            S=mat1_s,
-            theta=mat1_theta,
-            psi=mat1_psi,
+            S=fields["mat1_s"],
+            theta=fields["mat1_theta"],
+            psi=fields["mat1_psi"],
             energies=list(map(float, energies_ev)),
             opt_constants=optics[1].opt_constants,
             name="core",
@@ -656,9 +584,9 @@ def build_scaled_core_shell_materials(
         3: Material(
             materialID=3,
             Vfrac=fields["mat3_vfrac"],
-            S=mat3_s,
-            theta=mat3_theta,
-            psi=mat3_psi,
+            S=fields["mat3_s"],
+            theta=fields["mat3_theta"],
+            psi=fields["mat3_psi"],
             energies=list(map(float, energies_ev)),
             opt_constants=optics[3].opt_constants,
             name="matrix",
@@ -673,7 +601,6 @@ def build_scaled_core_shell_morphology(
     eangle_rotation: tuple[float, float, float],
     backend: str,
     field_namespace: str,
-    isotropic_representation: str = "legacy_zero_array",
     resident_mode: str | None,
     input_policy: str,
     ownership_policy: str | None,
@@ -684,7 +611,6 @@ def build_scaled_core_shell_morphology(
         size_spec=size_spec,
         energies_ev=energies_ev,
         field_namespace=field_namespace,
-        isotropic_representation=isotropic_representation,
     )
     config = _default_morphology_config(energies_ev, eangle_rotation)
 
@@ -711,8 +637,6 @@ def _case_note(case: BenchmarkCase) -> str:
             f"CoreShell {case.shape_label} {size_spec.shape} PhysSize={size_spec.phys_size_nm} "
             f"EAngleRotation={list(case.eangle_rotation)} energies={list(case.energies_ev)} "
             f"resident_mode={case.resident_mode} field_namespace={case.field_namespace} "
-            f"isotropic_representation={case.isotropic_representation} "
-            f"cuda_prewarm_mode={case.cuda_prewarm_mode} "
             f"input_policy={case.input_policy} ownership_policy={case.ownership_policy} "
             f"backend_options={case.backend_options or {}}"
         )
@@ -732,129 +656,6 @@ def _result_summary_line(result: dict[str, Any]) -> str:
     return f"{result['label']}: primary {float(result['primary_seconds']):.3f}s{suffix}"
 
 
-def _strip_isotropic_representation_label_suffix(label: str, isotropic_representation: str) -> str:
-    suffix = _isotropic_representation_label_suffix(
-        isotropic_representation,
-        include_suffix=True,
-    )
-    if label.endswith(suffix):
-        return label[: -len(suffix)]
-    return label
-
-
-def _percent_change_vs_baseline(current: float, baseline: float) -> float | None:
-    if baseline == 0.0:
-        return None
-    return 100.0 * (current - baseline) / baseline
-
-
-def _build_isotropic_representation_comparisons(
-    timing_cases: dict[str, dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    grouped: dict[str, dict[str, dict[str, Any]]] = {}
-    for label, result in timing_cases.items():
-        isotropic_representation = str(result.get("isotropic_representation", ""))
-        if isotropic_representation not in ISOTROPIC_MATERIAL_REPRESENTATIONS:
-            continue
-        base_label = _strip_isotropic_representation_label_suffix(label, isotropic_representation)
-        grouped.setdefault(base_label, {})[isotropic_representation] = result
-
-    comparisons: dict[str, dict[str, Any]] = {}
-    for base_label in sorted(grouped):
-        representations = grouped[base_label]
-        legacy = representations.get("legacy_zero_array")
-        enum = representations.get("enum_contract")
-        if legacy is None or enum is None:
-            continue
-
-        comparison: dict[str, Any] = {
-            "legacy_zero_array_label": legacy["label"],
-            "enum_contract_label": enum["label"],
-            "resident_mode": legacy.get("resident_mode"),
-            "shape_label": legacy.get("shape_label"),
-            "execution_path": dict(legacy.get("backend_options") or {}).get("execution_path"),
-            "energies_ev": list(legacy.get("energies_ev", [])),
-            "eangle_rotation": list(legacy.get("eangle_rotation", [])),
-            "cuda_prewarm_mode": legacy.get("cuda_prewarm_requested_mode", "off"),
-            "cuda_prewarm_applied_mode": legacy.get("cuda_prewarm_applied_mode", "off"),
-        }
-
-        if legacy.get("status") != "ok" or enum.get("status") != "ok":
-            comparison["status"] = "comparison_unavailable"
-            comparison["legacy_zero_array_status"] = legacy.get("status")
-            comparison["enum_contract_status"] = enum.get("status")
-            comparisons[base_label] = comparison
-            continue
-
-        legacy_primary = float(legacy["primary_seconds"])
-        enum_primary = float(enum["primary_seconds"])
-        comparison["status"] = "ok"
-        comparison["primary_seconds"] = {
-            "legacy_zero_array": legacy_primary,
-            "enum_contract": enum_primary,
-        }
-        comparison["primary_delta_seconds"] = enum_primary - legacy_primary
-        comparison["primary_percent_change_vs_legacy"] = _percent_change_vs_baseline(
-            enum_primary,
-            legacy_primary,
-        )
-        comparison["primary_speedup_factor_enum_vs_legacy"] = (
-            None if enum_primary == 0.0 else legacy_primary / enum_primary
-        )
-
-        segment_comparisons: dict[str, dict[str, float | None]] = {}
-        legacy_segments = legacy.get("segment_seconds", {})
-        enum_segments = enum.get("segment_seconds", {})
-        for segment in TIMING_SEGMENTS:
-            legacy_seconds = legacy_segments.get(segment)
-            enum_seconds = enum_segments.get(segment)
-            if legacy_seconds is None and enum_seconds is None:
-                continue
-
-            segment_payload: dict[str, float | None] = {}
-            if legacy_seconds is not None:
-                segment_payload["legacy_zero_array"] = float(legacy_seconds)
-            if enum_seconds is not None:
-                segment_payload["enum_contract"] = float(enum_seconds)
-            if legacy_seconds is not None and enum_seconds is not None:
-                legacy_seconds_float = float(legacy_seconds)
-                enum_seconds_float = float(enum_seconds)
-                segment_payload["delta_seconds"] = enum_seconds_float - legacy_seconds_float
-                segment_payload["percent_change_vs_legacy"] = _percent_change_vs_baseline(
-                    enum_seconds_float,
-                    legacy_seconds_float,
-                )
-            segment_comparisons[segment] = segment_payload
-        comparison["segment_seconds"] = segment_comparisons
-        comparisons[base_label] = comparison
-
-    return comparisons
-
-
-def _isotropic_representation_comparison_summary_line(
-    comparison_label: str,
-    comparison: dict[str, Any],
-) -> str:
-    if comparison.get("status") != "ok":
-        return (
-            f"{comparison_label}: isotropic comparison unavailable "
-            f"(legacy={comparison.get('legacy_zero_array_status', 'missing')}, "
-            f"enum={comparison.get('enum_contract_status', 'missing')})"
-        )
-
-    primary_seconds = comparison["primary_seconds"]
-    legacy_primary = float(primary_seconds["legacy_zero_array"])
-    enum_primary = float(primary_seconds["enum_contract"])
-    delta = float(comparison["primary_delta_seconds"])
-    percent_change = comparison.get("primary_percent_change_vs_legacy")
-    percent_text = "n/a" if percent_change is None else f"{float(percent_change):+.1f}%"
-    delta_text = f"{delta:+.3f}s"
-    return (
-        f"{comparison_label}: primary legacy {legacy_primary:.3f}s, "
-        f"enum {enum_primary:.3f}s, delta {delta_text} ({percent_text})"
-    )
-
-
 def _prepare_core_shell_case_inputs(case: BenchmarkCase) -> dict[str, Any]:
     if case.family != "core_shell":
         raise AssertionError(f"Unsupported timing family: {case.family}")
@@ -865,47 +666,11 @@ def _prepare_core_shell_case_inputs(case: BenchmarkCase) -> dict[str, Any]:
             size_spec=size_spec,
             energies_ev=case.energies_ev,
             field_namespace=case.field_namespace,
-            isotropic_representation=case.isotropic_representation,
         ),
         "phys_size": float(size_spec.phys_size_nm),
         "config": _default_morphology_config(case.energies_ev, case.eangle_rotation),
         "backend_options": case.backend_options,
     }
-
-
-def _resolve_case_cuda_prewarm(case: BenchmarkCase) -> tuple[str, str | None]:
-    if case.cuda_prewarm_mode == "off":
-        return "off", "CUDA prewarm disabled."
-    if case.cuda_prewarm_mode == "before_prepare_inputs":
-        if case.resident_mode == "device":
-            return (
-                "redundant_device_prepare",
-                "Device-resident field preparation already touches CuPy before primary_start.",
-            )
-        return "before_prepare_inputs", None
-    raise AssertionError(f"Unsupported cuda_prewarm mode: {case.cuda_prewarm_mode!r}")
-
-
-def _prewarm_cuda_runtime_for_host_staging(
-    *,
-    backend_options: dict[str, Any] | None = None,
-) -> float:
-    runtime_contract = resolve_backend_runtime_contract("cupy-rsoxs", backend_options)
-    warm_host = np.zeros((1,), dtype=np.float32)
-    started = time.perf_counter()
-    plan = assess_array_for_backend_runtime(
-        warm_host,
-        backend_name="cupy-rsoxs",
-        field_name="Vfrac",
-        material_id=0,
-        contract=runtime_contract,
-    )
-    warmed = coerce_array_for_backend(warm_host, plan)
-    import cupy as cp
-
-    cp.cuda.Stream.null.synchronize()
-    del warmed
-    return time.perf_counter() - started
 
 
 def _construct_morphology_for_timing_case(case: BenchmarkCase, prepared: dict[str, Any]) -> Morphology:
@@ -938,8 +703,6 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         "shape_label": case.shape_label,
         "resident_mode": case.resident_mode,
         "field_namespace": case.field_namespace,
-        "isotropic_representation": case.isotropic_representation,
-        "cuda_prewarm_requested_mode": case.cuda_prewarm_mode,
         "input_policy": case.input_policy,
         "ownership_policy": case.ownership_policy,
         "backend_options": dict(case.backend_options or {}),
@@ -958,15 +721,6 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
     morphology = None
     backend_result = None
     try:
-        prewarm_mode, prewarm_note = _resolve_case_cuda_prewarm(case)
-        result["cuda_prewarm_applied_mode"] = prewarm_mode
-        if prewarm_note is not None:
-            result["cuda_prewarm_note"] = prewarm_note
-        if prewarm_mode == "before_prepare_inputs":
-            result["cuda_prewarm_seconds"] = _prewarm_cuda_runtime_for_host_staging(
-                backend_options=case.backend_options,
-            )
-
         prepared_inputs = _prepare_core_shell_case_inputs(case)
         if case.field_namespace == "cupy":
             _synchronize_cupy_default_stream()
@@ -1075,8 +829,6 @@ def _run_case_subprocess(
 def _timing_cases(
     *,
     resident_modes: tuple[str, ...],
-    isotropic_representations: tuple[str, ...],
-    cuda_prewarm_mode: str,
     execution_paths: tuple[str, ...],
     size_labels: tuple[str, ...],
     timing_segments: tuple[str, ...],
@@ -1088,192 +840,176 @@ def _timing_cases(
     energy_lists: tuple[tuple[float, ...], ...],
 ) -> list[BenchmarkCase]:
     cases: list[BenchmarkCase] = []
-    include_representation_in_label = (
-        len(isotropic_representations) > 1
-        or isotropic_representations[0] != "legacy_zero_array"
-    )
     for mode in resident_modes:
         variant = RESIDENT_VARIANTS[mode]
-        for isotropic_representation in isotropic_representations:
-            representation_suffix = _isotropic_representation_label_suffix(
-                isotropic_representation,
-                include_suffix=include_representation_in_label,
-            )
-            for execution_path in execution_paths:
-                backend_options = {"execution_path": execution_path}
+        for execution_path in execution_paths:
+            backend_options = {"execution_path": execution_path}
 
-                def append_case(
-                    *,
-                    label: str,
-                    size_label: str,
-                    energies_ev: tuple[float, ...],
-                    eangle_rotation: tuple[float, float, float],
-                    notes: str,
-                ) -> None:
-                    cases.append(
-                        BenchmarkCase(
-                            label=label,
-                            family="core_shell",
-                            backend="cupy-rsoxs",
-                            shape_label=size_label,
-                            energies_ev=energies_ev,
-                            eangle_rotation=eangle_rotation,
-                            field_namespace=variant.field_namespace,
-                            isotropic_representation=isotropic_representation,
-                            cuda_prewarm_mode=cuda_prewarm_mode,
-                            resident_mode=variant.resident_mode,
-                            input_policy=variant.input_policy,
-                            ownership_policy=variant.ownership_policy,
-                            backend_options=backend_options,
-                            timing_segments=timing_segments,
-                            notes=notes,
-                        )
+            def append_case(
+                *,
+                label: str,
+                size_label: str,
+                energies_ev: tuple[float, ...],
+                eangle_rotation: tuple[float, float, float],
+                notes: str,
+            ) -> None:
+                cases.append(
+                    BenchmarkCase(
+                        label=label,
+                        family="core_shell",
+                        backend="cupy-rsoxs",
+                        shape_label=size_label,
+                        energies_ev=energies_ev,
+                        eangle_rotation=eangle_rotation,
+                        field_namespace=variant.field_namespace,
+                        resident_mode=variant.resident_mode,
+                        input_policy=variant.input_policy,
+                        ownership_policy=variant.ownership_policy,
+                        backend_options=backend_options,
+                        timing_segments=timing_segments,
+                        notes=notes,
                     )
+                )
 
-                for size_label in size_labels:
+            for size_label in size_labels:
+                append_case(
+                    label=(
+                        f"core_shell_{size_label}_single_no_rotation_"
+                        f"{variant.label_suffix}_{execution_path}"
+                    ),
+                    size_label=size_label,
+                    energies_ev=CORE_SHELL_SINGLE_ENERGIES,
+                    eangle_rotation=EANGLE_OFF,
+                    notes=(
+                        f"{variant.notes} Primary no-rotation tuning lane. "
+                        f"execution_path={execution_path}."
+                    ),
+                )
+
+                if include_triple_no_rotation:
                     append_case(
                         label=(
-                            f"core_shell_{size_label}_single_no_rotation_"
-                            f"{variant.label_suffix}_{execution_path}{representation_suffix}"
+                            f"core_shell_{size_label}_triple_no_rotation_"
+                            f"{variant.label_suffix}_{execution_path}"
+                        ),
+                        size_label=size_label,
+                        energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
+                        eangle_rotation=EANGLE_OFF,
+                        notes=(
+                            f"{variant.notes} Secondary three-energy no-rotation checkpoint lane. "
+                            f"execution_path={execution_path}."
+                        ),
+                    )
+
+                for energy_count in no_rotation_energy_counts:
+                    if energy_count == 1:
+                        continue
+                    append_case(
+                        label=(
+                            f"core_shell_{size_label}_{energy_count}energy_no_rotation_"
+                            f"{variant.label_suffix}_{execution_path}"
+                        ),
+                        size_label=size_label,
+                        energies_ev=_centered_core_shell_energies(energy_count),
+                        eangle_rotation=EANGLE_OFF,
+                        notes=(
+                            f"{variant.notes} Development-only centered-energy no-rotation lane "
+                            f"with {energy_count} energies. execution_path={execution_path}."
+                        ),
+                    )
+
+                if include_triple_limited:
+                    append_case(
+                        label=(
+                            f"core_shell_{size_label}_triple_limited_rotation_"
+                            f"{variant.label_suffix}_{execution_path}"
+                        ),
+                        size_label=size_label,
+                        energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
+                        eangle_rotation=EANGLE_LIMITED,
+                        notes=(
+                            f"{variant.notes} Secondary limited-EAngle checkpoint lane. "
+                            f"execution_path={execution_path}."
+                        ),
+                    )
+
+                for eangle_rotation in rotation_specs:
+                    if eangle_rotation == EANGLE_OFF:
+                        continue
+                    rotation_label = _rotation_label_fragment(eangle_rotation)
+                    append_case(
+                        label=(
+                            f"core_shell_{size_label}_single_{rotation_label}_"
+                            f"{variant.label_suffix}_{execution_path}"
                         ),
                         size_label=size_label,
                         energies_ev=CORE_SHELL_SINGLE_ENERGIES,
-                        eangle_rotation=EANGLE_OFF,
+                        eangle_rotation=eangle_rotation,
                         notes=(
-                            f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                            f"Primary no-rotation tuning lane. execution_path={execution_path}."
+                            f"{variant.notes} Custom single-energy rotation lane with "
+                            f"EAngleRotation={list(eangle_rotation)} "
+                            f"([StartAngle, IncrementAngle, EndAngle]). "
+                            f"execution_path={execution_path}."
                         ),
                     )
 
-                    if include_triple_no_rotation:
-                        append_case(
-                            label=(
-                                f"core_shell_{size_label}_triple_no_rotation_"
-                                f"{variant.label_suffix}_{execution_path}{representation_suffix}"
-                            ),
-                            size_label=size_label,
-                            energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
-                            eangle_rotation=EANGLE_OFF,
-                            notes=(
-                                f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Secondary three-energy no-rotation checkpoint lane. "
-                                f"execution_path={execution_path}."
-                            ),
-                        )
+                for energies_ev in energy_lists:
+                    if energies_ev == CORE_SHELL_SINGLE_ENERGIES:
+                        continue
+                    energy_label = _energy_list_label_fragment(energies_ev)
+                    append_case(
+                        label=(
+                            f"core_shell_{size_label}_{energy_label}_no_rotation_"
+                            f"{variant.label_suffix}_{execution_path}"
+                        ),
+                        size_label=size_label,
+                        energies_ev=energies_ev,
+                        eangle_rotation=EANGLE_OFF,
+                        notes=(
+                            f"{variant.notes} Custom explicit-energy no-rotation lane with "
+                            f"energies={list(energies_ev)}. execution_path={execution_path}."
+                        ),
+                    )
 
-                    for energy_count in no_rotation_energy_counts:
-                        if energy_count == 1:
-                            continue
-                        append_case(
-                            label=(
-                                f"core_shell_{size_label}_{energy_count}energy_no_rotation_"
-                                f"{variant.label_suffix}_{execution_path}{representation_suffix}"
-                            ),
-                            size_label=size_label,
-                            energies_ev=_centered_core_shell_energies(energy_count),
-                            eangle_rotation=EANGLE_OFF,
-                            notes=(
-                                f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Development-only centered-energy no-rotation lane with {energy_count} "
-                                f"energies. execution_path={execution_path}."
-                            ),
-                        )
-
-                    if include_triple_limited:
-                        append_case(
-                            label=(
-                                f"core_shell_{size_label}_triple_limited_rotation_"
-                                f"{variant.label_suffix}_{execution_path}{representation_suffix}"
-                            ),
-                            size_label=size_label,
-                            energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
-                            eangle_rotation=EANGLE_LIMITED,
-                            notes=(
-                                f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Secondary limited-EAngle checkpoint lane. "
-                                f"execution_path={execution_path}."
-                            ),
-                        )
-
-                    for eangle_rotation in rotation_specs:
-                        if eangle_rotation == EANGLE_OFF:
-                            continue
-                        rotation_label = _rotation_label_fragment(eangle_rotation)
-                        append_case(
-                            label=(
-                                f"core_shell_{size_label}_single_{rotation_label}_"
-                                f"{variant.label_suffix}_{execution_path}{representation_suffix}"
-                            ),
-                            size_label=size_label,
-                            energies_ev=CORE_SHELL_SINGLE_ENERGIES,
-                            eangle_rotation=eangle_rotation,
-                            notes=(
-                                f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Custom single-energy rotation lane with EAngleRotation={list(eangle_rotation)} "
-                                f"([StartAngle, IncrementAngle, EndAngle]). "
-                                f"execution_path={execution_path}."
-                            ),
-                        )
-
+                for eangle_rotation in rotation_specs:
+                    if eangle_rotation == EANGLE_OFF:
+                        continue
+                    rotation_label = _rotation_label_fragment(eangle_rotation)
                     for energies_ev in energy_lists:
                         if energies_ev == CORE_SHELL_SINGLE_ENERGIES:
                             continue
                         energy_label = _energy_list_label_fragment(energies_ev)
                         append_case(
                             label=(
-                                f"core_shell_{size_label}_{energy_label}_no_rotation_"
-                                f"{variant.label_suffix}_{execution_path}{representation_suffix}"
+                                f"core_shell_{size_label}_{energy_label}_{rotation_label}_"
+                                f"{variant.label_suffix}_{execution_path}"
                             ),
                             size_label=size_label,
                             energies_ev=energies_ev,
-                            eangle_rotation=EANGLE_OFF,
+                            eangle_rotation=eangle_rotation,
                             notes=(
-                                f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Custom explicit-energy no-rotation lane with energies={list(energies_ev)}. "
+                                f"{variant.notes} Custom explicit-energy plus custom rotation lane "
+                                f"with energies={list(energies_ev)} and "
+                                f"EAngleRotation={list(eangle_rotation)} "
+                                f"([StartAngle, IncrementAngle, EndAngle]). "
                                 f"execution_path={execution_path}."
                             ),
                         )
 
-                    for eangle_rotation in rotation_specs:
-                        if eangle_rotation == EANGLE_OFF:
-                            continue
-                        rotation_label = _rotation_label_fragment(eangle_rotation)
-                        for energies_ev in energy_lists:
-                            if energies_ev == CORE_SHELL_SINGLE_ENERGIES:
-                                continue
-                            energy_label = _energy_list_label_fragment(energies_ev)
-                            append_case(
-                                label=(
-                                    f"core_shell_{size_label}_{energy_label}_{rotation_label}_"
-                                    f"{variant.label_suffix}_{execution_path}{representation_suffix}"
-                                ),
-                                size_label=size_label,
-                                energies_ev=energies_ev,
-                                eangle_rotation=eangle_rotation,
-                                notes=(
-                                    f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                    f"Custom explicit-energy plus custom rotation lane with "
-                                    f"energies={list(energies_ev)} and EAngleRotation={list(eangle_rotation)} "
-                                    f"([StartAngle, IncrementAngle, EndAngle]). "
-                                    f"execution_path={execution_path}."
-                                ),
-                            )
-
-                if include_full_small_check and "small" in size_labels:
-                    append_case(
-                        label=(
-                            f"core_shell_small_triple_full_rotation_"
-                            f"{variant.label_suffix}_{execution_path}{representation_suffix}"
-                        ),
-                        size_label="small",
-                        energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
-                        eangle_rotation=EANGLE_FULL,
-                        notes=(
-                            f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                            f"Occasional expensive checkpoint for the full parity-style rotation loop. "
-                            f"execution_path={execution_path}."
-                        ),
-                    )
+            if include_full_small_check and "small" in size_labels:
+                append_case(
+                    label=(
+                        f"core_shell_small_triple_full_rotation_"
+                        f"{variant.label_suffix}_{execution_path}"
+                    ),
+                    size_label="small",
+                    energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
+                    eangle_rotation=EANGLE_FULL,
+                    notes=(
+                        f"{variant.notes} Occasional expensive checkpoint for the full parity-style "
+                        f"rotation loop. execution_path={execution_path}."
+                    ),
+                )
     return cases
 
 
@@ -1288,10 +1024,6 @@ def run_matrix(args: argparse.Namespace) -> int:
 
     run_label = args.label or _timestamp()
     resident_modes = _parse_resident_modes(args.resident_modes)
-    isotropic_representations = _parse_isotropic_material_representations(
-        args.isotropic_material_representation
-    )
-    cuda_prewarm_mode = _parse_cuda_prewarm_mode(args.cuda_prewarm)
     execution_paths = _parse_execution_paths(args.execution_paths)
     size_labels = _parse_csv_labels(args.size_labels)
     unknown = [label for label in size_labels if label not in SIZE_SPECS]
@@ -1312,8 +1044,6 @@ def run_matrix(args: argparse.Namespace) -> int:
         "timing_boundary": PRIMARY_TIMING_BOUNDARY,
         "timing_segments": list(timing_segments),
         "resident_modes": list(resident_modes),
-        "isotropic_material_representations": list(isotropic_representations),
-        "cuda_prewarm_mode": cuda_prewarm_mode,
         "execution_paths": list(execution_paths),
         "size_labels": list(size_labels),
         "include_triple_no_rotation": bool(args.include_triple_no_rotation),
@@ -1323,7 +1053,6 @@ def run_matrix(args: argparse.Namespace) -> int:
         "explicit_energy_lists": [list(energies) for energies in energy_lists],
         "segment_g_status": "Reserved for future export timing. Not recorded in this pass.",
         "timing_cases": {},
-        "isotropic_representation_comparisons": {},
     }
 
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -1331,8 +1060,6 @@ def run_matrix(args: argparse.Namespace) -> int:
     print("Running cupy-rsoxs timing cases...", flush=True)
     for case in _timing_cases(
         resident_modes=resident_modes,
-        isotropic_representations=isotropic_representations,
-        cuda_prewarm_mode=cuda_prewarm_mode,
         execution_paths=execution_paths,
         size_labels=size_labels,
         timing_segments=timing_segments,
@@ -1346,15 +1073,6 @@ def run_matrix(args: argparse.Namespace) -> int:
         result = _run_case_subprocess(case=case, output_dir=output_dir)
         summary["timing_cases"][case.label] = result
         print(_result_summary_line(result), flush=True)
-
-    summary["isotropic_representation_comparisons"] = _build_isotropic_representation_comparisons(
-        summary["timing_cases"]
-    )
-    for comparison_label, comparison in summary["isotropic_representation_comparisons"].items():
-        print(
-            _isotropic_representation_comparison_summary_line(comparison_label, comparison),
-            flush=True,
-        )
 
     _write_summary(run_dir, summary)
     print(f"Wrote {run_dir / SUMMARY_NAME}", flush=True)
@@ -1375,22 +1093,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--resident-modes",
         default="host",
         help="Comma-separated resident-mode variants to run. Supported values: host,device.",
-    )
-    parser.add_argument(
-        "--isotropic-material-representation",
-        default="legacy_zero_array",
-        help=(
-            "Isotropic-material representation to use for the CoreShell core/matrix materials. "
-            "Supported values: legacy_zero_array, enum_contract, or both."
-        ),
-    )
-    parser.add_argument(
-        "--cuda-prewarm",
-        default="off",
-        help=(
-            "Optional untimed CUDA prewarm mode for the dev harness. "
-            "Supported values: off or before_prepare_inputs."
-        ),
     )
     parser.add_argument(
         "--execution-paths",

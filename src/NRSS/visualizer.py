@@ -127,28 +127,32 @@ def morphology_visualizer(
             matplotlib.use("Agg")  # Prevent showing stuff
 
         for i in range(1, morphology._numMaterial + 1):
+            material = morphology.materials[i]
+            effective_fields = morphology._material_effective_fields(material)
+            vfrac = effective_fields["Vfrac"]
+            s_field = effective_fields["S"]
+            theta_field = effective_fields["theta"]
+            psi_field = effective_fields["psi"]
             fig = plt.figure(figsize=(8.5, 12.75), dpi=dpi)
             if runquiet == False:
                 print(
-                    f"Material {i} Vfrac. Min: {morphology.materials[i].Vfrac.min()} Max:"
-                    f" {morphology.materials[i].Vfrac.max()}"
+                    f"Material {i} Vfrac. Min: {vfrac.min()} Max:"
+                    f" {vfrac.max()}"
                 )
                 print(
-                    f"Material {i} S. Min: {morphology.materials[i].S.min()} Max:"
-                    f" {morphology.materials[i].S.max()}"
+                    f"Material {i} S. Min: {s_field.min()} Max:"
+                    f" {s_field.max()}"
                 )
                 print(
-                    f"Material {i} theta. Min: {morphology.materials[i].theta.min()} Max:"
-                    f" {morphology.materials[i].theta.max()}"
+                    f"Material {i} theta. Min: {theta_field.min()} Max:"
+                    f" {theta_field.max()}"
                 )
                 print(
-                    f"Material {i} psi. Min: {morphology.materials[i].psi.min()} Max:"
-                    f" {morphology.materials[i].psi.max()}"
+                    f"Material {i} psi. Min: {psi_field.min()} Max:"
+                    f" {psi_field.max()}"
                 )
 
-            if (morphology.materials[i].theta.min() < 0) or (
-                morphology.materials[i].theta.max() > (np.pi)
-            ):
+            if (theta_field.min() < 0) or (theta_field.max() > (np.pi)):
                 warnings.warn(
                     "Visualization expects theta to have bounds of [0,pi]. This model has theta"
                     " outside those bounds and visualization may be incorrect."
@@ -198,7 +202,7 @@ def morphology_visualizer(
                         cmap = plt.get_cmap("winter")
 
                     Vfracplot = ax1.imshow(
-                        morphology.materials[i].Vfrac[z_slice, :, :],
+                        vfrac[z_slice, :, :],
                         cmap=cmap,
                         origin="lower",
                         interpolation="none",
@@ -206,7 +210,7 @@ def morphology_visualizer(
                     )
                     ax1.set_ylabel("Y index", labelpad=0)
                     ax1.set_xlabel("X index")
-                    ax1.set_title(f"Mat {i} {morphology.materials[i].name} Vfrac")
+                    ax1.set_title(f"Mat {i} {material.name} Vfrac")
                     ax1.set_xlim(start_x, end_x)
                     ax1.set_ylim(start_y, end_y)
                     Vfrac_cbar = plt.colorbar(Vfracplot, ax=ax1, fraction=0.040)
@@ -229,7 +233,7 @@ def morphology_visualizer(
                         cmap = plt.get_cmap("nipy_spectral")
 
                     Splot = ax2.imshow(
-                        morphology.materials[i].S[z_slice, :, :],
+                        s_field[z_slice, :, :],
                         cmap=cmap,
                         origin="lower",
                         interpolation="none",
@@ -237,7 +241,7 @@ def morphology_visualizer(
                     )
                     ax2.set_ylabel("Y index", labelpad=0)
                     ax2.set_xlabel("X index")
-                    ax2.set_title(f"Mat {i} {morphology.materials[i].name} S")
+                    ax2.set_title(f"Mat {i} {material.name} S")
                     ax2.set_xlim(start_x, end_x)
                     ax2.set_ylim(start_y, end_y)
                     S_cbar = plt.colorbar(Splot, fraction=0.040)
@@ -248,16 +252,16 @@ def morphology_visualizer(
                 # only do this if not runquiet; these plots are not outputted
                 if runquiet is not True:
                     ax3 = plt.subplot(gs[1, 0])
-                    ax3.hist(morphology.materials[i].Vfrac.flatten())
-                    ax3.set_title(f"Mat {i} {morphology.materials[i].name} Vfrac")
+                    ax3.hist(vfrac.flatten())
+                    ax3.set_title(f"Mat {i} {material.name} Vfrac")
                     ax3.set_xlim(left=0)
                     ax3.set_xlabel("Vfrac: volume fraction")
                     ax3.set_ylabel("num voxels")
                     ax3.set_yscale("log")
 
                     ax4 = plt.subplot(gs[1, 1])
-                    ax4.hist(morphology.materials[i].S.flatten())
-                    ax4.set_title(f"Mat {i} {morphology.materials[i].name} S")
+                    ax4.hist(s_field.flatten())
+                    ax4.set_title(f"Mat {i} {material.name} S")
                     ax4.set_xlim(left=0)
                     ax4.set_xlabel("S: orientational order parameter")
                     ax4.set_ylabel("num voxels")
@@ -269,10 +273,10 @@ def morphology_visualizer(
                     if screen_euler:
                         thetaplot = ax5.imshow(
                             np.ma.masked_array(
-                                morphology.materials[i].theta[z_slice, :, :] % np.pi,
+                                theta_field[z_slice, :, :] % np.pi,
                                 np.logical_or(
-                                    morphology.materials[i].Vfrac[z_slice, :, :] < 0.01,
-                                    morphology.materials[i].S[z_slice, :, :] < 0.01,
+                                    vfrac[z_slice, :, :] < 0.01,
+                                    s_field[z_slice, :, :] < 0.01,
                                 ),
                             ),
                             cmap=plt.get_cmap("jet"),
@@ -283,15 +287,15 @@ def morphology_visualizer(
 
                     else:
                         thetaplot = ax5.imshow(
-                            morphology.materials[i].theta[z_slice, :, :] % np.pi,
+                            theta_field[z_slice, :, :] % np.pi,
                             cmap=plt.get_cmap("jet"),
                             norm=norm,
                             origin="lower",
                             interpolation="none",
-                        )
+                    )
                     ax5.set_ylabel("Y index")
                     ax5.set_xlabel("X index")
-                    ax5.set_title(f"Mat {i} {morphology.materials[i].name} theta")
+                    ax5.set_title(f"Mat {i} {material.name} theta")
                     ax5.set_xlim(start_x, end_x)
                     ax5.set_ylim(start_y, end_y)
                     theta_cbar = plt.colorbar(thetaplot, fraction=0.040)
@@ -344,12 +348,12 @@ def morphology_visualizer(
                     norm = matplotlib.colors.Normalize(vmin=0, vmax=2 * np.pi, clip=False)
                     if screen_euler:
                         screen_mask = np.logical_or(
-                            morphology.materials[i].Vfrac[z_slice, :, :] < 0.01,
-                            morphology.materials[i].S[z_slice, :, :] < 0.01,
+                            vfrac[z_slice, :, :] < 0.01,
+                            s_field[z_slice, :, :] < 0.01,
                         )
                         psiplot = ax6.imshow(
                             np.ma.masked_array(
-                                morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi),
+                                psi_field[z_slice, :, :] % (2 * np.pi),
                                 screen_mask,
                             ),
                             cmap=psi_cmap,  # plt.get_cmap("hsv"),
@@ -360,14 +364,14 @@ def morphology_visualizer(
                         if add_quiver:
                             screen_white = np.logical_or(
                                 screen_mask,
-                                (morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi)) > np.pi,
+                                (psi_field[z_slice, :, :] % (2 * np.pi)) > np.pi,
                             )
                             screen_black = np.logical_or(
                                 screen_mask,
-                                (morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi)) < np.pi,
+                                (psi_field[z_slice, :, :] % (2 * np.pi)) < np.pi,
                             )
-                            sin_psi = np.sin(morphology.materials[i].psi[z_slice, :, :])
-                            cos_psi = np.cos(morphology.materials[i].psi[z_slice, :, :])
+                            sin_psi = np.sin(psi_field[z_slice, :, :])
+                            cos_psi = np.cos(psi_field[z_slice, :, :])
                             len_scale = np.maximum(np.abs(sin_psi), np.abs(cos_psi))
                             if quiver_bw:
                                 ax6.quiver(
@@ -398,8 +402,7 @@ def morphology_visualizer(
                                         screen_white,
                                     ),
                                     np.ma.masked_array(
-                                        (morphology.materials[i].psi[z_slice, :, :] + np.pi)
-                                        % (2 * np.pi),
+                                        (psi_field[z_slice, :, :] + np.pi) % (2 * np.pi),
                                         screen_white,
                                     ),
                                     cmap=psi_cmap,  # plt.get_cmap("hsv"),
@@ -440,8 +443,7 @@ def morphology_visualizer(
                                         screen_black,
                                     ),
                                     np.ma.masked_array(
-                                        (morphology.materials[i].psi[z_slice, :, :] + np.pi)
-                                        % (2 * np.pi),
+                                        (psi_field[z_slice, :, :] + np.pi) % (2 * np.pi),
                                         screen_black,
                                     ),
                                     cmap=psi_cmap,  # plt.get_cmap("hsv"),
@@ -455,21 +457,17 @@ def morphology_visualizer(
                                 )
                     else:
                         psiplot = ax6.imshow(
-                            morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi),
+                            psi_field[z_slice, :, :] % (2 * np.pi),
                             cmap=psi_cmap,  # plt.get_cmap("hsv"),
                             norm=norm,
                             origin="lower",
                             interpolation="none",
                         )
                         if add_quiver:
-                            screen_white = (
-                                morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi) > np.pi
-                            )
-                            screen_black = (
-                                morphology.materials[i].psi[z_slice, :, :] % (2 * np.pi) < np.pi
-                            )
-                            sin_psi = np.sin(morphology.materials[i].psi[z_slice, :, :])
-                            cos_psi = np.cos(morphology.materials[i].psi[z_slice, :, :])
+                            screen_white = psi_field[z_slice, :, :] % (2 * np.pi) > np.pi
+                            screen_black = psi_field[z_slice, :, :] % (2 * np.pi) < np.pi
+                            sin_psi = np.sin(psi_field[z_slice, :, :])
+                            cos_psi = np.cos(psi_field[z_slice, :, :])
                             len_scale = np.maximum(np.abs(sin_psi), np.abs(cos_psi))
                             ax6.quiver(
                                 np.ma.masked_array(
@@ -508,7 +506,7 @@ def morphology_visualizer(
 
                     ax6.set_ylabel("Y index")
                     ax6.set_xlabel("X index")
-                    ax6.set_title(f"Mat {i} {morphology.materials[i].name} psi")
+                    ax6.set_title(f"Mat {i} {material.name} psi")
                     ax6.set_xlim(start_x, end_x)
                     ax6.set_ylim(start_y, end_y)
                     psi_cbar = plt.colorbar(psiplot, fraction=0.040)
@@ -557,16 +555,16 @@ def morphology_visualizer(
 
                 if runquiet is not True:
                     ax7 = plt.subplot(gs[4, 0])
-                    ax7.hist(morphology.materials[i].theta.flatten())
-                    ax7.set_title(f"Mat {i} {morphology.materials[i].name} theta")
+                    ax7.hist(theta_field.flatten())
+                    ax7.set_title(f"Mat {i} {material.name} theta")
                     ax7.set_xlim(left=0)
                     ax7.set_xlabel("theta in radians")
                     ax7.set_ylabel("num voxels")
                     ax7.set_yscale("log")
 
                     ax8 = plt.subplot(gs[4, 1])
-                    ax8.hist(morphology.materials[i].psi.flatten())
-                    ax8.set_title(f"Mat {i} {morphology.materials[i].name} psi")
+                    ax8.hist(psi_field.flatten())
+                    ax8.set_title(f"Mat {i} {material.name} psi")
                     ax8.set_xlim(left=0)
                     ax8.set_xlabel("psi in radians")
                     ax8.set_ylabel("num voxels")

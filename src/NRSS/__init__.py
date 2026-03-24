@@ -19,9 +19,11 @@ except ImportError:
     __version__ = "0.0.0"  # Fallback version if the file is missing
 
 from .backends import available_backends, format_backend_availability, get_backend_info, known_backends
+from .material_contracts import SFieldMode
 
 __all__ = [
     "__version__",
+    "SFieldMode",
     "available_backends",
     "format_backend_availability",
     "get_backend_info",

@@ -2,6 +2,7 @@ import h5py
 # import pathlib
 import warnings
 from .checkH5 import check_NumMat
+from .material_contracts import SFieldMode, is_isotropic_s_field_mode
 from .reader import read_material, read_config
 from .writer import write_opts, write_hdf5
 from .visualizer import morphology_visualizer
@@ -222,6 +223,7 @@ class Morphology:
                     self.materials[i] = Material(materialID=i)
 
         self._bind_material_owners()
+        self._normalize_material_contracts()
         self.normalize_materials_for_backend(report_attr='construction_backend_coercion_report')
 
         # flag denoting if Morphology has been simulated
@@ -236,6 +238,63 @@ class Morphology:
     def _bind_material_owners(self):
         for material in self.materials.values():
             material._owner_morphology = self
+
+    @staticmethod
+    def _material_is_explicit_isotropic(material):
+        return bool(getattr(material, "_explicit_isotropic_contract", False))
+
+    def _normalize_material_contract(self, material):
+        explicit_isotropic = is_isotropic_s_field_mode(material.S)
+        object.__setattr__(material, "_explicit_isotropic_contract", explicit_isotropic)
+        if not explicit_isotropic:
+            return
+
+        material_id = getattr(material, "materialID", "unknown")
+        for field_name in ("theta", "psi"):
+            if getattr(material, field_name) is None:
+                continue
+            warnings.warn(
+                f"Material {material_id} uses SFieldMode.ISOTROPIC, so {field_name} is ignored and will be treated as None.",
+                stacklevel=2,
+            )
+            object.__setattr__(material, field_name, None)
+
+    def _normalize_material_contracts(self):
+        for material in self.materials.values():
+            self._normalize_material_contract(material)
+
+    def _material_contract_field_names(self, material, *, include_effective_euler=False):
+        if self._material_is_explicit_isotropic(material) and not include_effective_euler:
+            return ("Vfrac",)
+        return ("Vfrac", "S", "theta", "psi")
+
+    def _material_effective_field(self, material, field_name):
+        if field_name == "Vfrac":
+            return material.Vfrac
+
+        if not self._material_is_explicit_isotropic(material):
+            return getattr(material, field_name)
+
+        vfrac = material.Vfrac
+        if vfrac is None:
+            return None
+
+        info = inspect_array(vfrac)
+        if info["namespace"] == "numpy":
+            return np.zeros_like(np.asarray(vfrac), dtype=vfrac.dtype)
+        if info["namespace"] == "cupy":
+            xp = get_namespace_module("cupy")
+            return xp.zeros_like(vfrac, dtype=vfrac.dtype)
+        raise TypeError(
+            "Explicit isotropic material contract requires Vfrac to be a NumPy or CuPy array "
+            f"before synthesizing effective field {field_name!r}."
+        )
+
+    def _material_effective_fields(self, material):
+        return {
+            field_name: self._material_effective_field(material, field_name)
+            for field_name in ("Vfrac", "S", "theta", "psi")
+        }
 
     def _assert_mutation_allowed(self, target="morphology"):
         if self._results_locked:
@@ -500,13 +559,14 @@ class Morphology:
         )
 
     def _collect_backend_assessment(self):
+        self._normalize_material_contracts()
         contract = self._backend_array_contract
         backend_name = self._backend
         resident_mode = self._resident_mode
         backend_options = self._backend_options
         reports = []
         for material_id, mat in self.materials.items():
-            for field_name in ('Vfrac', 'S', 'theta', 'psi'):
+            for field_name in self._material_contract_field_names(mat):
                 reports.append(
                     assess_array_for_backend(
                         getattr(mat, field_name),
@@ -562,6 +622,7 @@ class Morphology:
         return reports
 
     def normalize_materials_for_backend(self, report_attr='last_backend_coercion_report'):
+        self._normalize_material_contracts()
         reports = self._collect_backend_assessment()
         unsupported = [plan for plan in reports if not plan.supported]
         if unsupported:
@@ -584,7 +645,7 @@ class Morphology:
         backend_options = self._backend_options
         normalized_reports = []
         for material_id, mat in self.materials.items():
-            for field_name in ('Vfrac', 'S', 'theta', 'psi'):
+            for field_name in self._material_contract_field_names(mat):
                 plan = assess_array_for_backend(
                     getattr(mat, field_name),
                     backend_name=backend_name,
@@ -740,13 +801,15 @@ class Morphology:
 
     def update_voxel_data(self):
         self._require_backend('cyrsoxs', 'update_voxel_data')
+        self._normalize_material_contracts()
         self.last_backend_coercion_report = []
         for ID in range(1, self.numMaterial+1):
             mat = self.materials[ID]
-            s = self._coerce_material_field(mat.S, field_name='S', material_id=ID)
-            theta = self._coerce_material_field(mat.theta, field_name='theta', material_id=ID)
-            psi = self._coerce_material_field(mat.psi, field_name='psi', material_id=ID)
-            vfrac = self._coerce_material_field(mat.Vfrac, field_name='Vfrac', material_id=ID)
+            effective_fields = self._material_effective_fields(mat)
+            s = self._coerce_material_field(effective_fields['S'], field_name='S', material_id=ID)
+            theta = self._coerce_material_field(effective_fields['theta'], field_name='theta', material_id=ID)
+            psi = self._coerce_material_field(effective_fields['psi'], field_name='psi', material_id=ID)
+            vfrac = self._coerce_material_field(effective_fields['Vfrac'], field_name='Vfrac', material_id=ID)
             
             self.voxelData.addVoxelData(
                 S=s,
@@ -805,11 +868,21 @@ class Morphology:
             self.create_voxel_data()
 
     def write_to_file(self, fname, author='NIST'):
-        _ = write_hdf5([[self.materials[i].Vfrac,
-                        self.materials[i].S,
-                        self.materials[i].theta,
-                        self.materials[i].psi] for i in self.materials],
-                        self.PhysSize, fname, self.MorphologyType, ordering='ZYX', author=author)
+        self._normalize_material_contracts()
+        _ = write_hdf5(
+            [
+                [
+                    self._material_effective_field(self.materials[i], field_name)
+                    for field_name in ('Vfrac', 'S', 'theta', 'psi')
+                ]
+                for i in self.materials
+            ],
+            self.PhysSize,
+            fname,
+            self.MorphologyType,
+            ordering='ZYX',
+            author=author,
+        )
 
     # TODO : function to write a config.txt file from config dict
     def write_config(self,):
@@ -881,17 +954,17 @@ class Morphology:
     # TODO : restructure to have a single checkH5 engine for both NRSS and
     # command line formats
     def check_materials(self, quiet=True):
+        self._normalize_material_contracts()
         coerced_vfracs = []
+        reference_shape = None
 
         # Check each material's properties
         for i, mat in self.materials.items():
+            field_names = self._material_contract_field_names(mat)
+            material_shape = None
             # Validate value ranges and types in one pass
-            for name, arr in {
-                'S': mat.S,
-                'Vfrac': mat.Vfrac,
-                'theta': mat.theta,
-                'psi': mat.psi
-            }.items():
+            for name in field_names:
+                arr = getattr(mat, name)
                 if arr is None:
                     raise AssertionError(f'Material {i} {name} is not populated')
 
@@ -914,11 +987,28 @@ class Morphology:
                 
                 if to_python_bool(xp.any(xp.isnan(arr))):
                     raise AssertionError(f'NaNs are present in Material {i} {name}')
+
+                field_shape = tuple(int(dim) for dim in arr.shape)
+                if material_shape is None:
+                    material_shape = field_shape
+                elif field_shape != material_shape:
+                    raise AssertionError(
+                        f'Material {i} field {name} shape {field_shape} does not match '
+                        f'the material reference shape {material_shape}'
+                    )
                 
                 # Check bounds for S and Vfrac
                 if name in ('S', 'Vfrac'):
                     if not to_python_bool(xp.all((arr >= 0) & (arr <= 1))):
                         raise AssertionError(f'Material {i} {name} value(s) does not lie between 0 and 1')
+
+            if reference_shape is None:
+                reference_shape = material_shape
+            elif material_shape != reference_shape:
+                raise AssertionError(
+                    f'Material {i} Vfrac shape {material_shape} does not match '
+                    f'the morphology reference shape {reference_shape}'
+                )
 
             vfrac_plan = assess_array_for_backend(
                 mat.Vfrac,
@@ -1021,6 +1111,9 @@ class Material(OpticalConstants):
         Integer value denoting the material number. Used in CyRSoXS
     Vfrac : ndarray
         Volume fractions for a Material
+    S : ndarray or SFieldMode
+        Orientational order parameter field, or SFieldMode.ISOTROPIC for the
+        explicit full-material isotropic contract
     theta : ndarray
         The second Euler angle (ZYZ convention)
     psi : ndarray
@@ -1040,11 +1133,13 @@ class Material(OpticalConstants):
         "NumZYX",
         "energies",
         "opt_constants",
+        "name",
     }
 
     def __init__(self, materialID=1, Vfrac=None, S=None, theta=None, psi=None,
                  NumZYX=None, energies=None, opt_constants=None, name=None):
         self._owner_morphology = None
+        self._explicit_isotropic_contract = False
         self.materialID = materialID
         # Store arrays as-is, type conversion will happen when needed
         self.Vfrac = Vfrac
@@ -1064,16 +1159,57 @@ class Material(OpticalConstants):
         if (energies is None) & (opt_constants is not None):
             self.energies = list(opt_constants.keys())
 
+        self._normalize_named_vacuum_contract()
         super().__init__(self.energies, self.opt_constants, name=name)
 
     def __repr__(self):
         return f'Material (Name : {self.name}, ID : {self.materialID}, Shape : {self.NumZYX})'
+
+    @staticmethod
+    def _format_ignored_field_names(field_names):
+        if len(field_names) == 1:
+            return field_names[0]
+        if len(field_names) == 2:
+            return f"{field_names[0]} and {field_names[1]}"
+        return ", ".join(field_names[:-1]) + f", and {field_names[-1]}"
+
+    def _normalize_named_vacuum_contract(self):
+        if self.__dict__.get("name") != "vacuum":
+            return
+
+        ignored_fields = []
+        s_value = self.__dict__.get("S")
+        if s_value is not None and not is_isotropic_s_field_mode(s_value):
+            ignored_fields.append("S")
+
+        for field_name in ("theta", "psi"):
+            if self.__dict__.get(field_name) is not None:
+                ignored_fields.append(field_name)
+
+        if ignored_fields:
+            ignored_field_names = self._format_ignored_field_names(tuple(ignored_fields))
+            verb = "is" if len(ignored_fields) == 1 else "are"
+            warnings.warn(
+                f"Material {self.materialID} uses name='vacuum', so {ignored_field_names} "
+                f"{verb} ignored and the explicit isotropic contract "
+                "SFieldMode.ISOTROPIC will be used.",
+                stacklevel=3,
+            )
+
+        object.__setattr__(self, "S", SFieldMode.ISOTROPIC)
+        object.__setattr__(self, "theta", None)
+        object.__setattr__(self, "psi", None)
+        object.__setattr__(self, "_explicit_isotropic_contract", True)
 
     def __setattr__(self, key, value):
         owner = self.__dict__.get("_owner_morphology")
         if owner is not None and key in self._guarded_attributes:
             owner._assert_mutation_allowed(f"Material.{key}")
         super().__setattr__(key, value)
+        if key in {"name", "S", "theta", "psi"}:
+            self._normalize_named_vacuum_contract()
+        if owner is not None and key in {"name", "S", "theta", "psi"}:
+            owner._normalize_material_contract(self)
 
     @staticmethod
     def _copy_field(value):

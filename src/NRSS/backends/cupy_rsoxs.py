@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
-from .arrays import assess_array_for_backend_runtime, coerce_array_for_backend, inspect_array
+from .arrays import assess_array_for_backend_runtime, coerce_array_for_backend
 from .registry import BackendUnavailableError
 from .runtime import BackendRuntime
 
@@ -327,7 +327,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         staging_reports = []
         runtime_materials = []
         for material_id, material in morphology.materials.items():
-            is_full_isotropic = self._material_is_full_isotropic(material.S, cp)
+            is_full_isotropic = morphology._material_is_explicit_isotropic(material)
             staged_fields = {"Vfrac": None, "S": None, "theta": None, "psi": None}
             field_names = ("Vfrac",) if is_full_isotropic else ("Vfrac", "S", "theta", "psi")
             for field_name in field_names:
@@ -356,14 +356,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
         morphology.last_runtime_staging_report = staging_reports
         return tuple(runtime_materials)
-
-    def _material_is_full_isotropic(self, s_field, cp) -> bool:
-        info = inspect_array(s_field)
-        if info["namespace"] == "numpy":
-            return not bool(np.any(np.asarray(s_field)))
-        if info["namespace"] == "cupy":
-            return int(cp.count_nonzero(s_field).item()) == 0
-        raise TypeError(f"Unsupported S-field namespace for isotropic detection: {info['namespace']!r}.")
 
     def _execution_path(self, morphology) -> str:
         return str(morphology.backend_options.get("execution_path", "tensor_coeff"))

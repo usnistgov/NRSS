@@ -46,8 +46,33 @@ Current contents:
     - end immediately after synchronized `run(return_xarray=False)`,
   - supports internal segment timing for segments `A1`, `A2`, and `B-F`,
   - alias `A` expands to `A1,A2` for convenience,
+  - supports isotropic-material representation selection for the CoreShell
+    isotropic materials:
+    - `legacy_zero_array` keeps concrete zero `S/theta/psi` fields for the
+      isotropic core/matrix materials,
+    - `enum_contract` uses the explicit `SFieldMode.ISOTROPIC` contract for
+      those isotropic materials,
+    - `both` emits paired cases so the same timing sweep compares both
+      representations directly,
+    - when `both` is selected, stdout and `summary.json` also emit paired
+      `isotropic_representation_comparisons` entries that surface `primary`
+      wall time side by side for legacy zero arrays versus the enum contract,
+  - supports optional untimed CUDA prewarm for host-resident steady-state
+    timing studies:
+    - `off` preserves the current cold-subprocess behavior and remains the
+      default,
+    - `before_prepare_inputs` performs a tiny NumPy -> CuPy staging touch
+      inside the worker before `_prepare_core_shell_case_inputs(...)` so
+      first-touch CUDA/CuPy bring-up can be absorbed before the primary timer
+      starts,
+    - device-resident cases record this as redundant because that lane already
+      touches CuPy before `primary_start`,
+    - the prewarm mode does not change allocator/pool refresh behavior,
   - runs each benchmark case in a subprocess so crashes or OOMs are isolated to
     the individual case.
+- `run_cupy_rsoxs_optimization_matrix_legacy_pre_isotropic_contract.py`
+  - frozen pre-enum snapshot of the timing harness kept so the older CLI and
+    case-construction behavior remain available unchanged if needed.
 
 Recommended workflow:
 
@@ -56,8 +81,11 @@ Segment `A` is nominally complete for the common workflow.
 - `resident_mode='device'` is expected to be faster when morphology fields
   already live on GPU, and that distinction should remain visible in the
   timing results.
-- Repeated-run host-resident staging reuse remains only a low-priority niche
-  future idea.
+- Repeated-run host-resident staging reuse inside the backend remains only a
+  low-priority niche future idea.
+- If the goal is to model many morphologies inside one already-warm subprocess,
+  use `--cuda-prewarm before_prepare_inputs` in this dev harness rather than
+  changing backend residency or pool-refresh behavior.
 - Current Segment `B` / `D` campaign focus:
   - establish execution-path baselines before changing math,
   - keep timing results execution-path-specific,
@@ -104,14 +132,46 @@ Latest accepted optimization step:
   - isolated `90°` spot checks showed the same low-`D` / near-zero-`E` shape
     for the y-family branch.
 
-Still-relevant caveat from `plan06`:
+Current isotropic-contract note:
 
-- exact-zero isotropic materials now skip runtime staging of `S/theta/psi` in
-  the host-resident lane and skip Euler/off-diagonal Segment `B` work in all
-  execution paths,
-- in the device-resident lane, runtime isotropic detection on device-resident
-  `S` currently lands in Segment `A2`, so post-plan06 device `A2` should no
-  longer be interpreted as pure staging only.
+- the older exact-zero detection path from `plan06` has been retired,
+- the explicit `enum_contract` path is now the only isotropic-material route
+  that skips `S/theta/psi` staging in `A2` and skips the Euler/off-diagonal
+  work in Segment `B`,
+- named `vacuum` materials now always resolve to that explicit isotropic
+  contract and ignore any supplied `S/theta/psi` fields with warning,
+- `legacy_zero_array` remains in the harness as the historical comparison lane
+  and does not receive inferred isotropic optimization,
+- for explicit `enum_contract` cases, device-resident `A2` again represents
+  runtime staging rather than a hidden `S` scan.
+
+Current host-prewarm note:
+
+- artifacts:
+  - cold host comparison:
+    `test-reports/cupy-rsoxs-optimization-dev/host_iso_cold_prewarm_compare_20260324/summary.json`
+  - prewarmed host comparison:
+    `test-reports/cupy-rsoxs-optimization-dev/host_iso_warm_prewarm_compare_20260324/summary.json`
+  - device-resident redundancy smoke:
+    `test-reports/cupy-rsoxs-optimization-dev/device_prewarm_redundant_smoke_20260324/summary.json`
+- primary-lane totals on the small single-energy host / `tensor_coeff`
+  CoreShell comparison:
+  - cold / `legacy_zero_array`: `primary 2.546s`, `A2 2.363`
+  - cold / `enum_contract`: `primary 2.545s`, `A2 2.369`
+  - prewarmed / `legacy_zero_array`: `primary 0.282s`, `A2 0.0887`
+  - prewarmed / `enum_contract`: `primary 0.226s`, `A2 0.0461`
+- interpretation:
+  - fresh host subprocesses still pay first-touch CUDA/CuPy bring-up inside
+    `A2`, so cold-process totals are not the right evidence for steady-state
+    isotropic staging gains,
+  - on this rerun the cold host totals were effectively tied while `A2`
+    remained startup-dominated, which is exactly why cold-process totals are a
+    poor authority for the isotropic contract itself,
+  - once that startup is prewarmed outside the primary boundary, the explicit
+    enum contract improves host primary time by about `19.8%` and cuts `A2`
+    by about `48.0%`,
+  - device-resident cases already touch CuPy before timing starts, so the
+    harness reports the prewarm mode as redundant there.
 
 Latest accepted-state verification:
 
@@ -152,6 +212,17 @@ Latest harness-extension verification:
   - explicit single-energy rotation,
   - explicit energy-list no-rotation,
   - explicit energy-list plus explicit rotation.
+
+Latest CUDA-prewarm verification:
+
+- focused non-GPU smoke:
+  - `pytest tests/smoke/test_smoke.py -k "cuda_prewarm or explicit_isotropic_contract or vacuum_named" -m "not gpu" -v`
+  - `7 passed`
+- verified behaviors:
+  - parser and summary plumbing for `--cuda-prewarm`,
+  - named `vacuum` forcing the explicit isotropic contract,
+  - warning behavior when orientation is supplied to `vacuum` or other
+    explicit isotropic materials.
 
 Latest multi-angle execution-path comparison:
 
@@ -223,6 +294,29 @@ Typical commands:
   tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
   --label baseline \
   --size-labels small
+```
+
+```bash
+/home/deand/mambaforge/envs/nrss-dev/bin/python \
+  tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
+  --label isotropic-representation-compare \
+  --size-labels small \
+  --resident-modes host,device \
+  --execution-paths tensor_coeff \
+  --isotropic-material-representation both \
+  --timing-segments A2,B
+```
+
+```bash
+/home/deand/mambaforge/envs/nrss-dev/bin/python \
+  tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
+  --label isotropic-representation-compare-prewarmed \
+  --size-labels small \
+  --resident-modes host \
+  --execution-paths tensor_coeff \
+  --isotropic-material-representation both \
+  --timing-segments A2,B \
+  --cuda-prewarm before_prepare_inputs
 ```
 
 ```bash

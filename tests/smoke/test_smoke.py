@@ -16,6 +16,7 @@ SRC_PATH = REPO_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
+from NRSS import SFieldMode
 from NRSS.reader import read_config
 from NRSS.backends import (
     BackendOptionError,
@@ -99,6 +100,8 @@ def _build_two_material_isotropic_block_morphology(
     backend_options: dict | None = None,
     resident_mode: str | None = None,
     field_namespace: str = "numpy",
+    isotropic_representation: str = "legacy_zero_array",
+    ignored_orientation_arrays: bool = False,
 ):
     shape = (4, 16, 16)
     energies = [285.0]
@@ -115,12 +118,31 @@ def _build_two_material_isotropic_block_morphology(
     elif field_namespace != "numpy":
         raise AssertionError(f"Unsupported field namespace {field_namespace!r}.")
 
+    if isotropic_representation == "legacy_zero_array":
+        mat1_s = zeros.copy()
+        mat1_theta = zeros.copy()
+        mat1_psi = zeros.copy()
+        mat2_s = zeros.copy()
+        mat2_theta = zeros.copy()
+        mat2_psi = zeros.copy()
+    elif isotropic_representation == "enum_contract":
+        mat1_s = SFieldMode.ISOTROPIC
+        mat1_theta = zeros.copy() if ignored_orientation_arrays else None
+        mat1_psi = zeros.copy() if ignored_orientation_arrays else None
+        mat2_s = SFieldMode.ISOTROPIC
+        mat2_theta = zeros.copy() if ignored_orientation_arrays else None
+        mat2_psi = zeros.copy() if ignored_orientation_arrays else None
+    else:
+        raise AssertionError(
+            f"Unsupported isotropic_representation {isotropic_representation!r}."
+        )
+
     mat1 = Material(
         materialID=1,
         Vfrac=vfrac_1,
-        S=zeros.copy(),
-        theta=zeros.copy(),
-        psi=zeros.copy(),
+        S=mat1_s,
+        theta=mat1_theta,
+        psi=mat1_psi,
         energies=energies,
         opt_constants={285.0: [1e-4, 2e-4, 1e-4, 2e-4]},
         name="block",
@@ -128,9 +150,9 @@ def _build_two_material_isotropic_block_morphology(
     mat2 = Material(
         materialID=2,
         Vfrac=vfrac_2,
-        S=zeros.copy(),
-        theta=zeros.copy(),
-        psi=zeros.copy(),
+        S=mat2_s,
+        theta=mat2_theta,
+        psi=mat2_psi,
         energies=energies,
         opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
         name="matrix",
@@ -158,6 +180,133 @@ def _build_two_material_isotropic_block_morphology(
         ownership_policy="borrow" if backend == "cupy-rsoxs" else None,
         create_cy_object=True,
     )
+
+
+@pytest.mark.backend_agnostic_contract
+def test_explicit_isotropic_contract_accepts_missing_orientation_arrays():
+    """Ensure enum-backed isotropic materials validate without concrete S/theta/psi arrays."""
+    morph = _build_two_material_isotropic_block_morphology(
+        backend="cupy-rsoxs",
+        resident_mode="host",
+        field_namespace="numpy",
+        isotropic_representation="enum_contract",
+    )
+
+    morph.check_materials(quiet=True)
+    assert morph.materials[1].S is SFieldMode.ISOTROPIC
+    assert morph.materials[1].theta is None
+    assert morph.materials[1].psi is None
+    assert morph.materials[1]._explicit_isotropic_contract is True
+
+
+@pytest.mark.backend_agnostic_contract
+def test_explicit_isotropic_contract_ignores_theta_and_psi_with_warning():
+    """Ensure theta/psi are ignored with warning under the explicit isotropic contract."""
+    with pytest.warns(UserWarning, match="SFieldMode\\.ISOTROPIC") as caught:
+        morph = _build_two_material_isotropic_block_morphology(
+            backend="cupy-rsoxs",
+            resident_mode="host",
+            field_namespace="numpy",
+            isotropic_representation="enum_contract",
+            ignored_orientation_arrays=True,
+        )
+
+    messages = [str(item.message) for item in caught]
+    assert len(messages) == 4
+    assert any("theta is ignored" in message for message in messages)
+    assert any("psi is ignored" in message for message in messages)
+    assert morph.materials[1].theta is None
+    assert morph.materials[1].psi is None
+    assert morph.materials[2].theta is None
+    assert morph.materials[2].psi is None
+    morph.check_materials(quiet=True)
+
+
+@pytest.mark.backend_agnostic_contract
+def test_write_to_file_materializes_effective_zero_orientation_fields_for_explicit_isotropic_contract(
+    tmp_path,
+):
+    """Ensure HDF5 export writes concrete zero S/theta/psi datasets for enum-backed isotropic materials."""
+    morph = _build_two_material_isotropic_block_morphology(
+        backend="cupy-rsoxs",
+        resident_mode="host",
+        field_namespace="numpy",
+        isotropic_representation="enum_contract",
+    )
+    out_path = tmp_path / "explicit_isotropic_contract.h5"
+
+    morph.write_to_file(str(out_path))
+
+    with h5py.File(out_path, "r") as handle:
+        for material_id in (1, 2):
+            np.testing.assert_array_equal(
+                handle[f"Euler_Angles/Mat_{material_id}_S"][()],
+                np.zeros((4, 16, 16), dtype=np.float32),
+            )
+            np.testing.assert_array_equal(
+                handle[f"Euler_Angles/Mat_{material_id}_Theta"][()],
+                np.zeros((4, 16, 16), dtype=np.float32),
+            )
+            np.testing.assert_array_equal(
+                handle[f"Euler_Angles/Mat_{material_id}_Psi"][()],
+                np.zeros((4, 16, 16), dtype=np.float32),
+            )
+
+
+@pytest.mark.backend_agnostic_contract
+def test_cupy_optimization_harness_parser_accepts_cuda_prewarm_mode():
+    """Ensure the dev optimization harness accepts the CUDA prewarm option surface."""
+    from tests.validation.dev.cupy_rsoxs_optimization.run_cupy_rsoxs_optimization_matrix import (
+        build_parser,
+    )
+
+    args = build_parser().parse_args(["--cuda-prewarm", "before_prepare_inputs"])
+    assert args.cuda_prewarm == "before_prepare_inputs"
+
+
+@pytest.mark.backend_agnostic_contract
+def test_cupy_optimization_harness_isotropic_comparison_retains_cuda_prewarm_metadata():
+    """Ensure paired isotropic comparison summaries preserve the harness CUDA prewarm mode."""
+    from tests.validation.dev.cupy_rsoxs_optimization.run_cupy_rsoxs_optimization_matrix import (
+        _build_isotropic_representation_comparisons,
+    )
+
+    comparisons = _build_isotropic_representation_comparisons(
+        {
+            "core_shell_small_single_no_rotation_host_tensor_coeff_legacy_zero_array": {
+                "label": "core_shell_small_single_no_rotation_host_tensor_coeff_legacy_zero_array",
+                "status": "ok",
+                "resident_mode": "host",
+                "shape_label": "small",
+                "backend_options": {"execution_path": "tensor_coeff"},
+                "energies_ev": [285.0],
+                "eangle_rotation": [0.0, 0.0, 0.0],
+                "isotropic_representation": "legacy_zero_array",
+                "cuda_prewarm_requested_mode": "before_prepare_inputs",
+                "cuda_prewarm_applied_mode": "before_prepare_inputs",
+                "primary_seconds": 2.0,
+                "segment_seconds": {"A2": 1.0, "B": 0.5},
+            },
+            "core_shell_small_single_no_rotation_host_tensor_coeff_enum_contract": {
+                "label": "core_shell_small_single_no_rotation_host_tensor_coeff_enum_contract",
+                "status": "ok",
+                "resident_mode": "host",
+                "shape_label": "small",
+                "backend_options": {"execution_path": "tensor_coeff"},
+                "energies_ev": [285.0],
+                "eangle_rotation": [0.0, 0.0, 0.0],
+                "isotropic_representation": "enum_contract",
+                "cuda_prewarm_requested_mode": "before_prepare_inputs",
+                "cuda_prewarm_applied_mode": "before_prepare_inputs",
+                "primary_seconds": 1.5,
+                "segment_seconds": {"A2": 0.5, "B": 0.25},
+            },
+        }
+    )
+
+    comparison = comparisons["core_shell_small_single_no_rotation_host_tensor_coeff"]
+    assert comparison["cuda_prewarm_mode"] == "before_prepare_inputs"
+    assert comparison["cuda_prewarm_applied_mode"] == "before_prepare_inputs"
 
 
 @pytest.mark.backend_agnostic_contract
@@ -737,8 +886,8 @@ def test_cupy_host_resident_runtime_stages_authoritative_numpy_fields_to_device(
 
 
 @pytest.mark.gpu
-def test_cupy_host_resident_runtime_skips_orientation_staging_for_full_isotropic_materials():
-    """Ensure fully isotropic materials stage only Vfrac into the runtime CuPy contract."""
+def test_cupy_host_resident_runtime_skips_orientation_staging_for_explicit_isotropic_contract_materials():
+    """Ensure enum-backed isotropic materials stage only Vfrac into the runtime CuPy contract."""
     cp = _import_cupy_required()
     morph = None
     try:
@@ -746,6 +895,7 @@ def test_cupy_host_resident_runtime_skips_orientation_staging_for_full_isotropic
             backend="cupy-rsoxs",
             resident_mode="host",
             field_namespace="numpy",
+            isotropic_representation="enum_contract",
         )
         result = morph.run(stdout=False, stderr=False, return_xarray=False)
         cp.cuda.Stream.null.synchronize()
@@ -771,44 +921,130 @@ def test_cupy_host_resident_runtime_skips_orientation_staging_for_full_isotropic
 
 
 @pytest.mark.gpu
-def test_cupy_execution_paths_match_on_fully_isotropic_morphology():
-    """Ensure surfaced execution paths remain numerically aligned on a fully isotropic morphology."""
+def test_cupy_device_resident_runtime_skips_orientation_staging_for_explicit_isotropic_contract_materials():
+    """Ensure enum-backed isotropic materials also skip orientation staging in device-resident mode."""
+    cp = _import_cupy_required()
+    morph = None
+    try:
+        morph = _build_two_material_isotropic_block_morphology(
+            backend="cupy-rsoxs",
+            resident_mode="device",
+            field_namespace="cupy",
+            isotropic_representation="enum_contract",
+        )
+        result = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.Stream.null.synchronize()
+        assert list(result.to_backend_array().shape) == [1, 16, 16]
+        staged_fields = sorted(
+            (plan.material_id, plan.field_name)
+            for plan in morph.last_runtime_staging_report
+            if plan.original_namespace != "missing"
+        )
+        assert staged_fields == [(1, "Vfrac"), (2, "Vfrac")]
+        assert all(
+            plan.transfer == "none"
+            for plan in morph.last_runtime_staging_report
+            if plan.original_namespace != "missing"
+        )
+    finally:
+        if morph is not None:
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
+@pytest.mark.gpu
+def test_cupy_host_resident_runtime_keeps_staging_all_legacy_zero_array_fields():
+    """Ensure legacy zero-array isotropic materials no longer receive the explicit-contract staging shortcut."""
+    cp = _import_cupy_required()
+    morph = None
+    try:
+        morph = _build_two_material_isotropic_block_morphology(
+            backend="cupy-rsoxs",
+            resident_mode="host",
+            field_namespace="numpy",
+            isotropic_representation="legacy_zero_array",
+        )
+        result = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.Stream.null.synchronize()
+        assert list(result.to_backend_array().shape) == [1, 16, 16]
+        staged_fields = sorted(
+            (plan.material_id, plan.field_name)
+            for plan in morph.last_runtime_staging_report
+            if plan.original_namespace != "missing"
+        )
+        assert staged_fields == [
+            (1, "S"),
+            (1, "Vfrac"),
+            (1, "psi"),
+            (1, "theta"),
+            (2, "S"),
+            (2, "Vfrac"),
+            (2, "psi"),
+            (2, "theta"),
+        ]
+    finally:
+        if morph is not None:
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
+@pytest.mark.gpu
+def test_cupy_execution_paths_and_isotropic_representations_match_on_fully_isotropic_morphology():
+    """Ensure execution-path parity holds for both isotropic representations and that enum and legacy outputs match."""
     if not _has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for isotropic execution-path comparison.")
 
     outputs = {}
-    for execution_path in ("tensor_coeff", "direct_polarization", "nt_polarization"):
-        morph = None
-        try:
-            morph = _build_two_material_isotropic_block_morphology(
-                backend="cupy-rsoxs",
-                backend_options={"execution_path": execution_path},
-                resident_mode="device",
-                field_namespace="cupy",
-            )
-            outputs[execution_path] = (
-                morph.run(stdout=False, stderr=False, return_xarray=True).values.copy()
-            )
-        finally:
-            if morph is not None:
-                try:
-                    morph.release_runtime()
-                except Exception:
-                    pass
-            _release_cupy_memory()
+    for isotropic_representation in ("legacy_zero_array", "enum_contract"):
+        outputs[isotropic_representation] = {}
+        for execution_path in ("tensor_coeff", "direct_polarization", "nt_polarization"):
+            morph = None
+            try:
+                morph = _build_two_material_isotropic_block_morphology(
+                    backend="cupy-rsoxs",
+                    backend_options={"execution_path": execution_path},
+                    resident_mode="device",
+                    field_namespace="cupy",
+                    isotropic_representation=isotropic_representation,
+                )
+                outputs[isotropic_representation][execution_path] = (
+                    morph.run(stdout=False, stderr=False, return_xarray=True).values.copy()
+                )
+            finally:
+                if morph is not None:
+                    try:
+                        morph.release_runtime()
+                    except Exception:
+                        pass
+                _release_cupy_memory()
 
-    np.testing.assert_allclose(
-        outputs["direct_polarization"],
-        outputs["tensor_coeff"],
-        rtol=0.0,
-        atol=1e-6,
-    )
-    np.testing.assert_allclose(
-        outputs["nt_polarization"],
-        outputs["tensor_coeff"],
-        rtol=0.0,
-        atol=1e-6,
-    )
+    for isotropic_representation in ("legacy_zero_array", "enum_contract"):
+        np.testing.assert_allclose(
+            outputs[isotropic_representation]["direct_polarization"],
+            outputs[isotropic_representation]["tensor_coeff"],
+            rtol=0.0,
+            atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            outputs[isotropic_representation]["nt_polarization"],
+            outputs[isotropic_representation]["tensor_coeff"],
+            rtol=0.0,
+            atol=1e-6,
+        )
+
+    for execution_path in ("tensor_coeff", "direct_polarization", "nt_polarization"):
+        np.testing.assert_allclose(
+            outputs["legacy_zero_array"][execution_path],
+            outputs["enum_contract"][execution_path],
+            rtol=0.0,
+            atol=1e-6,
+        )
 
 
 @pytest.mark.gpu
@@ -1306,9 +1542,6 @@ def test_vacuum_named_matches_explicit_zero_constants():
     vacuum_named = Material(
         materialID=2,
         Vfrac=zeros.copy(),
-        S=zeros.copy(),
-        theta=zeros.copy(),
-        psi=zeros.copy(),
         energies=energies,
         name="vacuum",
     )
@@ -1323,6 +1556,9 @@ def test_vacuum_named_matches_explicit_zero_constants():
         name="vacuum_explicit",
     )
 
+    assert vacuum_named.S is SFieldMode.ISOTROPIC
+    assert vacuum_named.theta is None
+    assert vacuum_named.psi is None
     assert vacuum_named.opt_constants == vacuum_explicit.opt_constants
 
     config = {
@@ -1357,10 +1593,41 @@ def test_vacuum_named_matches_explicit_zero_constants():
     morph_named.validate_all(quiet=True)
     morph_explicit.validate_all(quiet=True)
 
+    assert morph_named.materials[2].S is SFieldMode.ISOTROPIC
+    assert morph_named.materials[2].theta is None
+    assert morph_named.materials[2].psi is None
+    assert morph_named.materials[2]._explicit_isotropic_contract is True
+
     for e in energies:
         named_vals = morph_named.materials[2].opt_constants[e]
         explicit_vals = morph_explicit.materials[2].opt_constants[e]
         assert np.allclose(named_vals, explicit_vals, atol=0.0)
+
+
+@pytest.mark.backend_agnostic_contract
+def test_vacuum_named_ignores_supplied_orientation_and_forces_explicit_isotropic_contract():
+    """Ensure named vacuum always resolves to the explicit isotropic contract and ignores orientation fields."""
+    shape = (1, 4, 4)
+    zeros = np.zeros(shape, dtype=np.float32)
+
+    with pytest.warns(UserWarning, match="name='vacuum'.*SFieldMode\\.ISOTROPIC") as caught:
+        vacuum = Material(
+            materialID=2,
+            Vfrac=zeros.copy(),
+            S=zeros.copy(),
+            theta=zeros.copy(),
+            psi=zeros.copy(),
+            energies=[285.0],
+            name="vacuum",
+        )
+
+    messages = [str(item.message) for item in caught]
+    assert len(messages) == 1
+    assert "S, theta, and psi" in messages[0]
+    assert vacuum.S is SFieldMode.ISOTROPIC
+    assert vacuum.theta is None
+    assert vacuum.psi is None
+    assert vacuum._explicit_isotropic_contract is True
 
 
 @pytest.mark.backend_agnostic_contract

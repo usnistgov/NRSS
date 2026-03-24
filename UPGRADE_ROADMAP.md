@@ -460,6 +460,14 @@ Phase-1 parity lock-in:
 5. For CuPy-native upstream workflows, the dev timing harness forces a default
    stream synchronize immediately before the start timestamp so unfinished
    upstream GPU work is not counted inside morphology timing.
+   - the live harness now also supports `--cuda-prewarm before_prepare_inputs`
+     for host-resident steady-state studies,
+   - this prewarm performs a tiny untimed host->CuPy touch before
+     `_prepare_core_shell_case_inputs(...)`,
+   - default remains `off` so current cold-process behavior stays the
+     authority,
+   - device-resident cases mark this mode as redundant because they already
+     touch CuPy before `primary_start`.
 6. The current timing pass records:
    - Segment `A1` in the harness with wall-clock timing for `Morphology(...)`
      construction / contract normalization,
@@ -467,7 +475,9 @@ Phase-1 parity lock-in:
      runtime morphology staging,
    - Segments `B-F` inside `cupy-rsoxs` with private CUDA-event timing,
    - no timing payload at all unless timing is explicitly enabled,
-   - no Segment `G` / export timing in this pass.
+   - no Segment `G` / export timing in this pass,
+   - fresh host subprocesses may still absorb first-touch CUDA/CuPy bring-up
+     into `A2`, so cold `A2` is not always a pure transfer metric.
 7. The internal timing control surface is private-only:
    - `Morphology._set_private_backend_timing_segments(...)`
    - `Morphology._clear_private_backend_timing_segments()`
@@ -653,6 +663,8 @@ recover:
    - field generation before object creation,
    - result export such as `to_xarray()`,
    - downstream A-wedge generation, plotting, and analysis.
+   - in a fresh host subprocess, Segment `A2` may still include first-touch
+     CUDA/CuPy bring-up and therefore is not always a pure transfer metric.
 4. The implemented internal-only control path is:
    - `Morphology._set_private_backend_timing_segments(...)`
    - `Morphology._clear_private_backend_timing_segments()`
@@ -676,7 +688,14 @@ recover:
    - Segments `A1` and `A2` are wall-clock,
    - Segments `B-F` are CUDA-event timings,
    - residual host/launch overhead remains in the primary wall metric.
-10. Verification completed in `nrss-dev` for this pass:
+10. The live dev harness now also supports an optional untimed CUDA prewarm
+    mode for steady-state many-morph comparisons:
+    - `--cuda-prewarm before_prepare_inputs` performs a tiny host->CuPy touch
+      inside the worker before `_prepare_core_shell_case_inputs(...)`,
+    - default remains `off` to preserve cold subprocess measurements,
+    - device-resident cases record `redundant_device_prepare`,
+    - allocator/pool refresh behavior is intentionally unchanged.
+11. Verification completed in `nrss-dev` for this pass:
     - smoke coverage now includes
       `test_cupy_private_segment_timing_is_opt_in_and_subsettable`,
     - direct single-energy / no-rotation CoreShell worker timing passed,
@@ -750,9 +769,18 @@ recover:
      about `7.0%` on Segment `A2` versus the split-only baseline,
    - in the corresponding device-resident lane, Segment `A2` is effectively
      zero because the morphology fields already satisfy the backend-preferred
-     device contract before `run()` begins.
+     device contract before `run()` begins,
+   - later steady-state host-prewarm comparisons showed that fresh-subprocess
+     startup dominates the cold host lane:
+     - cold host / `legacy_zero_array`: `primary 2.546s`, `A2 2.363`,
+     - cold host / `enum_contract`: `primary 2.545s`, `A2 2.369`,
+     - prewarmed host / `legacy_zero_array`: `primary 0.282s`, `A2 0.0887`,
+     - prewarmed host / `enum_contract`: `primary 0.226s`, `A2 0.0461`.
 10. Practical prioritization interpretation from that evidence:
    - Segment `A` is nominally complete for the common workflow,
+   - cold host `A2` can be startup-dominated, so steady-state host comparisons
+     should use the prewarm option when the workflow model is many morphs per
+     process,
    - if a workflow expects morphology fields to remain on GPU,
      `resident_mode='device'` is the intended faster tradeoff and should
      remain visibly faster than host-resident staging,
@@ -1046,7 +1074,11 @@ Current campaign steps:
          primary wall metric and remains worth keeping,
        - the current implementation is therefore accepted as the baseline for
          the next step, with the device-path `A2` caveat recorded rather than
-         treated as a blocker.
+         treated as a blocker,
+       - this inferred exact-zero path was later superseded by
+         `plan12_explicit_isotropic_contract`, which removed the runtime
+         all-zero scan entirely and attached the isotropic fast path to an
+         explicit material contract instead.
 7. `plan07_axis_family_fast_path` - `completed`
    - add the high-value axis-family special cases for electric-field rotations
      congruent to `0°/180°` and `90°/270°`,
@@ -1188,6 +1220,91 @@ Current campaign steps:
       - because the default host lane remains the primary public-workflow
         authority and the gain was not broad enough to offset the extra kernel
         maintenance burden, the experiment was rejected and reverted.
+12. `plan12_explicit_isotropic_contract` - `completed`
+    - replace inferred exact-zero isotropic detection with an explicit
+      enum-backed full-material contract,
+    - accept `SFieldMode.ISOTROPIC` for fully isotropic materials only,
+    - expect `theta` and `psi` to be `None` for that contract and ignore them
+      with warning if the caller still supplies arrays,
+    - remove the Segment `A2` all-zero scan entirely so the optimization is
+      attached only to the explicit contract,
+    - keep legacy surfaces working by synthesizing concrete zero `S`, `theta`,
+      and `psi` arrays only at the legacy boundary,
+    - extend the live optimization harness with an isotropic-representation
+      comparison option while preserving a frozen pre-change harness snapshot,
+    - outcome from `plan12_explicit_isotropic_contract_20260324`:
+      - completed on March 24, 2026,
+      - `Material.S` now accepts the boolean-backed enum
+        `SFieldMode.ISOTROPIC` as the explicit full-material isotropic
+        contract,
+      - explicit isotropic materials now validate against `Vfrac`,
+        optical constants, and shape consistency without requiring concrete
+        `S/theta/psi` arrays,
+      - named `vacuum` materials now always resolve to the explicit isotropic
+        contract and ignore any supplied `S/theta/psi` fields with warning,
+      - non-`None` `theta` / `psi` values under that contract are warned about
+        and normalized away before runtime use,
+      - `cupy-rsoxs` Segment `A2` now keys isotropic staging only from the
+        explicit contract and performs no inferred all-zero scan in either
+        resident mode,
+      - legacy zero-array isotropic inputs remain supported but no longer
+        receive inferred isotropic optimization,
+      - CyRSoXS voxel handoff, HDF5 export, and visualization synthesize
+        concrete zero `S/theta/psi` arrays only when those legacy surfaces need
+        them,
+      - focused smoke coverage now includes explicit-contract validation,
+        warning behavior, host/device staging behavior, representation parity,
+        and legacy-boundary materialization,
+      - the live optimization harness now supports
+        `--isotropic-material-representation {legacy_zero_array, enum_contract, both}`
+        and emits paired `primary` / segment comparison entries in
+        `summary.json` when both representations are requested,
+      - that isotropic comparison surface now composes directly with
+        `--cuda-prewarm {off, before_prepare_inputs}` so the contract can be
+        measured in both cold-process and steady-state host modes,
+      - standard small CoreShell no-rotation measurements after the explicit
+        contract plus named-vacuum cleanup showed:
+        - host / `tensor_coeff`: `primary 2.534s -> 2.503s`,
+          `A2 2.352 -> 2.326`, `B 0.119 -> 0.111`,
+        - device / `tensor_coeff`: `primary 0.182s -> 0.180s`,
+          `A2 0.000154 -> 0.000131`, `B 0.116 -> 0.111`,
+        and the pre-change harness snapshot is kept as
+        `run_cupy_rsoxs_optimization_matrix_legacy_pre_isotropic_contract.py`.
+13. `plan13_dev_harness_cuda_context_prewarm` - `completed`
+    - extend only the live dev optimization harness with optional in-process
+      CUDA context prewarm,
+    - keep default `--cuda-prewarm off` as the current cold subprocess
+      behavior,
+    - add `before_prepare_inputs` so the worker can perform a tiny untimed
+      host->CuPy touch before `_prepare_core_shell_case_inputs(...)`,
+    - leave allocator/pool refresh behavior unchanged,
+    - record both requested and applied prewarm modes in per-case results and
+      isotropic comparison summaries,
+    - treat device-resident prewarm as explicitly redundant rather than as a
+      separate timing lane,
+    - outcome from `plan13_dev_harness_cuda_context_prewarm_20260324`:
+      - completed on March 24, 2026,
+      - the live harness now accepts
+        `--cuda-prewarm {off, before_prepare_inputs}`,
+      - host cases record `cuda_prewarm_seconds` outside the primary timing
+        boundary when `before_prepare_inputs` is selected,
+      - device-resident cases record
+        `cuda_prewarm_applied_mode='redundant_device_prepare'`,
+      - focused smoke coverage now includes parser/summary checks for the new
+        option,
+      - small CoreShell host / `tensor_coeff` totals now show:
+        - cold / `legacy_zero_array`: `primary 2.546s`,
+        - cold / `enum_contract`: `primary 2.545s`,
+        - prewarmed / `legacy_zero_array`: `primary 0.282s`,
+        - prewarmed / `enum_contract`: `primary 0.226s`,
+      - interpretation:
+        - cold host timings remain dominated by first-touch CUDA/CuPy bring-up
+          and are not the right authority for steady-state host staging,
+        - the prewarmed host lane is the better model for many-morph
+          single-process workflows,
+        - in that prewarmed host lane, the explicit enum contract improves
+          primary time by about `19.8%` versus legacy zero arrays and cuts
+          `A2` by about `48.0%`.
 
 Precision and option-surface notes for this campaign:
 
