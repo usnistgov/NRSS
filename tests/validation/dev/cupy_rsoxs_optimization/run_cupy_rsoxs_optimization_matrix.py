@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -32,6 +33,7 @@ os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
 from NRSS.morphology import Material, Morphology, OpticalConstants
+from NRSS.backends import normalize_backend_options
 from tests.validation.lib.core_shell import has_visible_gpu
 from tests.validation.lib.core_shell import release_runtime_memory
 
@@ -79,6 +81,7 @@ class BenchmarkCase:
     resident_mode: str | None
     input_policy: str
     ownership_policy: str | None
+    backend_options: dict[str, Any] | None = None
     timing_segments: tuple[str, ...] = ()
     create_cy_object: bool = True
     validation_baseline_name: str | None = None
@@ -133,6 +136,60 @@ def _parse_csv_labels(raw: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
+def _parse_positive_int_csv(raw: str) -> tuple[int, ...]:
+    requested = tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
+    if not requested:
+        return ()
+    values: list[int] = []
+    for item in requested:
+        try:
+            value = int(item)
+        except ValueError as exc:
+            raise SystemExit(f"Expected a comma-separated list of positive integers, got {item!r}.") from exc
+        if value <= 0:
+            raise SystemExit(f"Energy counts must be positive integers, got {value!r}.")
+        values.append(value)
+    return tuple(values)
+
+
+def _parse_rotation_specs(raw: str) -> tuple[tuple[float, float, float], ...]:
+    requested = tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
+    if not requested:
+        return ()
+
+    specs: list[tuple[float, float, float]] = []
+    for item in requested:
+        parts = tuple(part.strip() for part in item.split(":"))
+        if len(parts) != 3 or any(not part for part in parts):
+            raise SystemExit(
+                "Rotation specs must be comma-separated 'start:increment:end' triples, "
+                f"got {item!r}."
+            )
+        try:
+            start, increment, end = (float(part) for part in parts)
+        except ValueError as exc:
+            raise SystemExit(
+                "Rotation specs must contain finite numeric values in "
+                f"'start:increment:end' order, got {item!r}."
+            ) from exc
+        if not all(math.isfinite(value) for value in (start, increment, end)):
+            raise SystemExit(f"Rotation spec values must be finite, got {item!r}.")
+
+        spec = tuple(0.0 if value == 0.0 else float(value) for value in (start, increment, end))
+        if spec[1] == 0.0 and not math.isclose(spec[0], spec[2], rel_tol=0.0, abs_tol=1e-12):
+            raise SystemExit(
+                "Rotation specs with zero increment must also have start == end, "
+                f"got {item!r}."
+            )
+        if spec[1] != 0.0 and ((spec[2] - spec[0]) / spec[1]) < 0:
+            raise SystemExit(
+                "Rotation specs must advance from start to end using the sign of the increment, "
+                f"got {item!r}."
+            )
+        specs.append(spec)
+    return tuple(specs)
+
+
 def _parse_resident_modes(raw: str) -> tuple[str, ...]:
     requested = tuple(dict.fromkeys(part.strip().lower() for part in raw.split(",") if part.strip()))
     unknown = tuple(mode for mode in requested if mode not in RESIDENT_VARIANTS)
@@ -166,6 +223,69 @@ def _parse_timing_segments(raw: str) -> tuple[str, ...]:
     return requested
 
 
+def _parse_execution_paths(raw: str) -> tuple[str, ...]:
+    requested = tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
+    if not requested:
+        raise SystemExit("execution_paths must select at least one execution path.")
+
+    normalized: list[str] = []
+    for item in requested:
+        try:
+            resolved = normalize_backend_options(
+                "cupy-rsoxs",
+                {"execution_path": item},
+            )["execution_path"]
+        except Exception as exc:
+            raise SystemExit(str(exc)) from exc
+        normalized.append(resolved)
+    return tuple(dict.fromkeys(normalized))
+
+
+def _resolve_core_shell_energy(value: float, *, available: tuple[float, ...]) -> float:
+    closest = min(available, key=lambda candidate: abs(candidate - value))
+    if not math.isclose(float(closest), float(value), rel_tol=0.0, abs_tol=1e-6):
+        raise SystemExit(
+            f"Energy {value!r} is not present in the CoreShell optics table. "
+            f"Closest available energy is {closest!r}."
+        )
+    return float(closest)
+
+
+def _parse_energy_lists(raw: str) -> tuple[tuple[float, ...], ...]:
+    requested = tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
+    if not requested:
+        return ()
+
+    available = _load_core_shell_available_energies()
+    energy_lists: list[tuple[float, ...]] = []
+    for item in requested:
+        parts = tuple(part.strip() for part in item.split("|") if part.strip())
+        if not parts:
+            raise SystemExit(
+                "Energy lists must be comma-separated groups of '|' separated values, "
+                f"got {item!r}."
+            )
+        resolved: list[float] = []
+        seen_within_group: set[float] = set()
+        for part in parts:
+            try:
+                value = float(part)
+            except ValueError as exc:
+                raise SystemExit(
+                    "Energy lists must contain numeric values separated with '|', "
+                    f"got {part!r} in {item!r}."
+                ) from exc
+            if not math.isfinite(value):
+                raise SystemExit(f"Energy list values must be finite, got {part!r} in {item!r}.")
+            resolved_value = _resolve_core_shell_energy(value, available=available)
+            if resolved_value in seen_within_group:
+                raise SystemExit(f"Duplicate energy {resolved_value!r} in explicit energy list {item!r}.")
+            seen_within_group.add(resolved_value)
+            resolved.append(resolved_value)
+        energy_lists.append(tuple(resolved))
+    return tuple(energy_lists)
+
+
 def _json_default(value: Any):
     if isinstance(value, Path):
         return str(value)
@@ -174,7 +294,34 @@ def _json_default(value: Any):
     raise TypeError(f"Unsupported JSON value: {type(value)!r}")
 
 
-def _subset_optical_constants(optical_constants: OpticalConstants, energies_ev: tuple[float, ...], *, name: str) -> OpticalConstants:
+def _format_label_float(value: float) -> str:
+    text = np.format_float_positional(float(value), trim="-")
+    if text == "-0":
+        text = "0"
+    return text.replace("-", "m").replace(".", "p").replace("+", "")
+
+
+def _rotation_label_fragment(eangle_rotation: tuple[float, float, float]) -> str:
+    return "rot_" + "_".join(_format_label_float(value) for value in eangle_rotation)
+
+
+def _energy_list_label_fragment(energies_ev: tuple[float, ...]) -> str:
+    tokens = [_format_label_float(value) for value in energies_ev]
+    joined = "_".join(tokens)
+    if len(joined) <= 72:
+        return "elist_" + joined
+
+    digest_input = ",".join(np.format_float_positional(float(value), trim="-") for value in energies_ev)
+    digest = hashlib.sha1(digest_input.encode("ascii")).hexdigest()[:8]
+    return f"elist_{len(energies_ev)}_{tokens[0]}_{tokens[-1]}_{digest}"
+
+
+def _subset_optical_constants(
+    optical_constants: OpticalConstants,
+    energies_ev: tuple[float, ...],
+    *,
+    name: str,
+) -> OpticalConstants:
     subset = {float(energy): optical_constants.opt_constants[float(energy)] for energy in energies_ev}
     return OpticalConstants(list(map(float, energies_ev)), subset, name=name)
 
@@ -206,6 +353,44 @@ def _load_core_shell_optics(energies_ev: tuple[float, ...]) -> dict[int, Optical
             name="matrix",
         ),
     }
+
+
+@lru_cache(maxsize=1)
+def _load_core_shell_available_energies() -> tuple[float, ...]:
+    optical_constants = OpticalConstants.load_matfile(str(CORE_SHELL_DATA_DIR / "Material1.txt"), name="core")
+    return tuple(float(energy) for energy in optical_constants.energies)
+
+
+def _centered_core_shell_energies(count: int) -> tuple[float, ...]:
+    if count <= 0:
+        raise ValueError(f"count must be positive, got {count!r}.")
+    if count == 1:
+        return CORE_SHELL_SINGLE_ENERGIES
+    available = _load_core_shell_available_energies()
+    if count > len(available):
+        raise ValueError(
+            f"Requested {count} energies, but only {len(available)} are available in the CoreShell optics table."
+        )
+
+    center_energy = CORE_SHELL_SINGLE_ENERGIES[0]
+    center_index = min(
+        range(len(available)),
+        key=lambda idx: (abs(available[idx] - center_energy), idx),
+    )
+    start = center_index - (count // 2)
+    stop = start + count
+    if start < 0:
+        start = 0
+        stop = count
+    if stop > len(available):
+        stop = len(available)
+        start = stop - count
+    subset = tuple(available[start:stop])
+    if len(subset) != count:
+        raise AssertionError(
+            f"Internal energy-selection error: expected {count} energies, got {len(subset)}."
+        )
+    return subset
 
 
 
@@ -420,6 +605,7 @@ def build_scaled_core_shell_morphology(
     input_policy: str,
     ownership_policy: str | None,
     create_cy_object: bool,
+    backend_options: dict[str, Any] | None = None,
 ) -> Morphology:
     materials = build_scaled_core_shell_materials(
         size_spec=size_spec,
@@ -435,6 +621,7 @@ def build_scaled_core_shell_morphology(
         config=config,
         create_cy_object=create_cy_object,
         backend=backend,
+        backend_options=backend_options,
         resident_mode=resident_mode,
         input_policy=input_policy,
         ownership_policy=ownership_policy,
@@ -450,7 +637,8 @@ def _case_note(case: BenchmarkCase) -> str:
             f"CoreShell {case.shape_label} {size_spec.shape} PhysSize={size_spec.phys_size_nm} "
             f"EAngleRotation={list(case.eangle_rotation)} energies={list(case.energies_ev)} "
             f"resident_mode={case.resident_mode} field_namespace={case.field_namespace} "
-            f"input_policy={case.input_policy} ownership_policy={case.ownership_policy}"
+            f"input_policy={case.input_policy} ownership_policy={case.ownership_policy} "
+            f"backend_options={case.backend_options or {}}"
         )
     raise AssertionError(f"Unsupported benchmark family for the timing harness: {case.family}")
 
@@ -481,6 +669,7 @@ def _prepare_core_shell_case_inputs(case: BenchmarkCase) -> dict[str, Any]:
         ),
         "phys_size": float(size_spec.phys_size_nm),
         "config": _default_morphology_config(case.energies_ev, case.eangle_rotation),
+        "backend_options": case.backend_options,
     }
 
 
@@ -492,6 +681,7 @@ def _construct_morphology_for_timing_case(case: BenchmarkCase, prepared: dict[st
         config=prepared["config"],
         create_cy_object=case.create_cy_object,
         backend=case.backend,
+        backend_options=prepared["backend_options"],
         resident_mode=case.resident_mode,
         input_policy=case.input_policy,
         ownership_policy=case.ownership_policy,
@@ -515,6 +705,7 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         "field_namespace": case.field_namespace,
         "input_policy": case.input_policy,
         "ownership_policy": case.ownership_policy,
+        "backend_options": dict(case.backend_options or {}),
         "energies_ev": list(case.energies_ev),
         "eangle_rotation": list(case.eangle_rotation),
         "timing_segments_requested": list(case.timing_segments),
@@ -536,6 +727,7 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
 
         primary_start = time.perf_counter()
         morphology = _construct_morphology_for_timing_case(case, prepared_inputs)
+        result["resolved_backend_options"] = dict(morphology.backend_options)
         segment_seconds: dict[str, float] = {}
         if "A1" in case.timing_segments:
             segment_seconds["A1"] = time.perf_counter() - primary_start
@@ -637,66 +829,187 @@ def _run_case_subprocess(
 def _timing_cases(
     *,
     resident_modes: tuple[str, ...],
+    execution_paths: tuple[str, ...],
     size_labels: tuple[str, ...],
     timing_segments: tuple[str, ...],
+    include_triple_no_rotation: bool,
     include_triple_limited: bool,
     include_full_small_check: bool,
+    no_rotation_energy_counts: tuple[int, ...],
+    rotation_specs: tuple[tuple[float, float, float], ...],
+    energy_lists: tuple[tuple[float, ...], ...],
 ) -> list[BenchmarkCase]:
     cases: list[BenchmarkCase] = []
     for mode in resident_modes:
         variant = RESIDENT_VARIANTS[mode]
-        for size_label in size_labels:
-            cases.append(
-                BenchmarkCase(
-                    label=f"core_shell_{size_label}_single_no_rotation_{variant.label_suffix}",
-                    family="core_shell",
-                    backend="cupy-rsoxs",
-                    shape_label=size_label,
-                    energies_ev=CORE_SHELL_SINGLE_ENERGIES,
-                    eangle_rotation=EANGLE_OFF,
-                    field_namespace=variant.field_namespace,
-                    resident_mode=variant.resident_mode,
-                    input_policy=variant.input_policy,
-                    ownership_policy=variant.ownership_policy,
-                    timing_segments=timing_segments,
-                    notes=f"{variant.notes} Primary no-rotation tuning lane.",
-                )
-            )
-            if include_triple_limited:
+        for execution_path in execution_paths:
+            backend_options = {"execution_path": execution_path}
+
+            def append_case(
+                *,
+                label: str,
+                size_label: str,
+                energies_ev: tuple[float, ...],
+                eangle_rotation: tuple[float, float, float],
+                notes: str,
+            ) -> None:
                 cases.append(
                     BenchmarkCase(
-                        label=f"core_shell_{size_label}_triple_limited_rotation_{variant.label_suffix}",
+                        label=label,
                         family="core_shell",
                         backend="cupy-rsoxs",
                         shape_label=size_label,
-                        energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
-                        eangle_rotation=EANGLE_LIMITED,
+                        energies_ev=energies_ev,
+                        eangle_rotation=eangle_rotation,
                         field_namespace=variant.field_namespace,
                         resident_mode=variant.resident_mode,
                         input_policy=variant.input_policy,
                         ownership_policy=variant.ownership_policy,
+                        backend_options=backend_options,
                         timing_segments=timing_segments,
-                        notes=f"{variant.notes} Secondary limited-EAngle checkpoint lane.",
+                        notes=notes,
                     )
                 )
 
-        if include_full_small_check and "small" in size_labels:
-            cases.append(
-                BenchmarkCase(
-                    label=f"core_shell_small_triple_full_rotation_{variant.label_suffix}",
-                    family="core_shell",
-                    backend="cupy-rsoxs",
-                    shape_label="small",
+            for size_label in size_labels:
+                append_case(
+                    label=(
+                        f"core_shell_{size_label}_single_no_rotation_"
+                        f"{variant.label_suffix}_{execution_path}"
+                    ),
+                    size_label=size_label,
+                    energies_ev=CORE_SHELL_SINGLE_ENERGIES,
+                    eangle_rotation=EANGLE_OFF,
+                    notes=(
+                        f"{variant.notes} Primary no-rotation tuning lane. "
+                        f"execution_path={execution_path}."
+                    ),
+                )
+
+                if include_triple_no_rotation:
+                    append_case(
+                        label=(
+                            f"core_shell_{size_label}_triple_no_rotation_"
+                            f"{variant.label_suffix}_{execution_path}"
+                        ),
+                        size_label=size_label,
+                        energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
+                        eangle_rotation=EANGLE_OFF,
+                        notes=(
+                            f"{variant.notes} Secondary three-energy no-rotation checkpoint lane. "
+                            f"execution_path={execution_path}."
+                        ),
+                    )
+
+                for energy_count in no_rotation_energy_counts:
+                    if energy_count == 1:
+                        continue
+                    append_case(
+                        label=(
+                            f"core_shell_{size_label}_{energy_count}energy_no_rotation_"
+                            f"{variant.label_suffix}_{execution_path}"
+                        ),
+                        size_label=size_label,
+                        energies_ev=_centered_core_shell_energies(energy_count),
+                        eangle_rotation=EANGLE_OFF,
+                        notes=(
+                            f"{variant.notes} Development-only centered-energy no-rotation lane "
+                            f"with {energy_count} energies. execution_path={execution_path}."
+                        ),
+                    )
+
+                if include_triple_limited:
+                    append_case(
+                        label=(
+                            f"core_shell_{size_label}_triple_limited_rotation_"
+                            f"{variant.label_suffix}_{execution_path}"
+                        ),
+                        size_label=size_label,
+                        energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
+                        eangle_rotation=EANGLE_LIMITED,
+                        notes=(
+                            f"{variant.notes} Secondary limited-EAngle checkpoint lane. "
+                            f"execution_path={execution_path}."
+                        ),
+                    )
+
+                for eangle_rotation in rotation_specs:
+                    if eangle_rotation == EANGLE_OFF:
+                        continue
+                    rotation_label = _rotation_label_fragment(eangle_rotation)
+                    append_case(
+                        label=(
+                            f"core_shell_{size_label}_single_{rotation_label}_"
+                            f"{variant.label_suffix}_{execution_path}"
+                        ),
+                        size_label=size_label,
+                        energies_ev=CORE_SHELL_SINGLE_ENERGIES,
+                        eangle_rotation=eangle_rotation,
+                        notes=(
+                            f"{variant.notes} Custom single-energy rotation lane with "
+                            f"EAngleRotation={list(eangle_rotation)} "
+                            f"([StartAngle, IncrementAngle, EndAngle]). "
+                            f"execution_path={execution_path}."
+                        ),
+                    )
+
+                for energies_ev in energy_lists:
+                    if energies_ev == CORE_SHELL_SINGLE_ENERGIES:
+                        continue
+                    energy_label = _energy_list_label_fragment(energies_ev)
+                    append_case(
+                        label=(
+                            f"core_shell_{size_label}_{energy_label}_no_rotation_"
+                            f"{variant.label_suffix}_{execution_path}"
+                        ),
+                        size_label=size_label,
+                        energies_ev=energies_ev,
+                        eangle_rotation=EANGLE_OFF,
+                        notes=(
+                            f"{variant.notes} Custom explicit-energy no-rotation lane with "
+                            f"energies={list(energies_ev)}. execution_path={execution_path}."
+                        ),
+                    )
+
+                for eangle_rotation in rotation_specs:
+                    if eangle_rotation == EANGLE_OFF:
+                        continue
+                    rotation_label = _rotation_label_fragment(eangle_rotation)
+                    for energies_ev in energy_lists:
+                        if energies_ev == CORE_SHELL_SINGLE_ENERGIES:
+                            continue
+                        energy_label = _energy_list_label_fragment(energies_ev)
+                        append_case(
+                            label=(
+                                f"core_shell_{size_label}_{energy_label}_{rotation_label}_"
+                                f"{variant.label_suffix}_{execution_path}"
+                            ),
+                            size_label=size_label,
+                            energies_ev=energies_ev,
+                            eangle_rotation=eangle_rotation,
+                            notes=(
+                                f"{variant.notes} Custom explicit-energy plus custom rotation lane "
+                                f"with energies={list(energies_ev)} and "
+                                f"EAngleRotation={list(eangle_rotation)} "
+                                f"([StartAngle, IncrementAngle, EndAngle]). "
+                                f"execution_path={execution_path}."
+                            ),
+                        )
+
+            if include_full_small_check and "small" in size_labels:
+                append_case(
+                    label=(
+                        f"core_shell_small_triple_full_rotation_"
+                        f"{variant.label_suffix}_{execution_path}"
+                    ),
+                    size_label="small",
                     energies_ev=CORE_SHELL_TRIPLE_ENERGIES,
                     eangle_rotation=EANGLE_FULL,
-                    field_namespace=variant.field_namespace,
-                    resident_mode=variant.resident_mode,
-                    input_policy=variant.input_policy,
-                    ownership_policy=variant.ownership_policy,
-                    timing_segments=timing_segments,
-                    notes=f"{variant.notes} Occasional expensive checkpoint for the full parity-style rotation loop.",
+                    notes=(
+                        f"{variant.notes} Occasional expensive checkpoint for the full parity-style "
+                        f"rotation loop. execution_path={execution_path}."
+                    ),
                 )
-            )
     return cases
 
 
@@ -711,11 +1024,15 @@ def run_matrix(args: argparse.Namespace) -> int:
 
     run_label = args.label or _timestamp()
     resident_modes = _parse_resident_modes(args.resident_modes)
+    execution_paths = _parse_execution_paths(args.execution_paths)
     size_labels = _parse_csv_labels(args.size_labels)
     unknown = [label for label in size_labels if label not in SIZE_SPECS]
     if unknown:
         raise SystemExit(f"Unsupported size_labels entries: {unknown!r}")
     timing_segments = _parse_timing_segments(args.timing_segments)
+    no_rotation_energy_counts = _parse_positive_int_csv(args.no_rotation_energy_counts)
+    rotation_specs = _parse_rotation_specs(args.rotation_specs)
+    energy_lists = _parse_energy_lists(args.energy_lists)
 
     run_dir = OUT_ROOT / run_label
     output_dir = run_dir / "cases"
@@ -727,8 +1044,13 @@ def run_matrix(args: argparse.Namespace) -> int:
         "timing_boundary": PRIMARY_TIMING_BOUNDARY,
         "timing_segments": list(timing_segments),
         "resident_modes": list(resident_modes),
+        "execution_paths": list(execution_paths),
         "size_labels": list(size_labels),
+        "include_triple_no_rotation": bool(args.include_triple_no_rotation),
         "include_triple_limited": bool(args.include_triple_limited),
+        "no_rotation_energy_counts": list(no_rotation_energy_counts),
+        "rotation_specs": [list(spec) for spec in rotation_specs],
+        "explicit_energy_lists": [list(energies) for energies in energy_lists],
         "segment_g_status": "Reserved for future export timing. Not recorded in this pass.",
         "timing_cases": {},
     }
@@ -738,10 +1060,15 @@ def run_matrix(args: argparse.Namespace) -> int:
     print("Running cupy-rsoxs timing cases...", flush=True)
     for case in _timing_cases(
         resident_modes=resident_modes,
+        execution_paths=execution_paths,
         size_labels=size_labels,
         timing_segments=timing_segments,
+        include_triple_no_rotation=args.include_triple_no_rotation,
         include_triple_limited=args.include_triple_limited,
         include_full_small_check=args.include_full_small_check,
+        no_rotation_energy_counts=no_rotation_energy_counts,
+        rotation_specs=rotation_specs,
+        energy_lists=energy_lists,
     ):
         result = _run_case_subprocess(case=case, output_dir=output_dir)
         summary["timing_cases"][case.label] = result
@@ -768,6 +1095,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated resident-mode variants to run. Supported values: host,device.",
     )
     parser.add_argument(
+        "--execution-paths",
+        default="tensor_coeff",
+        help=(
+            "Comma-separated cupy-rsoxs execution paths to run. "
+            "Supported values: tensor_coeff,direct_polarization,nt_polarization "
+            "plus aliases default,tensor,direct,nt."
+        ),
+    )
+    parser.add_argument(
         "--size-labels",
         default="small",
         help="Comma-separated subset of size labels to run, for example 'small,medium'.",
@@ -781,9 +1117,40 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--include-triple-no-rotation",
+        action="store_true",
+        help="Include the no-rotation three-energy CoreShell lane for the selected resident-mode variants.",
+    )
+    parser.add_argument(
         "--include-triple-limited",
         action="store_true",
         help="Include the limited-rotation three-energy CoreShell lane for the selected resident-mode variants.",
+    )
+    parser.add_argument(
+        "--no-rotation-energy-counts",
+        default="",
+        help=(
+            "Optional comma-separated extra no-rotation energy counts for development sweeps, "
+            "for example '2,4,8'. Energies are selected as a centered contiguous subset "
+            "from the CoreShell optics table."
+        ),
+    )
+    parser.add_argument(
+        "--rotation-specs",
+        default="",
+        help=(
+            "Optional comma-separated explicit rotation specs in start:increment:end order, "
+            "for example '0:15:165,0:5:165'. Each spec maps to "
+            "EAngleRotation=[StartAngle, IncrementAngle, EndAngle]."
+        ),
+    )
+    parser.add_argument(
+        "--energy-lists",
+        default="",
+        help=(
+            "Optional comma-separated explicit energy groups. Quote this argument because each "
+            "group uses '|' separators, for example '284.7|285.0|285.2,284.9|285.0|285.1|285.2'."
+        ),
     )
     parser.add_argument(
         "--include-full-small-check",

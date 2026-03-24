@@ -19,8 +19,28 @@ Current contents:
     - CuPy authoritative fields prepared before timing starts,
     - default stream synchronized before the timer starts so upstream GPU work
       is excluded,
+  - keeps the no-rotation triple-energy lane available as an opt-in secondary
+    checkpoint for either resident-mode variant,
   - keeps the limited-rotation triple-energy lane available as an opt-in
     secondary checkpoint for either resident-mode variant,
+  - supports optional centered-energy no-rotation sweeps for arbitrary energy
+    counts via `--no-rotation-energy-counts`,
+  - supports arbitrary explicit rotation sweeps via `--rotation-specs`,
+    - syntax is comma-separated `start:increment:end` triples,
+    - each triple maps directly to
+      `EAngleRotation=[StartAngle, IncrementAngle, EndAngle]`,
+  - supports arbitrary explicit energy-list sweeps via `--energy-lists`,
+    - quote the argument because each group uses `|` separators,
+    - each comma-separated group becomes one explicit energy case,
+  - if both `--rotation-specs` and `--energy-lists` are supplied, the harness
+    also emits combined explicit-energy plus explicit-rotation cases,
+  - execution-path sweep support is now live for the current Segment `B` / `D`
+    campaign,
+    - use `backend_options["execution_path"]` through `--execution-paths`,
+    - supported execution-path values are:
+      - `tensor_coeff` for the current accepted route,
+      - `direct_polarization` for the CyRSoXS communication-minimizing analog,
+      - `nt_polarization` for the CyRSoXS memory-minimizing analog,
   - defines the primary timing boundary as:
     - start immediately before `Morphology(...)`,
     - end immediately after synchronized `run(return_xarray=False)`,
@@ -38,6 +58,143 @@ Segment `A` is nominally complete for the common workflow.
   timing results.
 - Repeated-run host-resident staging reuse remains only a low-priority niche
   future idea.
+- Current Segment `B` / `D` campaign focus:
+  - establish execution-path baselines before changing math,
+  - keep timing results execution-path-specific,
+  - validate dormant paths with the maintained CoreShell helper before using
+    them as optimization guidance,
+  - treat future float16 work as orthogonal to execution path rather than as a
+    replacement for it.
+
+Latest execution-path baseline snapshot:
+
+- Source artifact:
+  - `test-reports/cupy-rsoxs-optimization-dev/execution_path_surface_smoke_20260324/summary.json`
+- Host no-rotation single-energy small lane:
+  - `tensor_coeff`: `primary 2.833s`, `B 0.139`, `D 0.072`, `E 0.112`
+  - `direct_polarization`: `primary 2.609s`, `B 0.143`, `D 0.033`, `E 0.002`
+  - `nt_polarization`: `primary 2.607s`, `B 0.130`, `D 0.034`, `E 0.002`
+- Device no-rotation single-energy small lane:
+  - `tensor_coeff`: `primary 0.237s`, `B 0.131`, `D 0.072`, `E 0.004`
+  - `direct_polarization`: `primary 0.204s`, `B 0.138`, `D 0.033`, `E 0.002`
+  - `nt_polarization`: `primary 0.205s`, `B 0.134`, `D 0.033`, `E 0.002`
+- Quick correctness checkpoint on the official maintained CoreShell morphology
+  path versus `tensor_coeff`:
+  - `direct_polarization` and `nt_polarization` both showed
+    `max_abs 0.078125`, `rmse 1.60801e-4`, `p95_abs 3.8147e-06` on the raw
+    no-rotation single-energy scattering output,
+  - heavier A-wedge validation should still be finished before treating the
+    dormant paths as validated optimization guidance.
+
+Latest accepted optimization step:
+
+- `plan07_axis_family_fast_path`
+  - fully axis-aligned angle sets now use explicit x-family / y-family
+    specialization for `0°/180°` and `90°/270°`,
+  - benchmark artifact:
+    - `test-reports/cupy-rsoxs-optimization-dev/plan07_axis_family_fast_path_clean_20260324/summary.json`
+  - notable deltas versus the post-plan06 baseline:
+    - device / `tensor_coeff`: `primary 0.231s -> 0.196s`,
+      `D 0.072 -> 0.035`, `E 0.004 -> 0.002`,
+    - device / `direct_polarization`: `primary 0.210s -> 0.198s`,
+      `D 0.051 -> 0.033`, `E 0.002 -> 0.000`,
+    - host / `tensor_coeff`: `D 0.073 -> 0.035`, `E 0.004 -> 0.002`
+      even though host `A2` noise still makes the wall-clock delta less
+      stable than the backend-segment deltas,
+  - isolated `90°` spot checks showed the same low-`D` / near-zero-`E` shape
+    for the y-family branch.
+
+Still-relevant caveat from `plan06`:
+
+- exact-zero isotropic materials now skip runtime staging of `S/theta/psi` in
+  the host-resident lane and skip Euler/off-diagonal Segment `B` work in all
+  execution paths,
+- in the device-resident lane, runtime isotropic detection on device-resident
+  `S` currently lands in Segment `A2`, so post-plan06 device `A2` should no
+  longer be interpreted as pure staging only.
+
+Latest accepted-state verification:
+
+- final accepted-state benchmark artifact:
+  - `test-reports/cupy-rsoxs-optimization-dev/plan09_final_rebenchmark_accepted_state_20260324/summary.json`
+- final accepted-state snapshot on the primary small single-energy no-rotation
+  lane:
+  - host / `tensor_coeff`: `primary 2.515s`, `A2 2.339`, `B 0.109`,
+    `D 0.035`, `E 0.002`
+  - device / `tensor_coeff`: `primary 0.205s`, `A2 0.122`, `B 0.010`,
+    `D 0.039`, `E 0.002`
+- focused smoke close-out:
+  - `9 passed` across execution-path option handling, isotropic staging,
+    aligned-angle endpoint behavior, and private segment timing checks
+- maintained reference close-out:
+  - `pytest tests/validation/test_core_shell_reference.py -k "sim_regression_cupy_borrow_strict" --nrss-backend cupy-rsoxs -v`
+    passed for the accepted default path
+- dormant-path correctness note:
+  - official maintained-morphology raw scattering comparisons versus
+    `tensor_coeff` remained close after the accepted plan06/plan07 changes:
+    `max_abs 0.046875`, `rmse 9.72605e-05`, `p95_abs 3.8147e-06`,
+  - full dormant-path A-wedge validation was attempted but remained too
+    expensive for this inner-loop campaign, so treat dormant-path timing
+    results as timing evidence plus raw-scattering similarity rather than as
+    fully closed reference validation.
+
+Latest harness-extension verification:
+
+- artifact:
+  - `test-reports/cupy-rsoxs-optimization-dev/harness_rotation_energy_smoke_20260324/summary.json`
+- focused verification scope:
+  - `resident_modes=host,device`,
+  - `execution_paths=tensor_coeff`,
+  - `rotation_specs=[[0, 15, 165]]`,
+  - `explicit_energy_lists=[[284.7, 285.0, 285.2]]`,
+- confirmed emitted case families for both host and device:
+  - baseline single-energy no-rotation,
+  - explicit single-energy rotation,
+  - explicit energy-list no-rotation,
+  - explicit energy-list plus explicit rotation.
+
+Latest multi-angle execution-path comparison:
+
+- artifact:
+  - `test-reports/cupy-rsoxs-optimization-dev/execution_path_multiangle_5_vs_15_20260324/summary.json`
+- measurement scope:
+  - small CoreShell,
+  - single energy `285.0`,
+  - `resident_modes=host,device`,
+  - `execution_paths=tensor_coeff,direct_polarization,nt_polarization`,
+  - rotation sets equivalent to `--rotation-specs '0:15:165,0:5:165'`,
+- result:
+  - once multi-angle work matters, `tensor_coeff` is the clear winner,
+  - host / `0:15:165`:
+    - `tensor_coeff 2.742s`,
+    - `nt_polarization 3.319s`,
+    - `direct_polarization 3.742s`,
+  - host / `0:5:165`:
+    - `tensor_coeff 2.921s`,
+    - `nt_polarization 4.376s`,
+    - `direct_polarization 4.524s`,
+  - device / `0:15:165`:
+    - `tensor_coeff 0.419s`,
+    - `nt_polarization 0.441s`,
+    - `direct_polarization 0.556s`,
+  - device / `0:5:165`:
+    - `tensor_coeff 0.412s`,
+    - `nt_polarization 0.926s`,
+    - `direct_polarization 1.559s`,
+- interpretation:
+  - the dormant paths still matter as no-rotation references,
+  - but for angle-heavy workloads the default `tensor_coeff` path is the one
+    to optimize and benchmark first.
+
+Rejected late experiments:
+
+- `plan08_segment_b_algebraic_rewrite`
+  - fixed-size scratch reuse did not blow up memory, but it regressed the
+    default `tensor_coeff` Segment `B` path and was reverted
+- `plan11_elementwise_kernel_experiment`
+  - the aligned-angle `ElementwiseKernel` cut device `B` for the `Nt` subset,
+    but it regressed the default host `tensor_coeff` `B` path badly enough that
+    the added maintenance burden was not justified
 
 1. Iterate on `cupy-rsoxs` with the primary no-rotation lane first:
    - for new work, start with Segments `B` or `D` unless Segment `A` is being
@@ -49,9 +206,14 @@ Segment `A` is nominally complete for the common workflow.
      or the targeted segment metric.
 2. Recheck the opt-in device-resident lane periodically as a regression guard
    for direct CuPy workflows.
-3. Use the limited-rotation triple-energy lane only when rotation-sensitive
-   changes need confirmation.
-4. Return to the maintained test suite after the optimization block to confirm
+3. Use the limited-rotation triple-energy lane only when the built-in
+   `EAngleRotation=[0, 15, 165]` checkpoint is sufficient.
+4. Use `--rotation-specs` when the exact angle set is the point of the
+   measurement, and `--energy-lists` when the exact energy list is the point of
+   the measurement.
+5. If both energy list and rotation set matter, pass both options together so
+   the harness records the combined cases explicitly.
+6. Return to the maintained test suite after the optimization block to confirm
    there was no physical drift.
 
 Typical commands:
@@ -69,6 +231,40 @@ Typical commands:
   --label device-regression \
   --size-labels small \
   --resident-modes device
+```
+
+```bash
+/home/deand/mambaforge/envs/nrss-dev/bin/python \
+  tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
+  --label multienergy-no-rotation \
+  --size-labels small \
+  --resident-modes host,device \
+  --include-triple-no-rotation \
+  --no-rotation-energy-counts 2,4,8 \
+  --timing-segments B
+```
+
+```bash
+/home/deand/mambaforge/envs/nrss-dev/bin/python \
+  tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
+  --label explicit-rotation \
+  --size-labels small \
+  --resident-modes host,device \
+  --execution-paths tensor_coeff,direct_polarization,nt_polarization \
+  --rotation-specs '0:15:165,0:5:165' \
+  --timing-segments B,C,D,E
+```
+
+```bash
+/home/deand/mambaforge/envs/nrss-dev/bin/python \
+  tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
+  --label explicit-energy-and-rotation \
+  --size-labels small \
+  --resident-modes host,device \
+  --execution-paths tensor_coeff \
+  --rotation-specs '0:15:165' \
+  --energy-lists '284.7|285.0|285.2,284.9|285.0|285.1|285.2' \
+  --timing-segments B,C,D,E
 ```
 
 ```bash

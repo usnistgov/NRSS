@@ -46,7 +46,13 @@ _BACKEND_ARRAY_CONTRACTS = {
         "runtime_device": "gpu",
         "default_dtype": "float32",
         "supported_dtypes": ("float32",),
-        "supported_backend_options": ("dtype",),
+        "default_execution_path": "tensor_coeff",
+        "supported_execution_paths": (
+            "tensor_coeff",
+            "direct_polarization",
+            "nt_polarization",
+        ),
+        "supported_backend_options": ("dtype", "execution_path"),
     },
 }
 
@@ -113,7 +119,27 @@ def normalize_backend_options(
             f"Supported dtypes: {', '.join(spec['supported_dtypes'])}."
         )
 
-    return {"dtype": normalized_dtype}
+    normalized_options = {"dtype": normalized_dtype}
+    if "execution_path" in spec["supported_backend_options"]:
+        execution_path = str(
+            options.get("execution_path", spec["default_execution_path"])
+        ).strip().lower()
+        aliases = {
+            "default": spec["default_execution_path"],
+            "tensor": "tensor_coeff",
+            "direct": "direct_polarization",
+            "nt": "nt_polarization",
+        }
+        execution_path = aliases.get(execution_path, execution_path)
+        if execution_path not in spec["supported_execution_paths"]:
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support execution_path {execution_path!r}. "
+                "Supported execution paths: "
+                f"{', '.join(spec['supported_execution_paths'])}."
+            )
+        normalized_options["execution_path"] = execution_path
+
+    return normalized_options
 
 
 def resolve_backend_array_contract(
@@ -136,6 +162,8 @@ def resolve_backend_array_contract(
         "supported_resident_modes": spec["supported_resident_modes"],
         "default_dtype": spec["default_dtype"],
         "supported_dtypes": spec["supported_dtypes"],
+        "default_execution_path": spec.get("default_execution_path"),
+        "supported_execution_paths": spec.get("supported_execution_paths", ()),
         "supported_backend_options": spec["supported_backend_options"],
         "dtype": normalized_options["dtype"],
         "options": normalized_options,
@@ -156,6 +184,8 @@ def resolve_backend_runtime_contract(
         "supported_resident_modes": spec["supported_resident_modes"],
         "default_dtype": spec["default_dtype"],
         "supported_dtypes": spec["supported_dtypes"],
+        "default_execution_path": spec.get("default_execution_path"),
+        "supported_execution_paths": spec.get("supported_execution_paths", ()),
         "supported_backend_options": spec["supported_backend_options"],
         "dtype": normalized_options["dtype"],
         "options": normalized_options,

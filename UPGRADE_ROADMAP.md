@@ -817,8 +817,14 @@ recover:
      `EAngleRotation=[0, 0, 0]`, `resident_mode='device'`, with morphology
      fields preconverted to the CuPy contract and the default stream
      synchronized before the timer starts,
-   - rotation-focused lane: opt-in `--include-triple-limited` on either or
-     both resident-mode variants,
+   - rotation-focused lane: use opt-in `--include-triple-limited` on either or
+     both resident-mode variants when the built-in
+     `EAngleRotation=[0, 15, 165]` checkpoint is sufficient, or use
+     `--rotation-specs start:increment:end[, ...]` when the exact rotation set
+     is the point of the measurement,
+   - energy-focused lane: use `--no-rotation-energy-counts` for centered
+     contiguous CoreShell subsets, or `--energy-lists 'E1|E2|...'[, ...]` when
+     an explicit energy list is the point of the measurement,
    - memory / throughput guardrail lane: `large`, single energy, selected
      resident mode, dense angle sweep when needed.
 6. When chasing a hotspot, narrow `--timing-segments` to the relevant subset
@@ -847,6 +853,361 @@ recover:
 12. Future optimization guidance should be treated as open-ended. Many more
    opportunities likely exist beyond the ones already enumerated or tried. The
    document should not be read as an exhaustive list of remaining ideas.
+
+### 18.5.1 Current Segment B/D campaign plan (March 24, 2026)
+
+This subsection is the live plan and outcome ledger for the current Segment `B`
+/ `D` optimization block. Update it as each step completes so a fresh context
+can recover both the intended order and the measured outcomes.
+
+Status key:
+- `planned`: not started yet,
+- `in_progress`: active implementation or measurement work,
+- `completed`: implemented and measured,
+- `rejected`: attempted and not kept.
+
+Current campaign steps:
+
+1. `plan01_document_campaign` - `completed`
+   - write the full Segment `B` / `D` plan into this roadmap and the dev timing
+     README before code changes,
+   - define the execution-path terminology and the benchmark matrix to be used
+     for the campaign,
+   - outcome:
+     - completed on March 24, 2026 by adding this live campaign subsection and
+       the matching dev-harness README notes.
+2. `plan02_execution_path_surface` - `completed`
+   - revive `backend_options` as the backend-specific runtime-behavior surface
+     for `cupy-rsoxs`,
+   - add an explicit `execution_path` option with default
+     `execution_path='tensor_coeff'`,
+   - initial intended values:
+     - `tensor_coeff`: current accepted `Nt -> FFT(Nt) -> projection-coefficient`
+       route,
+     - `direct_polarization`: CyRSoXS `AlgorithmType=0`
+       communication-minimizing analog,
+     - `nt_polarization`: CyRSoXS `AlgorithmType=1`
+       memory-minimizing analog,
+   - outcome:
+     - completed on March 24, 2026,
+     - `cupy-rsoxs` now accepts `backend_options["execution_path"]` with
+       supported values `tensor_coeff`, `direct_polarization`, and
+       `nt_polarization`,
+     - aliases now normalize as:
+       - `default -> tensor_coeff`,
+       - `tensor -> tensor_coeff`,
+       - `direct -> direct_polarization`,
+       - `nt -> nt_polarization`,
+     - default behavior remains unchanged at `execution_path='tensor_coeff'`.
+3. `plan03_core_shell_backend_options_plumbing` - `completed`
+   - thread `backend_options` through the maintained CoreShell construction and
+     backend-run helpers so execution-path validation can use the official
+     maintained morphology path with reasonable defaults,
+   - outcome:
+     - completed on March 24, 2026,
+     - maintained CoreShell helpers now accept `backend_options` for both
+       morphology construction and backend execution so dormant-path validation
+       can use the official maintained morphology lane rather than ad hoc
+       builders.
+4. `plan04_harness_execution_path_matrix` - `completed`
+   - extend the authoritative subprocess timing harness to accept
+     execution-path-specific sweeps,
+   - ensure labels and summaries include both primary timing and
+     segment-by-segment timing per execution path,
+   - keep segment tracking available for all execution paths using the existing
+     `A1,A2,B,C,D,E,F` segmentation,
+   - outcome:
+     - completed on March 24, 2026,
+     - the authoritative subprocess harness now accepts
+       `--execution-paths ...`,
+     - the same harness now also accepts explicit
+       `--rotation-specs start:increment:end[, ...]` and
+       `--energy-lists 'E1|E2|...'[, ...]` inputs for targeted
+       rotation-sensitive or energy-sensitive studies,
+     - benchmark labels now carry the execution-path suffix,
+     - requested and resolved backend options are persisted into the summary
+       artifact for each case,
+     - segment tracking remains available across all surfaced execution paths,
+       even though the exact work contained inside Segments `B/C/D/E` differs
+       by execution path,
+     - when both explicit rotation and explicit energy lists are supplied, the
+       harness emits combined cases as well as the rotation-only and
+       energy-only variants,
+     - focused verification artifact:
+       `test-reports/cupy-rsoxs-optimization-dev/harness_rotation_energy_smoke_20260324/summary.json`
+       confirmed baseline, rotation-only, energy-only, and combined case
+       emission on both host and device resident modes.
+5. `plan05_execution_path_baselines` - `in_progress`
+   - benchmark the current `tensor_coeff` path plus the two dormant paths on
+     the official no-rotation host/device small lanes before new math changes,
+   - run CoreShell correctness validation for the newly surfaced dormant paths
+     before treating their timings as optimization guidance,
+   - current measured timing baseline from
+     `execution_path_surface_smoke_20260324`:
+     - host / `tensor_coeff`:
+       `primary 2.833s`, `A1 0.003`, `A2 2.482`, `B 0.139`, `C 0.010`,
+       `D 0.072`, `E 0.112`, `F 0.001`,
+     - host / `direct_polarization`:
+       `primary 2.609s`, `A1 0.003`, `A2 2.401`, `B 0.143`, `C 0.009`,
+       `D 0.033`, `E 0.002`, `F 0.001`,
+     - host / `nt_polarization`:
+       `primary 2.607s`, `A1 0.003`, `A2 2.408`, `B 0.130`, `C 0.016`,
+       `D 0.034`, `E 0.002`, `F 0.000`,
+     - device / `tensor_coeff`:
+       `primary 0.237s`, `A1 0.003`, `A2 0.000`, `B 0.131`, `C 0.010`,
+       `D 0.072`, `E 0.004`, `F 0.000`,
+     - device / `direct_polarization`:
+       `primary 0.204s`, `A1 0.003`, `A2 0.000`, `B 0.138`, `C 0.009`,
+       `D 0.033`, `E 0.002`, `F 0.000`,
+     - device / `nt_polarization`:
+       `primary 0.205s`, `A1 0.003`, `A2 0.000`, `B 0.134`, `C 0.015`,
+       `D 0.033`, `E 0.002`, `F 0.000`,
+   - current interpretation:
+     - both surfaced dormant routes are materially faster than
+       `tensor_coeff` on the small single-energy no-rotation lane,
+     - their speed advantage is driven mostly by much smaller Segment `D` and
+       Segment `E` work rather than by a clear Segment `B` win,
+     - however, a later limited multi-angle comparison on the same small
+       CoreShell model showed the ranking reverses once angle iteration
+       matters:
+       - source artifact:
+         `test-reports/cupy-rsoxs-optimization-dev/execution_path_multiangle_5_vs_15_20260324/summary.json`,
+       - host / `EAngleRotation=[0, 15, 165]`:
+         `tensor_coeff 2.742s`, `nt_polarization 3.319s`,
+         `direct_polarization 3.742s`,
+       - host / `EAngleRotation=[0, 5, 165]`:
+         `tensor_coeff 2.921s`, `nt_polarization 4.376s`,
+         `direct_polarization 4.524s`,
+       - device / `EAngleRotation=[0, 15, 165]`:
+         `tensor_coeff 0.419s`, `nt_polarization 0.441s`,
+         `direct_polarization 0.556s`,
+       - device / `EAngleRotation=[0, 5, 165]`:
+         `tensor_coeff 0.412s`, `nt_polarization 0.926s`,
+         `direct_polarization 1.559s`,
+       - interpretation:
+         for angle-heavy workloads, `tensor_coeff` is the practical winner and
+         should remain the primary optimization target even though the dormant
+         routes are still useful no-rotation reference points,
+     - quick raw CoreShell comparisons against `tensor_coeff` on the official
+       maintained morphology path show the dormant routes are numerically very
+       close overall but not bitwise-identical:
+        `max_abs 0.078125`, `rmse 1.60801e-4`, `p95_abs 3.8147e-06`,
+      - after the accepted plan06/plan07 steps, the same official maintained
+        morphology raw comparison remained close:
+        `max_abs 0.046875`, `rmse 9.72605e-05`, `p95_abs 3.8147e-06`,
+      - the maintained official sim-regression test for the accepted default
+        `cupy-rsoxs` path passed on March 24, 2026:
+        `pytest tests/validation/test_core_shell_reference.py -k "sim_regression_cupy_borrow_strict" --nrss-backend cupy-rsoxs -v`,
+      - full dormant-path A-wedge / sim-reference validation was attempted on
+        the official CoreShell helper path but remained too expensive for the
+        current inner-loop campaign, so dormant-path timing guidance should
+        still be treated as timing evidence plus raw-maintained-morphology
+        similarity rather than as fully closed reference validation.
+6. `plan06_isotropic_material_fast_path` - `completed`
+   - add a full-material isotropic fast path for materials with
+     `S == 0` everywhere,
+   - skip Euler decode and off-diagonal tensor work for those materials across
+     all execution paths,
+   - expected to help common vacuum / matrix / isotropic-additive cases,
+   - outcome from `plan06_isotropic_material_fast_path_clean_20260324`:
+     - completed on March 24, 2026,
+     - exact-zero isotropic materials now:
+       - skip runtime staging of `S`, `theta`, and `psi` in the host-resident
+         path,
+       - skip Euler decode and off-diagonal tensor work in Segment `B` across
+         all execution paths,
+     - focused smoke checks added:
+       - host-resident isotropic staging now confirms only `Vfrac` is staged to
+         CuPy for fully isotropic materials,
+       - all three execution paths now agree on a fully isotropic synthetic
+         morphology in the maintained smoke lane,
+     - measured timing deltas versus the execution-path baseline on the
+       official small single-energy no-rotation CoreShell lane:
+       - host / `tensor_coeff`:
+         `primary 2.833s -> 2.519s`, `A2 2.482 -> 2.305`, `B 0.139 -> 0.110`,
+       - host / `direct_polarization`:
+         `primary 2.609s -> 2.613s`, `B 0.143 -> 0.112`,
+       - host / `nt_polarization`:
+         `primary 2.607s -> 2.706s`, `B 0.130 -> 0.113`,
+       - device / `tensor_coeff`:
+         `primary 0.237s -> 0.231s`, `A2 0.000 -> 0.112`, `B 0.131 -> 0.014`,
+       - device / `direct_polarization`:
+         `primary 0.204s -> 0.210s`, `A2 0.000 -> 0.109`, `B 0.138 -> 0.015`,
+       - device / `nt_polarization`:
+         `primary 0.205s -> 0.201s`, `A2 0.000 -> 0.116`, `B 0.134 -> 0.014`,
+     - interpretation:
+       - the CoreShell lane confirms the intended Segment `B` win strongly,
+         especially in the device-resident path where two of the three
+         materials are fully isotropic,
+       - total latency impact is mixed because exact-zero isotropic detection is
+         currently performed during runtime staging for device-resident inputs,
+         which moves about `0.11s` into Segment `A2` on this small benchmark,
+       - the host-default `tensor_coeff` lane still improves materially on the
+         primary wall metric and remains worth keeping,
+       - the current implementation is therefore accepted as the baseline for
+         the next step, with the device-path `A2` caveat recorded rather than
+         treated as a blocker.
+7. `plan07_axis_family_fast_path` - `completed`
+   - add the high-value axis-family special cases for electric-field rotations
+     congruent to `0°/180°` and `90°/270°`,
+   - first target the single-angle / fully axis-aligned cases where the
+     savings reach beyond Segment `E`,
+   - note the analogous downstream pruning opportunity in Segment `D`:
+     axis-aligned cases can avoid `proj_xy` and one projection-family branch,
+   - outcome from `plan07_axis_family_fast_path_clean_20260324`:
+     - completed on March 24, 2026,
+     - fully axis-aligned angle sets now use an explicit angle-family plan:
+       - `0°/180°` use the x-family subset,
+       - `90°/270°` use the y-family subset,
+       - general angles continue to use the existing full path,
+     - implementation details:
+       - `tensor_coeff` now skips `proj_xy` and the unused x/y projection
+         family on fully axis-aligned angle sets,
+       - `nt_polarization` now computes only the `Nt` component subset needed
+         by the aligned angle family,
+       - `direct_polarization` now uses the aligned-field specialization rather
+         than the general `mx*sx + my*sy` branch,
+       - identity rotations now bypass the affine-transform path in Segment
+         `E`,
+     - focused smoke/regression checks remained green, including the existing
+       endpoint-semantics smoke and the execution-path smoke subset,
+     - measured deltas versus the post-plan06 baseline on the official small
+       single-energy no-rotation CoreShell lane:
+       - host / `tensor_coeff`:
+         `D 0.073 -> 0.035`, `E 0.004 -> 0.002`,
+       - host / `direct_polarization`:
+         `primary 2.613s -> 2.530s`, `E 0.002 -> 0.000`,
+       - host / `nt_polarization`:
+         `primary 2.706s -> 2.537s`, `D 0.040 -> 0.033`,
+         `E 0.002 -> 0.000`,
+       - device / `tensor_coeff`:
+         `primary 0.231s -> 0.196s`, `D 0.072 -> 0.035`,
+         `E 0.004 -> 0.002`,
+       - device / `direct_polarization`:
+         `primary 0.210s -> 0.198s`, `D 0.051 -> 0.033`,
+         `E 0.002 -> 0.000`,
+       - device / `nt_polarization`:
+         `primary 0.201s -> 0.193s`, `E 0.002 -> 0.000`,
+     - interpretation:
+       - the aligned-angle specialization is a clear `D`/`E` win on the
+         default `0°` lane and produces the intended overall device-lane speedup,
+       - host-lane `A2` variance still makes wall-clock interpretation noisier
+         than the backend-segment metrics, so the step should be read primarily
+         as a segment-specific improvement rather than as a universal primary
+         win on every surfaced path,
+       - an isolated `90°` spot check showed the same low-`D` / near-zero-`E`
+         shape for the y-family branch, so the optimization is not only
+         exercising the `0°` case.
+8. `plan08_segment_b_algebraic_rewrite` - `rejected`
+   - simplify Segment `B` tensor assembly with shared-term factoring, smaller
+     scratch reuse, and more aggressive dead-intermediate deletion,
+   - this is explicitly not the abandoned multi-energy cache idea:
+     it should reduce temporary live-set pressure rather than persist large
+     per-energy/per-material tensors,
+   - outcome from `plan08_segment_b_algebraic_rewrite_20260324`:
+     - attempted on March 24, 2026 with a fixed-size scratch-buffer
+       formulation for Segment `B`,
+     - this implementation did *not* recreate the abandoned cache-memory risk:
+       it used only per-call scratch buffers rather than any persistent
+       per-energy/per-material cache,
+     - however it materially regressed the default `tensor_coeff` Segment `B`
+       lane and therefore did not clear the acceptance bar,
+     - most important measured regression versus the post-plan07 baseline:
+       - host / `tensor_coeff`:
+         `B 0.107 -> 0.192` and `primary 2.690s -> 2.619s` still failed the
+         Segment `B` objective because the targeted segment became
+         substantially slower,
+     - other surfaced paths were mixed to nearly flat rather than strongly
+       improved,
+     - the implementation was reverted and the accepted baseline therefore
+       remains the post-plan07 axis-family state.
+9. `plan09_rebenchmark_and_regression_check` - `completed`
+   - rerun the official subprocess timing matrix after each accepted step,
+   - use the maintained smoke/reference checks as regression guards before the
+     campaign is closed out,
+   - outcome from `plan09_final_rebenchmark_accepted_state_20260324`:
+     - completed on March 24, 2026,
+     - final accepted state is the combination of:
+       - execution-path surfacing,
+       - full-material isotropic fast path,
+       - axis-family fast path,
+       - with the plan08 scratch experiment and the plan11
+         `ElementwiseKernel` experiment both reverted,
+     - final accepted-state timing snapshot on the official small
+       single-energy no-rotation CoreShell lane:
+       - host / `tensor_coeff`:
+         `primary 2.515s`, `A2 2.339`, `B 0.109`, `D 0.035`, `E 0.002`,
+       - host / `direct_polarization`:
+         `primary 2.541s`, `A2 2.364`, `B 0.113`, `D 0.034`, `E 0.000`,
+       - host / `nt_polarization`:
+         `primary 2.519s`, `A2 2.344`, `B 0.108`, `D 0.033`, `E 0.000`,
+       - device / `tensor_coeff`:
+         `primary 0.205s`, `A2 0.122`, `B 0.010`, `D 0.039`, `E 0.002`,
+       - device / `direct_polarization`:
+         `primary 0.198s`, `A2 0.116`, `B 0.014`, `D 0.034`, `E 0.000`,
+       - device / `nt_polarization`:
+         `primary 0.207s`, `A2 0.115`, `B 0.010`, `D 0.035`, `E 0.001`,
+     - maintained regression checks completed in this close-out pass:
+       - focused smoke subset: `9 passed`,
+       - accepted-path maintained CoreShell sim regression:
+         `1 passed` with `--nrss-backend cupy-rsoxs`,
+     - final interpretation:
+       - the accepted state materially improves the default host
+         `tensor_coeff` lane versus the original execution-path baseline,
+         mostly through lower `A2`, `B`, `D`, and `E`,
+       - the device lane keeps the strong Segment `B` and aligned-angle
+         `D/E` wins, with the known caveat that isotropic detection now lands
+         in `A2`.
+10. `plan10_float16_followup_scaffold` - `completed`
+    - do not implement the mixed-precision campaign in this block,
+    - only leave the execution-path surface and roadmap notes in a form that
+      allows an orthogonal future backend-options extension for reduced
+      storage/transfer precision,
+    - outcome:
+      - completed on March 24, 2026 with no float16 compute-path work landed,
+      - `backend_options["execution_path"]` and the accompanying roadmap notes
+        now provide the intended light scaffold for a future orthogonal reduced
+        precision option surface,
+      - the existing float16-rejection smoke continues to pass in this state.
+11. `plan11_elementwise_kernel_experiment` - `rejected`
+    - try one last `ElementwiseKernel` implementation aimed at Segment `B`,
+    - scope it narrowly to the aligned-angle/default-lane path first rather
+      than broadening it across every route immediately,
+    - accept it only if the default-lane gain is large enough to justify the
+      added maintenance burden; otherwise reject and revert it,
+    - outcome from `plan11_elementwise_kernel_experiment_20260324`:
+      - attempted on March 24, 2026 by replacing the aligned-angle `Nt`
+        subset path with a narrow `ElementwiseKernel` implementation,
+      - this did reduce device-resident aligned-angle `B` time for the
+        `tensor_coeff` / `nt_polarization` subset:
+        - device / `tensor_coeff`: `B 0.010 -> 0.005`,
+        - device / `nt_polarization`: `B 0.010 -> 0.005`,
+      - but it materially regressed the default host-resident
+        `tensor_coeff` path:
+        - host / `tensor_coeff`: `B 0.107 -> 0.246`,
+      - because the default host lane remains the primary public-workflow
+        authority and the gain was not broad enough to offset the extra kernel
+        maintenance burden, the experiment was rejected and reverted.
+
+Precision and option-surface notes for this campaign:
+
+1. `backend_options` is being resurrected as the explicit backend-specific
+   runtime-behavior surface rather than overloading `AlgorithmType` directly in
+   `cupy-rsoxs`.
+2. The float16 plan is orthogonal to `execution_path`.
+   - intended future direction:
+     - reduced storage / host->device transfer precision as the first target,
+     - optional Segment `B` low-precision experiment if validation permits,
+     - cast to `float32` / `complex64` before FFT ingress for parity-sensitive
+       math.
+3. No float16 compute-path implementation should be accepted in this campaign
+   beyond the light option-surface scaffolding needed so a later block can add
+   it cleanly.
+4. Segment `D` should keep a note for future pruning and scratch-reuse work:
+   - axis-family cases may avoid building `proj_xy` and one of the x/y
+     projection families,
+   - algebraic factoring and scratch reuse around basis/projection assembly may
+     be worthwhile there after the Segment `B` pass is measured.
 
 ### 18.6 Campaign ledger from work already done
 
@@ -923,6 +1284,14 @@ recover:
 
 1. `float16` and mixed-precision work remain deferred until after the next
    speed campaigns; parity-sensitive compute remains `float32/complex64`.
+   - near-term intended shape of that work:
+     - `backend_options` should carry reduced-precision storage/runtime flags
+       orthogonally to `execution_path`,
+     - the first target is host/device storage and transfer reduction rather
+       than end-to-end low-precision FFT/projection math,
+     - the expected precision ladder is reduced-precision storage or Segment
+       `B` staging followed by promotion to `float32` / `complex64` before FFT
+       ingress.
 2. Reduced angle sampling, alternate interpolation rules, and multi-GPU fan-out
    remain outside the current exact-tuning track.
 3. Host-resident staged mode creates room for explicit experiments with deeper
@@ -958,10 +1327,15 @@ recover:
      `/home/deand/mambaforge/envs/nrss-dev/bin/python tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py --label <label> --size-labels small --resident-modes host --timing-segments all`,
    - narrow `--timing-segments` when focusing on a specific segment,
    - use the single-energy benchmark ladder for inner-loop tuning,
+   - for explicit rotation-sensitive or energy-sensitive studies, the harness
+     now supports `--rotation-specs` and `--energy-lists`, and it emits
+     combined cases when both are supplied,
    - recheck `--resident-modes device` periodically as a regression lane for
      direct-CuPy workflows,
-   - add `--include-triple-limited` only when rotation-sensitive behavior needs
-     confirmation,
+   - add `--include-triple-limited` only when the fixed
+     `EAngleRotation=[0, 15, 165]` checkpoint is sufficient for the question,
+   - otherwise use `--rotation-specs` and `--energy-lists` to benchmark the
+     exact angle or energy sets under discussion,
    - rerun maintained parity checks after promising optimization changes,
    - treat the legacy full-energy backend-comparison harness as optional
      historical context rather than a required step in the default loop.

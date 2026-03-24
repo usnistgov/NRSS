@@ -42,13 +42,16 @@ def _baseline_awedge(
     input_policy: str,
     ownership_policy: str | None,
     field_namespace: str,
+    backend_options_items: tuple[tuple[str, object], ...] = (),
 ):
+    backend_options = dict(backend_options_items) if backend_options_items else None
     if backend == "cyrsoxs":
         scattering = run_core_shell_pybind(scenario="baseline")
     else:
         scattering, _ = run_core_shell_backend(
             scenario="baseline",
             backend=backend,
+            backend_options=backend_options,
             resident_mode=resident_mode,
             input_policy=input_policy,
             ownership_policy=ownership_policy,

@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import h5py
 import matplotlib
@@ -333,6 +334,7 @@ def build_core_shell_morphology(
     create_cy_object: bool = True,
     *,
     backend: str | None = None,
+    backend_options: dict[str, Any] | None = None,
     resident_mode: str | None = None,
     input_policy: str = "coerce",
     ownership_policy: str | None = None,
@@ -402,6 +404,7 @@ def build_core_shell_morphology(
         config=config,
         create_cy_object=create_cy_object,
         backend=backend,
+        backend_options=backend_options,
         resident_mode=resident_mode,
         input_policy=input_policy,
         ownership_policy=ownership_policy,
@@ -432,6 +435,7 @@ def run_core_shell_backend(
     scenario: CoreShellScenario | str = "baseline",
     *,
     backend: str,
+    backend_options: dict[str, Any] | None = None,
     resident_mode: str | None = None,
     input_policy: str = "coerce",
     ownership_policy: str | None = None,
@@ -441,6 +445,7 @@ def run_core_shell_backend(
         scenario=scenario,
         create_cy_object=True,
         backend=backend,
+        backend_options=backend_options,
         resident_mode=resident_mode,
         input_policy=input_policy,
         ownership_policy=ownership_policy,

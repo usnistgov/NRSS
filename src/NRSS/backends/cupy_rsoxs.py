@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
-from .arrays import assess_array_for_backend_runtime, coerce_array_for_backend
+from .arrays import assess_array_for_backend_runtime, coerce_array_for_backend, inspect_array
 from .registry import BackendUnavailableError
 from .runtime import BackendRuntime
 
@@ -41,6 +41,26 @@ class _RuntimeMaterialView:
     S: Any
     theta: Any
     psi: Any
+    is_full_isotropic: bool
+
+
+@dataclass(frozen=True)
+class _AnglePlan:
+    angle_radians: float
+    mx: np.float32
+    my: np.float32
+    family: str
+    is_identity_rotation: bool
+
+
+@dataclass(frozen=True)
+class _AngleFamilyPlan:
+    angles: tuple[_AnglePlan, ...]
+    all_axis_aligned: bool
+    required_nt_components: tuple[int, ...]
+    needs_proj_x: bool
+    needs_proj_y: bool
+    needs_proj_xy: bool
 
 
 class _NullSegmentRecorder:
@@ -188,7 +208,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         morphology._backend_timings = {}
 
         energies = tuple(float(energy) for energy in morphology.Energies)
-        runtime_materials = recorder.measure("A2", lambda: self._runtime_material_views(morphology))
+        runtime_materials = recorder.measure("A2", lambda: self._runtime_material_views(morphology, cp))
         projections = []
         window = None
         try:
@@ -302,13 +322,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         wx = cp.asarray(np.hanning(x), dtype=cp.float32)[None, None, :]
         return wz * wy * wx
 
-    def _runtime_material_views(self, morphology):
+    def _runtime_material_views(self, morphology, cp):
         runtime_contract = morphology._runtime_compute_contract
         staging_reports = []
         runtime_materials = []
         for material_id, material in morphology.materials.items():
-            staged_fields = {}
-            for field_name in ("Vfrac", "S", "theta", "psi"):
+            is_full_isotropic = self._material_is_full_isotropic(material.S, cp)
+            staged_fields = {"Vfrac": None, "S": None, "theta": None, "psi": None}
+            field_names = ("Vfrac",) if is_full_isotropic else ("Vfrac", "S", "theta", "psi")
+            for field_name in field_names:
                 value = getattr(material, field_name)
                 plan = assess_array_for_backend_runtime(
                     value,
@@ -328,19 +350,87 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     S=staged_fields["S"],
                     theta=staged_fields["theta"],
                     psi=staged_fields["psi"],
+                    is_full_isotropic=is_full_isotropic,
                 )
             )
 
         morphology.last_runtime_staging_report = staging_reports
         return tuple(runtime_materials)
 
+    def _material_is_full_isotropic(self, s_field, cp) -> bool:
+        info = inspect_array(s_field)
+        if info["namespace"] == "numpy":
+            return not bool(np.any(np.asarray(s_field)))
+        if info["namespace"] == "cupy":
+            return int(cp.count_nonzero(s_field).item()) == 0
+        raise TypeError(f"Unsupported S-field namespace for isotropic detection: {info['namespace']!r}.")
+
+    def _execution_path(self, morphology) -> str:
+        return str(morphology.backend_options.get("execution_path", "tensor_coeff"))
+
     def _run_single_energy(self, morphology, runtime_materials, energy, cp, ndimage, window, recorder):
-        num_angles = self._num_angles(morphology)
+        execution_path = self._execution_path(morphology)
+        if execution_path == "tensor_coeff":
+            return self._run_single_energy_tensor_coeff(
+                morphology=morphology,
+                runtime_materials=runtime_materials,
+                energy=energy,
+                cp=cp,
+                ndimage=ndimage,
+                window=window,
+                recorder=recorder,
+            )
+        if execution_path == "nt_polarization":
+            return self._run_single_energy_nt_polarization(
+                morphology=morphology,
+                runtime_materials=runtime_materials,
+                energy=energy,
+                cp=cp,
+                ndimage=ndimage,
+                window=window,
+                recorder=recorder,
+            )
+        if execution_path == "direct_polarization":
+            return self._run_single_energy_direct_polarization(
+                morphology=morphology,
+                runtime_materials=runtime_materials,
+                energy=energy,
+                cp=cp,
+                ndimage=ndimage,
+                window=window,
+                recorder=recorder,
+            )
+        raise AssertionError(f"Unsupported cupy-rsoxs execution_path {execution_path!r}.")
+
+    def _run_single_energy_tensor_coeff(
+        self,
+        morphology,
+        runtime_materials,
+        energy,
+        cp,
+        ndimage,
+        window,
+        recorder,
+    ):
+        angle_family_plan = self._angle_family_plan(morphology)
         nt = recorder.measure(
             "B",
-            lambda: self._compute_nt_components(runtime_materials, energy, cp),
+            lambda: self._compute_nt_components(
+                runtime_materials,
+                energy,
+                cp,
+                required_components=angle_family_plan.required_nt_components,
+            ),
         )
-        fft_nt = recorder.measure("C", lambda: self._compute_fft_nt_components(nt=nt, cp=cp, window=window))
+        fft_nt = recorder.measure(
+            "C",
+            lambda: self._compute_fft_nt_components(
+                nt=nt,
+                cp=cp,
+                window=window,
+                component_indices=angle_family_plan.required_nt_components,
+            ),
+        )
         proj_x, proj_y, proj_xy = recorder.measure(
             "D",
             lambda: self._projection_coefficients_from_fft_nt(
@@ -348,6 +438,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 energy=energy,
                 cp=cp,
                 fft_nt=fft_nt,
+                angle_family_plan=angle_family_plan,
             ),
         )
         angle_projections = recorder.measure(
@@ -359,11 +450,66 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 proj_x=proj_x,
                 proj_y=proj_y,
                 proj_xy=proj_xy,
-                num_angles=num_angles,
+                angle_family_plan=angle_family_plan,
             ),
         )
         del nt, fft_nt, proj_x, proj_y, proj_xy
         return angle_projections
+
+    def _run_single_energy_nt_polarization(
+        self,
+        morphology,
+        runtime_materials,
+        energy,
+        cp,
+        ndimage,
+        window,
+        recorder,
+    ):
+        angle_family_plan = self._angle_family_plan(morphology)
+        nt = recorder.measure(
+            "B",
+            lambda: self._compute_nt_components(
+                runtime_materials,
+                energy,
+                cp,
+                required_components=angle_family_plan.required_nt_components,
+            ),
+        )
+        angle_projections = self._project_from_nt(
+            morphology=morphology,
+            energy=energy,
+            cp=cp,
+            ndimage=ndimage,
+            nt=nt,
+            window=window,
+            angle_family_plan=angle_family_plan,
+            recorder=recorder,
+        )
+        del nt
+        return angle_projections
+
+    def _run_single_energy_direct_polarization(
+        self,
+        morphology,
+        runtime_materials,
+        energy,
+        cp,
+        ndimage,
+        window,
+        recorder,
+    ):
+        angle_family_plan = self._angle_family_plan(morphology)
+        return self._project_from_direct_polarization(
+            morphology=morphology,
+            runtime_materials=runtime_materials,
+            energy=energy,
+            cp=cp,
+            ndimage=ndimage,
+            window=window,
+            angle_family_plan=angle_family_plan,
+            recorder=recorder,
+        )
 
     def _num_angles(self, morphology) -> int:
         start_angle, increment_angle, end_angle = map(float, morphology.EAngleRotation)
@@ -375,6 +521,64 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         if num_angles == 1:
             return (math.radians(start_angle),)
         return tuple(math.radians(start_angle + increment_angle * idx) for idx in range(num_angles))
+
+    def _angle_family_plan(self, morphology):
+        angles = self._angles_radians(morphology)
+        cache_key = ("angle_family_plan", tuple(round(angle, 12) for angle in angles))
+        plan = morphology._backend_runtime_state.get(cache_key)
+        if plan is not None:
+            return plan
+
+        all_axis_aligned = True
+        required_nt_components: set[int] = set()
+        needs_proj_x = False
+        needs_proj_y = False
+        angle_plans = []
+        tol = 1e-6
+        full_turn = 2.0 * math.pi
+
+        for angle in angles:
+            mx = np.float32(math.cos(angle))
+            my = np.float32(math.sin(angle))
+            mx_f = float(mx)
+            my_f = float(my)
+
+            if abs(my_f) <= tol and abs(abs(mx_f) - 1.0) <= tol:
+                family = "x"
+                needs_proj_x = True
+                required_nt_components.update((0, 1, 2))
+            elif abs(mx_f) <= tol and abs(abs(my_f) - 1.0) <= tol:
+                family = "y"
+                needs_proj_y = True
+                required_nt_components.update((1, 3, 4))
+            else:
+                family = "general"
+                all_axis_aligned = False
+                needs_proj_x = True
+                needs_proj_y = True
+                required_nt_components = {0, 1, 2, 3, 4}
+
+            reduced = math.remainder(angle, full_turn)
+            angle_plans.append(
+                _AnglePlan(
+                    angle_radians=angle,
+                    mx=mx,
+                    my=my,
+                    family=family,
+                    is_identity_rotation=abs(reduced) <= tol,
+                )
+            )
+
+        plan = _AngleFamilyPlan(
+            angles=tuple(angle_plans),
+            all_axis_aligned=all_axis_aligned,
+            required_nt_components=tuple(sorted(required_nt_components or {0, 1, 2, 3, 4})),
+            needs_proj_x=needs_proj_x,
+            needs_proj_y=needs_proj_y,
+            needs_proj_xy=not all_axis_aligned,
+        )
+        morphology._backend_runtime_state[cache_key] = plan
+        return plan
 
     def _rotation_transforms(self, morphology, cp):
         cache_key = (
@@ -454,82 +658,132 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         nper = np.complex64(complex(1.0 - float(d_perp), float(b_perp)))
         return npar, nper
 
-    def _compute_nt_components(self, runtime_materials, energy, cp):
+    def _material_optical_scalars(self, material, energy):
+        npar, nper = self._material_optics(material, energy)
+        nsum_sq = np.complex64((npar + 2.0 * nper) ** 2)
+        npar_sq = np.complex64(npar * npar)
+        nper_sq = np.complex64(nper * nper)
+        isotropic_diag = np.complex64(nsum_sq / np.float32(9.0) - np.complex64(1.0))
+        aligned_base = np.complex64(nper_sq - nsum_sq / np.float32(9.0))
+        anisotropic_delta = np.complex64(npar_sq - nper_sq)
+        return isotropic_diag, aligned_base, anisotropic_delta
+
+    def _orientation_components(self, material, cp):
+        sin_theta = cp.sin(material.theta, dtype=cp.float32)
+        sx = cp.cos(material.psi, dtype=cp.float32) * sin_theta
+        sy = cp.sin(material.psi, dtype=cp.float32) * sin_theta
+        sz = cp.cos(material.theta, dtype=cp.float32)
+        del sin_theta
+        return sx, sy, sz
+
+    def _compute_nt_components(self, runtime_materials, energy, cp, required_components=None):
+        required = {0, 1, 2, 3, 4} if required_components is None else set(required_components)
+        need0 = 0 in required
+        need1 = 1 in required
+        need2 = 2 in required
+        need3 = 3 in required
+        need4 = 4 in required
         shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
         nt = cp.zeros((5, *shape), dtype=cp.complex64)
 
         for material in runtime_materials:
-            npar, nper = self._material_optics(material, energy)
-            nsum_sq = np.complex64((npar + 2.0 * nper) ** 2)
-            npar_sq = np.complex64(npar * npar)
-            nper_sq = np.complex64(nper * nper)
-
+            isotropic_diag, aligned_base, anisotropic_delta = self._material_optical_scalars(
+                material,
+                energy,
+            )
             vfrac = material.Vfrac
-            s = material.S
-            theta = material.theta
-            psi = material.psi
+            isotropic_term = None
+            if need0 or need3:
+                isotropic_term = vfrac * isotropic_diag
+                if need0:
+                    nt[0] += isotropic_term
+                if need3:
+                    nt[3] += isotropic_term
+            if material.is_full_isotropic:
+                if isotropic_term is not None:
+                    del isotropic_term
+                continue
 
-            phi_a = vfrac * s
-            phi_ui = vfrac - phi_a
-            sin_theta = cp.sin(theta, dtype=cp.float32)
-            sx = cp.cos(psi, dtype=cp.float32) * sin_theta
-            sy = cp.sin(psi, dtype=cp.float32) * sin_theta
-            sz = cp.cos(theta, dtype=cp.float32)
+            phi_a = vfrac * material.S
+            sx, sy, sz = self._orientation_components(material, cp)
 
-            nt[0] += phi_a * (
-                npar_sq * sx * sx + nper_sq * (sy * sy + sz * sz)
-            ) + (phi_ui * nsum_sq) / np.float32(9.0) - vfrac
-            nt[1] += phi_a * (npar_sq - nper_sq) * sx * sy
-            nt[2] += phi_a * (npar_sq - nper_sq) * sx * sz
-            nt[3] += phi_a * (
-                npar_sq * sy * sy + nper_sq * (sx * sx + sz * sz)
-            ) + (phi_ui * nsum_sq) / np.float32(9.0) - vfrac
-            nt[4] += phi_a * (npar_sq - nper_sq) * sy * sz
+            if need0:
+                nt[0] += phi_a * (aligned_base + anisotropic_delta * sx * sx)
+            if need1:
+                nt[1] += phi_a * anisotropic_delta * sx * sy
+            if need2:
+                nt[2] += phi_a * anisotropic_delta * sx * sz
+            if need3:
+                nt[3] += phi_a * (aligned_base + anisotropic_delta * sy * sy)
+            if need4:
+                nt[4] += phi_a * anisotropic_delta * sy * sz
 
-            del phi_a, phi_ui, sin_theta, sx, sy, sz
+            if isotropic_term is not None:
+                del isotropic_term
+            del phi_a, sx, sy, sz
 
         return nt
 
-    def _project_from_nt(self, morphology, energy, cp, ndimage, nt, window, num_angles):
+    def _project_from_nt(
+        self,
+        morphology,
+        energy,
+        cp,
+        ndimage,
+        nt,
+        window,
+        angle_family_plan,
+        recorder=None,
+    ):
+        recorder = _NullSegmentRecorder() if recorder is None else recorder
         projection_average = None
         valid_counts = None
         use_rot_mask = bool(morphology.RotMask)
-        for angle, (matrix_yx, offset_yx) in zip(
-            self._angles_radians(morphology),
+        num_angles = len(angle_family_plan.angles)
+        for angle_plan, (matrix_yx, offset_yx) in zip(
+            angle_family_plan.angles,
             self._rotation_transforms(morphology, cp),
         ):
-            p_x, p_y, p_z = self._polarization_from_nt(nt, angle, cp)
-            projection = self._projection_from_polarization(
-                morphology=morphology,
-                energy=energy,
-                cp=cp,
-                p_x=p_x,
-                p_y=p_y,
-                p_z=p_z,
-                window=window,
+            fft_x, fft_y, fft_z = recorder.measure(
+                "C",
+                lambda angle_plan=angle_plan: self._fft_polarization_from_nt(
+                    nt=nt,
+                    angle_plan=angle_plan,
+                    window=window,
+                    cp=cp,
+                ),
             )
-            rotated = self._apply_affine_transform(
-                projection,
-                ndimage,
-                matrix_yx,
-                offset_yx,
-                cval=np.nan,
+            projection = recorder.measure(
+                "D",
+                lambda fft_x=fft_x, fft_y=fft_y, fft_z=fft_z: self._projection_from_fft_polarization(
+                    morphology=morphology,
+                    energy=energy,
+                    cp=cp,
+                    fft_x=fft_x,
+                    fft_y=fft_y,
+                    fft_z=fft_z,
+                ),
             )
-            if use_rot_mask:
-                valid = cp.isfinite(rotated)
-                valid_counts = (
-                    valid.astype(cp.int32)
-                    if valid_counts is None
-                    else valid_counts + valid.astype(cp.int32)
-                )
-                rotated = cp.where(valid, rotated, np.float32(0.0))
-                del valid
-            projection_average = rotated if projection_average is None else projection_average + rotated
-            del p_x, p_y, p_z, projection, rotated
+            projection_average, valid_counts = recorder.measure(
+                "E",
+                lambda projection=projection, projection_average=projection_average, valid_counts=valid_counts, angle_plan=angle_plan: self._accumulate_rotated_projection(
+                    cp=cp,
+                    ndimage=ndimage,
+                    projection=projection,
+                    matrix_yx=matrix_yx,
+                    offset_yx=offset_yx,
+                    projection_average=projection_average,
+                    valid_counts=valid_counts,
+                    use_rot_mask=use_rot_mask,
+                    skip_rotation=angle_plan.is_identity_rotation,
+                ),
+            )
+            del fft_x, fft_y, fft_z, projection
         return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
 
-    def _compute_fft_nt_components(self, nt, cp, window):
-        for idx in range(nt.shape[0]):
+    def _compute_fft_nt_components(self, nt, cp, window, component_indices=None):
+        component_indices = tuple(range(nt.shape[0])) if component_indices is None else tuple(component_indices)
+        for idx in component_indices:
             component = nt[idx]
             if window is not None:
                 cp.multiply(component, window, out=component)
@@ -547,29 +801,33 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         proj_x,
         proj_y,
         proj_xy,
-        num_angles,
+        angle_family_plan,
     ):
         projection_average = None
         valid_counts = None
         use_rot_mask = bool(morphology.RotMask)
-        for angle, (matrix_yx, offset_yx) in zip(
-            self._angles_radians(morphology),
+        num_angles = len(angle_family_plan.angles)
+        for angle_plan, (matrix_yx, offset_yx) in zip(
+            angle_family_plan.angles,
             self._rotation_transforms(morphology, cp),
         ):
-            cos_angle = np.float32(math.cos(angle))
-            sin_angle = np.float32(math.sin(angle))
-            projection = (
-                proj_x * (cos_angle * cos_angle)
-                + proj_y * (sin_angle * sin_angle)
-                + proj_xy * (cos_angle * sin_angle)
-            )
+            if angle_plan.family == "x":
+                projection = proj_x
+            elif angle_plan.family == "y":
+                projection = proj_y
+            else:
+                projection = (
+                    proj_x * (angle_plan.mx * angle_plan.mx)
+                    + proj_y * (angle_plan.my * angle_plan.my)
+                    + proj_xy * (angle_plan.mx * angle_plan.my)
+                )
             rotated = self._apply_affine_transform(
                 projection,
                 ndimage,
                 matrix_yx,
                 offset_yx,
                 cval=np.nan,
-            )
+            ) if not angle_plan.is_identity_rotation else projection
             if use_rot_mask:
                 valid = cp.isfinite(rotated)
                 valid_counts = (
@@ -583,132 +841,188 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             del projection, rotated
         return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
 
-    def _projection_coefficients_from_fft_nt(self, morphology, energy, cp, fft_nt):
-        basis_x = (
-            fft_nt[0] * self._one_by_four_pi,
-            fft_nt[1] * self._one_by_four_pi,
-            fft_nt[2] * self._one_by_four_pi,
-        )
-        basis_y = (
-            fft_nt[1] * self._one_by_four_pi,
-            fft_nt[3] * self._one_by_four_pi,
-            fft_nt[4] * self._one_by_four_pi,
-        )
+    def _projection_coefficients_from_fft_nt(self, morphology, energy, cp, fft_nt, angle_family_plan):
+        basis_x = None
+        basis_y = None
+        proj_x = None
+        proj_y = None
+        proj_xy = None
 
-        proj_x = self._projection_from_fft_polarization(
-            morphology=morphology,
-            energy=energy,
-            cp=cp,
-            fft_x=basis_x[0],
-            fft_y=basis_x[1],
-            fft_z=basis_x[2],
-        )
-        proj_y = self._projection_from_fft_polarization(
-            morphology=morphology,
-            energy=energy,
-            cp=cp,
-            fft_x=basis_y[0],
-            fft_y=basis_y[1],
-            fft_z=basis_y[2],
-        )
-        proj_xy = self._projection_from_fft_polarization(
-            morphology=morphology,
-            energy=energy,
-            cp=cp,
-            fft_x=basis_x[0] + basis_y[0],
-            fft_y=basis_x[1] + basis_y[1],
-            fft_z=basis_x[2] + basis_y[2],
-        )
-        proj_xy = proj_xy - proj_x - proj_y
+        if angle_family_plan.needs_proj_x:
+            basis_x = (
+                fft_nt[0] * self._one_by_four_pi,
+                fft_nt[1] * self._one_by_four_pi,
+                fft_nt[2] * self._one_by_four_pi,
+            )
+            proj_x = self._projection_from_fft_polarization(
+                morphology=morphology,
+                energy=energy,
+                cp=cp,
+                fft_x=basis_x[0],
+                fft_y=basis_x[1],
+                fft_z=basis_x[2],
+            )
+
+        if angle_family_plan.needs_proj_y:
+            basis_y = (
+                fft_nt[1] * self._one_by_four_pi,
+                fft_nt[3] * self._one_by_four_pi,
+                fft_nt[4] * self._one_by_four_pi,
+            )
+            proj_y = self._projection_from_fft_polarization(
+                morphology=morphology,
+                energy=energy,
+                cp=cp,
+                fft_x=basis_y[0],
+                fft_y=basis_y[1],
+                fft_z=basis_y[2],
+            )
+
+        if angle_family_plan.needs_proj_xy:
+            proj_xy = self._projection_from_fft_polarization(
+                morphology=morphology,
+                energy=energy,
+                cp=cp,
+                fft_x=basis_x[0] + basis_y[0],
+                fft_y=basis_x[1] + basis_y[1],
+                fft_z=basis_x[2] + basis_y[2],
+            )
+            proj_xy = proj_xy - proj_x - proj_y
         return proj_x, proj_y, proj_xy
 
-    def _project_from_direct_polarization(self, morphology, runtime_materials, energy, cp, ndimage, window, num_angles):
+    def _project_from_direct_polarization(
+        self,
+        morphology,
+        runtime_materials,
+        energy,
+        cp,
+        ndimage,
+        window,
+        angle_family_plan,
+        recorder=None,
+    ):
+        recorder = _NullSegmentRecorder() if recorder is None else recorder
         projection_average = None
         valid_counts = None
         use_rot_mask = bool(morphology.RotMask)
-        for angle, (matrix_yx, offset_yx) in zip(
-            self._angles_radians(morphology),
+        num_angles = len(angle_family_plan.angles)
+        for angle_plan, (matrix_yx, offset_yx) in zip(
+            angle_family_plan.angles,
             self._rotation_transforms(morphology, cp),
         ):
-            p_x, p_y, p_z = self._compute_direct_polarization(runtime_materials, energy, angle, cp)
-            projection = self._projection_from_polarization(
-                morphology=morphology,
-                energy=energy,
+            p_x, p_y, p_z = recorder.measure(
+                "B",
+                lambda angle_plan=angle_plan: self._compute_direct_polarization(
+                    runtime_materials=runtime_materials,
+                    energy=energy,
+                    angle_plan=angle_plan,
+                    cp=cp,
+                ),
+            )
+            fft_x, fft_y, fft_z = recorder.measure(
+                "C",
+                lambda p_x=p_x, p_y=p_y, p_z=p_z: self._fft_polarization_fields(
+                    cp=cp,
+                    p_x=p_x,
+                    p_y=p_y,
+                    p_z=p_z,
+                    window=window,
+                ),
+            )
+            del p_x, p_y, p_z
+            projection = recorder.measure(
+                "D",
+                lambda fft_x=fft_x, fft_y=fft_y, fft_z=fft_z: self._projection_from_fft_polarization(
+                    morphology=morphology,
+                    energy=energy,
+                    cp=cp,
+                    fft_x=fft_x,
+                    fft_y=fft_y,
+                    fft_z=fft_z,
+                ),
+            )
+            projection_average, valid_counts = recorder.measure(
+                "E",
+                lambda projection=projection, projection_average=projection_average, valid_counts=valid_counts, angle_plan=angle_plan: self._accumulate_rotated_projection(
+                    cp=cp,
+                    ndimage=ndimage,
+                    projection=projection,
+                    matrix_yx=matrix_yx,
+                    offset_yx=offset_yx,
+                    projection_average=projection_average,
+                    valid_counts=valid_counts,
+                    use_rot_mask=use_rot_mask,
+                    skip_rotation=angle_plan.is_identity_rotation,
+                ),
+            )
+            del fft_x, fft_y, fft_z, projection
+        return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
+
+    def _polarization_from_nt(self, nt, angle_plan):
+        if angle_plan.family == "x":
+            p_x = nt[0] * angle_plan.mx * self._one_by_four_pi
+            p_y = nt[1] * angle_plan.mx * self._one_by_four_pi
+            p_z = nt[2] * angle_plan.mx * self._one_by_four_pi
+            return p_x, p_y, p_z
+        if angle_plan.family == "y":
+            p_x = nt[1] * angle_plan.my * self._one_by_four_pi
+            p_y = nt[3] * angle_plan.my * self._one_by_four_pi
+            p_z = nt[4] * angle_plan.my * self._one_by_four_pi
+            return p_x, p_y, p_z
+
+        p_x = (nt[0] * angle_plan.mx + nt[1] * angle_plan.my) * self._one_by_four_pi
+        p_y = (nt[1] * angle_plan.mx + nt[3] * angle_plan.my) * self._one_by_four_pi
+        p_z = (nt[2] * angle_plan.mx + nt[4] * angle_plan.my) * self._one_by_four_pi
+        return p_x, p_y, p_z
+
+    def _fft_polarization_from_nt(self, nt, angle_plan, cp, window):
+        p_x, p_y, p_z = self._polarization_from_nt(nt, angle_plan)
+        try:
+            return self._fft_polarization_fields(
                 cp=cp,
                 p_x=p_x,
                 p_y=p_y,
                 p_z=p_z,
                 window=window,
             )
-            rotated = self._apply_affine_transform(
-                projection,
-                ndimage,
-                matrix_yx,
-                offset_yx,
-                cval=np.nan,
-            )
-            if use_rot_mask:
-                valid = cp.isfinite(rotated)
-                valid_counts = (
-                    valid.astype(cp.int32)
-                    if valid_counts is None
-                    else valid_counts + valid.astype(cp.int32)
-                )
-                rotated = cp.where(valid, rotated, np.float32(0.0))
-                del valid
-            projection_average = rotated if projection_average is None else projection_average + rotated
-            del p_x, p_y, p_z, projection, rotated
-        return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
+        finally:
+            del p_x, p_y, p_z
 
-    def _polarization_from_nt(self, nt, angle, cp):
-        mx = np.float32(math.cos(angle))
-        my = np.float32(math.sin(angle))
-        p_x = (nt[0] * mx + nt[1] * my) * self._one_by_four_pi
-        p_y = (nt[1] * mx + nt[3] * my) * self._one_by_four_pi
-        p_z = (nt[2] * mx + nt[4] * my) * self._one_by_four_pi
-        return p_x, p_y, p_z
-
-    def _compute_direct_polarization(self, runtime_materials, energy, angle, cp):
+    def _compute_direct_polarization(self, runtime_materials, energy, angle_plan, cp):
         shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
         p_x = cp.zeros(shape, dtype=cp.complex64)
         p_y = cp.zeros(shape, dtype=cp.complex64)
         p_z = cp.zeros(shape, dtype=cp.complex64)
-        mx = np.float32(math.cos(angle))
-        my = np.float32(math.sin(angle))
+        mx = angle_plan.mx
+        my = angle_plan.my
 
         for material in runtime_materials:
-            npar, nper = self._material_optics(material, energy)
-            nsum_sq = np.complex64((npar + 2.0 * nper) ** 2)
-            npar_sq = np.complex64(npar * npar)
-            nper_sq = np.complex64(nper * nper)
-
+            isotropic_diag, aligned_base, anisotropic_delta = self._material_optical_scalars(
+                material,
+                energy,
+            )
             vfrac = material.Vfrac
-            s = material.S
-            theta = material.theta
-            psi = material.psi
+            isotropic_term = vfrac * isotropic_diag
+            p_x += isotropic_term * mx
+            p_y += isotropic_term * my
+            if material.is_full_isotropic:
+                del isotropic_term
+                continue
 
-            phi_a = vfrac * s
-            phi_ui = vfrac - phi_a
-            sin_theta = cp.sin(theta, dtype=cp.float32)
-            sx = cp.cos(psi, dtype=cp.float32) * sin_theta
-            sy = cp.sin(psi, dtype=cp.float32) * sin_theta
-            sz = cp.cos(theta, dtype=cp.float32)
+            phi_a = vfrac * material.S
+            sx, sy, sz = self._orientation_components(material, cp)
+            if angle_plan.family == "x":
+                field_projection = sx * mx
+            elif angle_plan.family == "y":
+                field_projection = sy * my
+            else:
+                field_projection = sx * mx + sy * my
 
-            t0 = phi_a * (
-                npar_sq * sx * sx + nper_sq * (sy * sy + sz * sz)
-            ) + (phi_ui * nsum_sq) / np.float32(9.0) - vfrac
-            t1 = phi_a * (npar_sq - nper_sq) * sx * sy
-            t2 = phi_a * (npar_sq - nper_sq) * sx * sz
-            t3 = phi_a * (
-                npar_sq * sy * sy + nper_sq * (sx * sx + sz * sz)
-            ) + (phi_ui * nsum_sq) / np.float32(9.0) - vfrac
-            t4 = phi_a * (npar_sq - nper_sq) * sy * sz
+            p_x += phi_a * (mx * aligned_base + anisotropic_delta * sx * field_projection)
+            p_y += phi_a * (my * aligned_base + anisotropic_delta * sy * field_projection)
+            p_z += phi_a * anisotropic_delta * sz * field_projection
 
-            p_x += t0 * mx + t1 * my
-            p_y += t1 * mx + t3 * my
-            p_z += t2 * mx + t4 * my
-
-            del phi_a, phi_ui, sin_theta, sx, sy, sz, t0, t1, t2, t3, t4
+            del isotropic_term, phi_a, sx, sy, sz, field_projection
 
         p_x *= self._one_by_four_pi
         p_y *= self._one_by_four_pi
@@ -716,10 +1030,29 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return p_x, p_y, p_z
 
     def _projection_from_polarization(self, morphology, energy, cp, p_x, p_y, p_z, window):
+        fft_x, fft_y, fft_z = self._fft_polarization_fields(
+            cp=cp,
+            p_x=p_x,
+            p_y=p_y,
+            p_z=p_z,
+            window=window,
+        )
+        projection = self._projection_from_fft_polarization(
+            morphology=morphology,
+            energy=energy,
+            cp=cp,
+            fft_x=fft_x,
+            fft_y=fft_y,
+            fft_z=fft_z,
+        )
+        del fft_x, fft_y, fft_z
+        return projection
+
+    def _fft_polarization_fields(self, cp, p_x, p_y, p_z, window):
         if window is not None:
-            p_x = p_x * window
-            p_y = p_y * window
-            p_z = p_z * window
+            cp.multiply(p_x, window, out=p_x)
+            cp.multiply(p_y, window, out=p_y)
+            cp.multiply(p_z, window, out=p_z)
 
         fft_x = cp.fft.fftn(p_x)
         fft_y = cp.fft.fftn(p_y)
@@ -730,19 +1063,43 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         fft_x = self._igor_shift(fft_x, cp)
         fft_y = self._igor_shift(fft_y, cp)
         fft_z = self._igor_shift(fft_z, cp)
+        return fft_x, fft_y, fft_z
 
-        scatter3d = self._compute_scatter3d(
-            morphology=morphology,
-            energy=energy,
-            cp=cp,
-            p_x=fft_x,
-            p_y=fft_y,
-            p_z=fft_z,
+    def _accumulate_rotated_projection(
+        self,
+        cp,
+        ndimage,
+        projection,
+        matrix_yx,
+        offset_yx,
+        projection_average,
+        valid_counts,
+        use_rot_mask,
+        skip_rotation=False,
+    ):
+        rotated = (
+            projection
+            if skip_rotation
+            else self._apply_affine_transform(
+                projection,
+                ndimage,
+                matrix_yx,
+                offset_yx,
+                cval=np.nan,
+            )
         )
-        projection = self._project_scatter3d(morphology, energy, cp, scatter3d)
-
-        del fft_x, fft_y, fft_z, scatter3d
-        return projection
+        if use_rot_mask:
+            valid = cp.isfinite(rotated)
+            valid_counts = (
+                valid.astype(cp.int32)
+                if valid_counts is None
+                else valid_counts + valid.astype(cp.int32)
+            )
+            rotated = cp.where(valid, rotated, np.float32(0.0))
+            del valid
+        projection_average = rotated if projection_average is None else projection_average + rotated
+        del rotated
+        return projection_average, valid_counts
 
     def _projection_from_fft_polarization(self, morphology, energy, cp, fft_x, fft_y, fft_z):
         scatter3d = self._compute_scatter3d(

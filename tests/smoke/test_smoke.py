@@ -93,6 +93,73 @@ def _tiny_smoothing_kernel(arr: np.ndarray) -> np.ndarray:
     )
 
 
+def _build_two_material_isotropic_block_morphology(
+    *,
+    backend: str = "cupy-rsoxs",
+    backend_options: dict | None = None,
+    resident_mode: str | None = None,
+    field_namespace: str = "numpy",
+):
+    shape = (4, 16, 16)
+    energies = [285.0]
+    vfrac_1 = np.zeros(shape, dtype=np.float32)
+    vfrac_1[1:3, 4:12, 5:11] = 1.0
+    vfrac_2 = np.float32(1.0) - vfrac_1
+    zeros = np.zeros(shape, dtype=np.float32)
+
+    if field_namespace == "cupy":
+        cp = _import_cupy_required()
+        vfrac_1 = cp.asarray(vfrac_1, dtype=cp.float32)
+        vfrac_2 = cp.asarray(vfrac_2, dtype=cp.float32)
+        zeros = cp.asarray(zeros, dtype=cp.float32)
+    elif field_namespace != "numpy":
+        raise AssertionError(f"Unsupported field namespace {field_namespace!r}.")
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=vfrac_1,
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [1e-4, 2e-4, 1e-4, 2e-4]},
+        name="block",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=vfrac_2,
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="matrix",
+    )
+    config = {
+        "CaseType": 0,
+        "MorphologyType": 0,
+        "Energies": energies,
+        "EAngleRotation": [0.0, 0.0, 0.0],
+        "RotMask": 0,
+        "WindowingType": 0,
+        "AlgorithmType": 0,
+        "ReferenceFrame": 1,
+        "EwaldsInterpolation": 1,
+    }
+    return Morphology(
+        2,
+        materials={1: mat1, 2: mat2},
+        PhysSize=5.0,
+        config=config,
+        backend=backend,
+        backend_options=backend_options,
+        resident_mode=resident_mode,
+        input_policy="strict",
+        ownership_policy="borrow" if backend == "cupy-rsoxs" else None,
+        create_cy_object=True,
+    )
+
+
 @pytest.mark.backend_agnostic_contract
 def test_required_imports():
     """Verify core runtime dependencies import without forcing backend imports."""
@@ -125,6 +192,7 @@ def test_backend_registry_reports_known_backends():
     assert get_backend_info("cupy-rsoxs").default_resident_mode == "host"
     assert get_backend_info("cupy-rsoxs").supported_resident_modes == ("host", "device")
     assert "dtype" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "execution_path" in get_backend_info("cupy-rsoxs").supported_backend_options
 
 
 @pytest.mark.backend_agnostic_contract
@@ -165,8 +233,10 @@ def test_cupy_backend_array_contract_defaults_to_host_resident_numpy():
     assert contract["resident_mode"] == "host"
     assert contract["namespace"] == "numpy"
     assert contract["device"] == "cpu"
+    assert contract["options"]["execution_path"] == "tensor_coeff"
     assert runtime_contract["namespace"] == "cupy"
     assert runtime_contract["device"] == "gpu"
+    assert runtime_contract["options"]["execution_path"] == "tensor_coeff"
     assert plan.target_namespace == "numpy"
     assert plan.target_device == "cpu"
     assert plan.transfer == "none"
@@ -227,6 +297,35 @@ def test_cupy_backend_rejects_float16_dtype_option():
 
 @pytest.mark.backend_specific
 @pytest.mark.cpu
+def test_cupy_backend_accepts_execution_path_backend_option():
+    """Ensure cupy-rsoxs normalizes execution_path via backend_options."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"execution_path": "direct"},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == {
+        "dtype": "float32",
+        "execution_path": "direct_polarization",
+    }
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_unknown_execution_path_backend_option():
+    """Ensure cupy-rsoxs rejects unsupported execution_path values up front."""
+    with pytest.raises(BackendOptionError, match="does not support execution_path"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"execution_path": "definitely-not-a-path"},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
 def test_morphology_normalizes_material_arrays_eagerly_for_selected_backend_default_residence(nrss_backend):
     """Ensure Morphology coerces arrays to the selected authoritative contract at construction time."""
     shape = (1, 4, 4)
@@ -265,8 +364,11 @@ def test_morphology_normalizes_material_arrays_eagerly_for_selected_backend_defa
 
     expected_namespace = "numpy"
     expected_dtype = morph.backend_dtype
+    expected_backend_options = {"dtype": expected_dtype}
+    if nrss_backend == "cupy-rsoxs":
+        expected_backend_options["execution_path"] = "tensor_coeff"
     assert morph.resident_mode == get_backend_info(nrss_backend).default_resident_mode
-    assert morph.backend_options == {"dtype": expected_dtype}
+    assert morph.backend_options == expected_backend_options
     assert morph.backend_array_contract["resident_mode"] == morph.resident_mode
     assert morph.backend_array_contract["dtype"] == expected_dtype
     assert morph.runtime_compute_contract["dtype"] == expected_dtype
@@ -632,6 +734,81 @@ def test_cupy_host_resident_runtime_stages_authoritative_numpy_fields_to_device(
             except Exception:
                 pass
         _release_cupy_memory()
+
+
+@pytest.mark.gpu
+def test_cupy_host_resident_runtime_skips_orientation_staging_for_full_isotropic_materials():
+    """Ensure fully isotropic materials stage only Vfrac into the runtime CuPy contract."""
+    cp = _import_cupy_required()
+    morph = None
+    try:
+        morph = _build_two_material_isotropic_block_morphology(
+            backend="cupy-rsoxs",
+            resident_mode="host",
+            field_namespace="numpy",
+        )
+        result = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.Stream.null.synchronize()
+        assert list(result.to_backend_array().shape) == [1, 16, 16]
+        staged_fields = sorted(
+            (plan.material_id, plan.field_name)
+            for plan in morph.last_runtime_staging_report
+            if plan.original_namespace != "missing"
+        )
+        assert staged_fields == [(1, "Vfrac"), (2, "Vfrac")]
+        assert all(
+            plan.transfer == "host_to_device"
+            for plan in morph.last_runtime_staging_report
+            if plan.original_namespace != "missing"
+        )
+    finally:
+        if morph is not None:
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
+@pytest.mark.gpu
+def test_cupy_execution_paths_match_on_fully_isotropic_morphology():
+    """Ensure surfaced execution paths remain numerically aligned on a fully isotropic morphology."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for isotropic execution-path comparison.")
+
+    outputs = {}
+    for execution_path in ("tensor_coeff", "direct_polarization", "nt_polarization"):
+        morph = None
+        try:
+            morph = _build_two_material_isotropic_block_morphology(
+                backend="cupy-rsoxs",
+                backend_options={"execution_path": execution_path},
+                resident_mode="device",
+                field_namespace="cupy",
+            )
+            outputs[execution_path] = (
+                morph.run(stdout=False, stderr=False, return_xarray=True).values.copy()
+            )
+        finally:
+            if morph is not None:
+                try:
+                    morph.release_runtime()
+                except Exception:
+                    pass
+            _release_cupy_memory()
+
+    np.testing.assert_allclose(
+        outputs["direct_polarization"],
+        outputs["tensor_coeff"],
+        rtol=0.0,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        outputs["nt_polarization"],
+        outputs["tensor_coeff"],
+        rtol=0.0,
+        atol=1e-6,
+    )
 
 
 @pytest.mark.gpu
