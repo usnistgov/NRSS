@@ -99,6 +99,63 @@ Segment `A` is nominally complete for the common workflow.
     them as optimization guidance,
   - treat future float16 work as orthogonal to execution path rather than as a
     replacement for it.
+- Current Segment `D` continuation focus for the next pass:
+  - use `execution_path='tensor_coeff'` as the maintained default target,
+  - use device-resident timing only for the inner-loop ranking pass,
+  - keep the aligned no-rotation device lane as a regression guard,
+  - rank proposed `D` changes on at least one explicit general-angle device
+    case such as `--rotation-specs 0:15:165`,
+  - require a parity/correctness check before accepting any measured speed win,
+  - update `CUPY_RSOXS_OPTIMIZATION_LEDGER.md` after each attempted step or any
+    important intermediate result.
+
+Current prioritized Segment `D` plan:
+
+1. Cache detector / Ewald geometry and interpolation tables that are currently
+   rebuilt inside `_q_axes(...)` and `_project_scatter3d(...)`.
+   - current status:
+     - implemented and retained as scaffolding,
+     - standalone gain on the general-angle device lane was only modest/noisy,
+       so do not count it as the first accepted March 25 Segment `D` win by
+       itself.
+2. For `tensor_coeff`, reduce repeated general-angle detector-projection work
+   in `_projection_coefficients_from_fft_nt(...)`.
+   - current status:
+     - accepted and later extended to the aligned `x` / `y` families,
+     - the general-angle `tensor_coeff` path now builds `proj_x`, `proj_y`,
+       and `proj_xy` directly on the detector grid from the two FFT basis
+       families instead of calling the generic 3D projector three times.
+     - aligned `x` / `y` families now also use the detector-grid helper
+       instead of the old `scatter3d` materialization route inside this
+       wrapper,
+     - current accepted end-state artifacts:
+       - `test-reports/cupy-rsoxs-optimization-dev/planD02b_aligned_detector_projection_no_rotation/summary.json`
+       - `test-reports/cupy-rsoxs-optimization-dev/planD02b_aligned_detector_projection_general/summary.json`
+       - use the dedicated no-rotation artifact as the aligned regression
+         authority because the explicit-rotation harness still emits its
+         built-in no-rotation companion case.
+3. Replace full `scatter3d` materialization with a direct detector-output path
+   if the lower-risk caching/algebra steps are not enough.
+   - current status:
+     - rejected for this pass,
+     - a raw-kernel prototype was much faster warm but much worse on the cold
+       first call that defines the current subprocess timing surface.
+4. Precompute and reuse static `D` algebra built from detector geometry.
+   - current status:
+     - rejected as non-material on the authority surface,
+     - it trimmed the targeted general-angle `D` segment slightly but did not
+       produce a meaningful primary-time win.
+5. Test whether constant projection-family scaling can be hoisted out of the
+   hot full-array path.
+   - current status:
+     - rejected,
+     - the targeted general-angle primary time regressed.
+6. Only then test reusable Segment `D` scratch buffers if the simplified math
+   path still appears allocator-sensitive.
+   - current status:
+     - closed without implementation for this pass,
+     - after the accepted `planD02` refactor, the remaining cold timing surface
+       is no longer convincingly allocator-limited.
 
 Latest execution-path baseline snapshot:
 
@@ -122,21 +179,23 @@ Latest execution-path baseline snapshot:
 
 Latest accepted optimization step:
 
-- `plan07_axis_family_fast_path`
-  - fully axis-aligned angle sets now use explicit x-family / y-family
-    specialization for `0°/180°` and `90°/270°`,
-  - benchmark artifact:
-    - `test-reports/cupy-rsoxs-optimization-dev/plan07_axis_family_fast_path_clean_20260324/summary.json`
-  - notable deltas versus the post-plan06 baseline:
-    - device / `tensor_coeff`: `primary 0.231s -> 0.196s`,
-      `D 0.072 -> 0.035`, `E 0.004 -> 0.002`,
-    - device / `direct_polarization`: `primary 0.210s -> 0.198s`,
-      `D 0.051 -> 0.033`, `E 0.002 -> 0.000`,
-    - host / `tensor_coeff`: `D 0.073 -> 0.035`, `E 0.004 -> 0.002`
-      even though host `A2` noise still makes the wall-clock delta less
-      stable than the backend-segment deltas,
-  - isolated `90°` spot checks showed the same low-`D` / near-zero-`E` shape
-    for the y-family branch.
+- `planD02b_aligned_detector_projection_extension`
+  - after the accepted `planD02` general-angle fusion, the aligned
+    `tensor_coeff` `x` / `y` families were moved onto the same detector-grid
+    projection helper instead of materializing full `scatter3d` volumes,
+  - benchmark artifacts:
+    - `test-reports/cupy-rsoxs-optimization-dev/planD02b_aligned_detector_projection_no_rotation/summary.json`
+    - `test-reports/cupy-rsoxs-optimization-dev/planD02b_aligned_detector_projection_general/summary.json`
+  - maintained parity:
+    - `pytest tests/validation/test_core_shell_reference.py -k "test_core_shell_sim_regression_cupy_borrow_strict" --nrss-backend cupy-rsoxs -v`
+      passed,
+    - `pytest tests/validation/test_core_shell_reference.py -k "test_core_shell_sim_regression_pybind" --nrss-backend cupy-rsoxs -v`
+      passed,
+  - notable deltas versus the initial March 25 device baseline:
+    - aligned no-rotation device lane:
+      `primary 0.219s -> 0.177s`, `D 0.035 -> 0.020`,
+    - explicit general-angle device lane:
+      `primary 0.248s -> 0.185s`, `D 0.074 -> 0.020`.
 
 Current isotropic-contract note:
 
@@ -181,28 +240,29 @@ Current host-prewarm note:
 
 Latest accepted-state verification:
 
-- final accepted-state benchmark artifact:
-  - `test-reports/cupy-rsoxs-optimization-dev/plan09_final_rebenchmark_accepted_state_20260324/summary.json`
-- final accepted-state snapshot on the primary small single-energy no-rotation
-  lane:
-  - host / `tensor_coeff`: `primary 2.515s`, `A2 2.339`, `B 0.109`,
-    `D 0.035`, `E 0.002`
-  - device / `tensor_coeff`: `primary 0.205s`, `A2 0.122`, `B 0.010`,
-    `D 0.039`, `E 0.002`
-- focused smoke close-out:
-  - `9 passed` across execution-path option handling, isotropic staging,
-    aligned-angle endpoint behavior, and private segment timing checks
+- final accepted-state benchmark artifacts:
+  - `test-reports/cupy-rsoxs-optimization-dev/planD02b_aligned_detector_projection_no_rotation/summary.json`
+  - `test-reports/cupy-rsoxs-optimization-dev/planD02b_aligned_detector_projection_general/summary.json`
+- final accepted-state snapshot on the March 25 Segment `D` device authority
+  lanes:
+  - aligned no-rotation device / `tensor_coeff`:
+    `primary 0.177s`, `D 0.020`
+  - explicit general-angle device / `tensor_coeff`:
+    `primary 0.185s`, `D 0.020`
 - maintained reference close-out:
-  - `pytest tests/validation/test_core_shell_reference.py -k "sim_regression_cupy_borrow_strict" --nrss-backend cupy-rsoxs -v`
-    passed for the accepted default path
-- dormant-path correctness note:
-  - official maintained-morphology raw scattering comparisons versus
-    `tensor_coeff` remained close after the accepted plan06/plan07 changes:
-    `max_abs 0.046875`, `rmse 9.72605e-05`, `p95_abs 3.8147e-06`,
-  - full dormant-path A-wedge validation was attempted but remained too
-    expensive for this inner-loop campaign, so treat dormant-path timing
-    results as timing evidence plus raw-scattering similarity rather than as
-    fully closed reference validation.
+  - `pytest tests/validation/test_core_shell_reference.py -k "test_core_shell_sim_regression_cupy_borrow_strict" --nrss-backend cupy-rsoxs -v`
+    passed,
+  - `pytest tests/validation/test_core_shell_reference.py -k "test_core_shell_sim_regression_pybind" --nrss-backend cupy-rsoxs -v`
+    passed.
+- latest principal cross-backend speed snapshot:
+  - artifact root:
+    `test-reports/core-shell-backend-performance-dev/principal_cross_backend_20260325_planD02b/`
+  - summary:
+    - host speedup versus legacy `cyrsoxs` ranged from about `1.9x` to `4.5x`,
+    - device speedup versus legacy pre-warm ranged from about `2.6x` to
+      `13.3x`,
+    - medium/large device rows now land around `9.2x-13.3x` faster than the
+      matching legacy pre-warm rows.
 
 Latest harness-extension verification:
 
@@ -218,6 +278,129 @@ Latest harness-extension verification:
   - explicit single-energy rotation,
   - explicit energy-list no-rotation,
   - explicit energy-list plus explicit rotation.
+
+Recommended inner-loop command for the next Segment `D` device-only pass:
+
+```bash
+/home/deand/mambaforge/envs/nrss-dev/bin/python \
+  tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
+  --label d_focus \
+  --size-labels small \
+  --resident-modes device \
+  --execution-paths tensor_coeff \
+  --rotation-specs 0:15:165 \
+  --timing-segments D
+```
+
+Recommended aligned-angle device regression command for the same pass:
+
+```bash
+/home/deand/mambaforge/envs/nrss-dev/bin/python \
+  tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
+  --label d_device_regression \
+  --size-labels small \
+  --resident-modes device \
+  --execution-paths tensor_coeff \
+  --timing-segments D
+```
+
+Initial device-only Segment `D` baseline for this continuation pass:
+
+- artifact:
+  - `test-reports/cupy-rsoxs-optimization-dev/planD00_device_baseline_20260325_193556/summary.json`
+- measured before any new Segment `D` code changes:
+  - `core_shell_small_single_no_rotation_device_tensor_coeff`:
+    `primary 0.219s`, `D 0.035s`
+  - `core_shell_small_single_rot_0_15_165_device_tensor_coeff`:
+    `primary 0.248s`, `D 0.074s`
+- use the explicit general-angle device case as the main ranking lane because
+  the accepted aligned-angle work already removed much of the easy `D` cost
+  from the `0°` path.
+
+Latest Segment `D` continuation outcomes:
+
+- `planD01_detector_geometry_cache`
+  - authoritative artifact:
+    `test-reports/cupy-rsoxs-optimization-dev/planD01_detector_geometry_cache_seq_20260325_194304/summary.json`
+  - parity/smoke:
+    - maintained device strict/borrow CoreShell regression passed,
+    - maintained host-resident CoreShell sim-regression smoke also passed,
+  - timing versus the initial device baseline:
+    - no-rotation device lane:
+      `primary 0.219s -> 0.190s`, `D 0.035 -> 0.035`,
+    - explicit general-angle device lane:
+      `primary 0.248s -> 0.244s`, `D 0.074 -> 0.070`,
+  - interpretation:
+    - keep it as low-risk detector-geometry scaffolding,
+    - do not count it as a standalone material speed win.
+- `planD02_tensor_coeff_general_angle_projection_fusion`
+  - authoritative artifacts:
+    - `test-reports/cupy-rsoxs-optimization-dev/planD02_tensor_coeff_general_angle_projection_fusion_fix/summary.json`,
+    - `test-reports/cupy-rsoxs-optimization-dev/planD02b_aligned_detector_projection_no_rotation/summary.json`,
+    - `test-reports/cupy-rsoxs-optimization-dev/planD02b_aligned_detector_projection_general/summary.json`,
+    - use the dedicated no-rotation artifact as the aligned regression
+      authority because the explicit-rotation harness still emits its
+      companion no-rotation case,
+  - superseded intermediates:
+    - `test-reports/cupy-rsoxs-optimization-dev/planD02_tensor_coeff_general_angle_projection_fusion/summary.json`,
+    - `test-reports/cupy-rsoxs-optimization-dev/planD02_tensor_coeff_general_angle_projection_fusion_rerun/summary.json`,
+    - those two runs predated removal of an accidentally retained legacy
+      `proj_x` projection call in the general-angle wrapper and should not be
+      used as the final `planD02` authority,
+  - current-tree regression repros that motivated the aligned-family
+    follow-on:
+    - `test-reports/cupy-rsoxs-optimization-dev/planD02_repro_current_no_rotation/summary.json`
+    - `test-reports/cupy-rsoxs-optimization-dev/planD02_repro_current_general/summary.json`
+    - those reruns showed the aligned device guard had drifted back to about
+      `primary 0.243-0.256s`, `D 0.055-0.076` while the targeted general-angle
+      lane stayed fast,
+  - maintained parity:
+    - `pytest tests/validation/test_core_shell_reference.py -k "test_core_shell_sim_regression_cupy_borrow_strict" --nrss-backend cupy-rsoxs -v`
+      passed,
+    - `pytest tests/validation/test_core_shell_reference.py -k "test_core_shell_sim_regression_pybind" --nrss-backend cupy-rsoxs -v`
+      passed,
+  - timing versus the initial device baseline:
+    - aligned no-rotation device lane:
+      `primary 0.219s -> 0.177s`, `D 0.035 -> 0.020`,
+    - explicit general-angle device lane:
+      `primary 0.248s -> 0.185s`, `D 0.074 -> 0.020`,
+  - interpretation:
+    - accept this as the first material March 25 Segment `D` speed win because
+      the targeted general-angle device lane improved strongly,
+    - the later aligned-family detector-grid follow-on removed the renewed
+      no-rotation regression and now defines the final accepted March 25
+      Segment `D` end state.
+- `planD03_direct_detector_kernel`
+  - interpretation:
+    - reject for this pass,
+    - a dedicated raw-kernel detector path reached about `0.10ms` warm for the
+      helper itself but its first cold call was about `59ms`, which is worse
+      than the accepted elementwise helper on the authority timing surface.
+- `planD04_static_algebra_prefactor_cache`
+  - authoritative artifact:
+    `test-reports/cupy-rsoxs-optimization-dev/planD04_static_algebra_prefactor_cache/summary.json`
+  - timing versus the accepted `planD02` state:
+    - aligned no-rotation device lane:
+      `primary 0.186s -> 0.196s`, `D 0.034 -> 0.035`,
+    - explicit general-angle device lane:
+      `primary 0.186s -> 0.188s`, `D 0.020 -> 0.019`,
+  - interpretation:
+    - reject as non-material.
+- `planD05_tensor_coeff_scale_hoist`
+  - authoritative artifact:
+    `test-reports/cupy-rsoxs-optimization-dev/planD05_tensor_coeff_scale_hoist/summary.json`
+  - timing versus the accepted `planD02` state:
+    - aligned no-rotation device lane:
+      `primary 0.186s -> 0.185s`, `D 0.034 -> 0.034`,
+    - explicit general-angle device lane:
+      `primary 0.186s -> 0.205s`, `D 0.020 -> 0.021`,
+  - interpretation:
+    - reject because the targeted primary metric regressed.
+- `planD06_segment_d_scratch_reuse`
+  - interpretation:
+    - close without implementation for this pass,
+    - the remaining Segment `D` surface after `planD02` is dominated more by
+      first-call kernel setup than by obvious allocator churn.
 
 Latest CUDA-prewarm verification:
 

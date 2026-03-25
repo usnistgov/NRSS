@@ -63,6 +63,30 @@ class _AngleFamilyPlan:
     needs_proj_xy: bool
 
 
+@dataclass(frozen=True)
+class _DetectorGeometry:
+    qx: Any
+    qy: Any
+    qz: Any
+    x_idx: Any
+    y_idx: Any
+    border_valid: Any
+    radius_sq: Any
+    z_count: int
+    y_count: int
+    x_count: int
+    qz0: np.float32
+    dz: np.float32
+
+
+@dataclass(frozen=True)
+class _DetectorProjectionGeometry:
+    valid: Any
+    safe_z0: Any | None
+    safe_z1: Any | None
+    frac: Any | None
+
+
 class _NullSegmentRecorder:
     selected_segments: tuple[str, ...] = ()
     segment_measurements: dict[str, str] = {}
@@ -838,21 +862,12 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         basis_y = None
         proj_x = None
         proj_y = None
-        proj_xy = None
 
         if angle_family_plan.needs_proj_x:
             basis_x = (
                 fft_nt[0] * self._one_by_four_pi,
                 fft_nt[1] * self._one_by_four_pi,
                 fft_nt[2] * self._one_by_four_pi,
-            )
-            proj_x = self._projection_from_fft_polarization(
-                morphology=morphology,
-                energy=energy,
-                cp=cp,
-                fft_x=basis_x[0],
-                fft_y=basis_x[1],
-                fft_z=basis_x[2],
             )
 
         if angle_family_plan.needs_proj_y:
@@ -861,25 +876,170 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 fft_nt[3] * self._one_by_four_pi,
                 fft_nt[4] * self._one_by_four_pi,
             )
-            proj_y = self._projection_from_fft_polarization(
-                morphology=morphology,
-                energy=energy,
-                cp=cp,
-                fft_x=basis_y[0],
-                fft_y=basis_y[1],
-                fft_z=basis_y[2],
-            )
 
         if angle_family_plan.needs_proj_xy:
-            proj_xy = self._projection_from_fft_polarization(
+            return self._projection_coefficients_from_fft_pair(
                 morphology=morphology,
                 energy=energy,
                 cp=cp,
-                fft_x=basis_x[0] + basis_y[0],
-                fft_y=basis_x[1] + basis_y[1],
-                fft_z=basis_x[2] + basis_y[2],
+                basis_x=basis_x,
+                basis_y=basis_y,
             )
-            proj_xy = proj_xy - proj_x - proj_y
+
+        # Even aligned families only need detector-plane values, so avoid
+        # materializing an intermediate scatter3d volume here.
+        if angle_family_plan.needs_proj_x and angle_family_plan.needs_proj_y:
+            proj_x, proj_y, _ = self._projection_coefficients_from_fft_pair(
+                morphology=morphology,
+                energy=energy,
+                cp=cp,
+                basis_x=basis_x,
+                basis_y=basis_y,
+            )
+            return proj_x, proj_y, None
+
+        if angle_family_plan.needs_proj_x:
+            proj_x, _, _ = self._projection_coefficients_from_fft_pair(
+                morphology=morphology,
+                energy=energy,
+                cp=cp,
+                basis_x=basis_x,
+                basis_y=basis_x,
+            )
+
+        if angle_family_plan.needs_proj_y:
+            proj_y, _, _ = self._projection_coefficients_from_fft_pair(
+                morphology=morphology,
+                energy=energy,
+                cp=cp,
+                basis_x=basis_y,
+                basis_y=basis_y,
+            )
+
+        return proj_x, proj_y, None
+
+    def _projection_coefficients_from_fft_pair(self, morphology, energy, cp, basis_x, basis_y):
+        detector_geometry = self._detector_geometry(morphology, cp)
+        projection_geometry = self._detector_projection_geometry(
+            morphology=morphology,
+            energy=energy,
+            cp=cp,
+            detector_geometry=detector_geometry,
+        )
+        k = np.float32(2.0 * math.pi / (1239.84197 / float(energy)))
+        d = np.float32(k * k)
+        a = detector_geometry.qx[None, :]
+        b = detector_geometry.qy[:, None]
+        out_nan = np.float32(np.nan)
+
+        if detector_geometry.z_count == 1:
+            proj_x, proj_y, proj_xy = self._detector_projection_coefficients_from_fft_slices(
+                a=a,
+                b=b,
+                c=k + detector_geometry.qz[0],
+                d=d,
+                basis_x=(basis_x[0][0], basis_x[1][0], basis_x[2][0]),
+                basis_y=(basis_y[0][0], basis_y[1][0], basis_y[2][0]),
+            )
+            return (
+                cp.where(projection_geometry.valid, proj_x, out_nan),
+                cp.where(projection_geometry.valid, proj_y, out_nan),
+                cp.where(projection_geometry.valid, proj_xy, out_nan),
+            )
+
+        z0 = projection_geometry.safe_z0
+        z1 = projection_geometry.safe_z1
+        y_idx = detector_geometry.y_idx
+        x_idx = detector_geometry.x_idx
+        c0 = k + detector_geometry.qz[z0]
+        c1 = k + detector_geometry.qz[z1]
+
+        proj_x0, proj_y0, proj_xy0 = self._detector_projection_coefficients_from_fft_slices(
+            a=a,
+            b=b,
+            c=c0,
+            d=d,
+            basis_x=(
+                basis_x[0][z0, y_idx, x_idx],
+                basis_x[1][z0, y_idx, x_idx],
+                basis_x[2][z0, y_idx, x_idx],
+            ),
+            basis_y=(
+                basis_y[0][z0, y_idx, x_idx],
+                basis_y[1][z0, y_idx, x_idx],
+                basis_y[2][z0, y_idx, x_idx],
+            ),
+        )
+        proj_x1, proj_y1, proj_xy1 = self._detector_projection_coefficients_from_fft_slices(
+            a=a,
+            b=b,
+            c=c1,
+            d=d,
+            basis_x=(
+                basis_x[0][z1, y_idx, x_idx],
+                basis_x[1][z1, y_idx, x_idx],
+                basis_x[2][z1, y_idx, x_idx],
+            ),
+            basis_y=(
+                basis_y[0][z1, y_idx, x_idx],
+                basis_y[1][z1, y_idx, x_idx],
+                basis_y[2][z1, y_idx, x_idx],
+            ),
+        )
+
+        frac = projection_geometry.frac
+        keep = np.float32(1.0) - frac
+        proj_x = keep * proj_x0 + frac * proj_x1
+        proj_y = keep * proj_y0 + frac * proj_y1
+        proj_xy = keep * proj_xy0 + frac * proj_xy1
+        return (
+            cp.where(projection_geometry.valid, proj_x, out_nan),
+            cp.where(projection_geometry.valid, proj_y, out_nan),
+            cp.where(projection_geometry.valid, proj_xy, out_nan),
+        )
+
+    def _detector_projection_coefficients_from_fft_slices(
+        self,
+        a,
+        b,
+        c,
+        d,
+        basis_x,
+        basis_y,
+    ):
+        x1, y1, z1 = basis_x
+        x2, y2, z2 = basis_y
+
+        term1_x = (-a * a + d) * x1 - a * (b * y1 + c * z1)
+        term2_x = -(a * b) * x1 + (-b * b + d) * y1 - b * c * z1
+        term3_x = -(a * c) * x1 - b * c * y1 + (-c * c + d) * z1
+
+        term1_y = (-a * a + d) * x2 - a * (b * y2 + c * z2)
+        term2_y = -(a * b) * x2 + (-b * b + d) * y2 - b * c * z2
+        term3_y = -(a * c) * x2 - b * c * y2 + (-c * c + d) * z2
+
+        proj_x = (
+            term1_x.real * term1_x.real
+            + term1_x.imag * term1_x.imag
+            + term2_x.real * term2_x.real
+            + term2_x.imag * term2_x.imag
+            + term3_x.real * term3_x.real
+            + term3_x.imag * term3_x.imag
+        )
+        proj_y = (
+            term1_y.real * term1_y.real
+            + term1_y.imag * term1_y.imag
+            + term2_y.real * term2_y.real
+            + term2_y.imag * term2_y.imag
+            + term3_y.real * term3_y.real
+            + term3_y.imag * term3_y.imag
+        )
+        proj_xy = np.float32(2.0) * (
+            (term1_x.real * term1_y.real + term1_x.imag * term1_y.imag)
+            + (term2_x.real * term2_y.real + term2_x.imag * term2_y.imag)
+            + (term3_x.real * term3_y.real + term3_x.imag * term3_y.imag)
+        )
+        del term1_x, term2_x, term3_x, term1_y, term2_y, term3_y
         return proj_x, proj_y, proj_xy
 
     def _project_from_direct_polarization(
@@ -1204,16 +1364,23 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return out
 
     def _compute_scatter3d(self, morphology, energy, cp, p_x, p_y, p_z):
-        z, y, x = map(int, morphology.NumZYX)
-        qx, qy, qz = self._q_axes(morphology, cp)
+        detector_geometry = self._detector_geometry(morphology, cp)
+        z = detector_geometry.z_count
         k = np.float32(2.0 * math.pi / (1239.84197 / float(energy)))
         d = np.float32(k * k)
-        scatter = cp.empty((z, y, x), dtype=cp.float32)
+        scatter = cp.empty(
+            (
+                detector_geometry.z_count,
+                detector_geometry.y_count,
+                detector_geometry.x_count,
+            ),
+            dtype=cp.float32,
+        )
 
-        a = qx[None, :]
-        b = qy[:, None]
+        a = detector_geometry.qx[None, :]
+        b = detector_geometry.qy[:, None]
         for z_index in range(z):
-            c = k + qz[z_index]
+            c = k + detector_geometry.qz[z_index]
             p1 = p_x[z_index]
             p2 = p_y[z_index]
             p3 = p_z[z_index]
@@ -1233,47 +1400,132 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return scatter
 
     def _project_scatter3d(self, morphology, energy, cp, scatter3d):
-        z, y, x = map(int, morphology.NumZYX)
-        qx, qy, qz = self._q_axes(morphology, cp)
-        k = np.float32(2.0 * math.pi / (1239.84197 / float(energy)))
-        x_idx = cp.arange(x, dtype=cp.int32)[None, :]
-        y_idx = cp.arange(y, dtype=cp.int32)[:, None]
-        qx_grid = qx[None, :]
-        qy_grid = qy[:, None]
-        val = k * k - qx_grid * qx_grid - qy_grid * qy_grid
+        detector_geometry = self._detector_geometry(morphology, cp)
+        projection_geometry = self._detector_projection_geometry(
+            morphology=morphology,
+            energy=energy,
+            cp=cp,
+            detector_geometry=detector_geometry,
+        )
 
-        projection = cp.full((y, x), np.float32(np.nan), dtype=cp.float32)
-        valid = (val >= 0) & (x_idx != (x - 1)) & (y_idx != (y - 1))
-        if z == 1:
-            projection = cp.where(valid, scatter3d[0], projection)
+        projection = cp.full(
+            (detector_geometry.y_count, detector_geometry.x_count),
+            np.float32(np.nan),
+            dtype=cp.float32,
+        )
+        if detector_geometry.z_count == 1:
+            projection = cp.where(projection_geometry.valid, scatter3d[0], projection)
             return projection
 
-        pos_z = -k + cp.sqrt(cp.where(valid, val, 0), dtype=cp.float32)
-        dz = qz[1] - qz[0]
-        z_float = (pos_z - qz[0]) / dz
-        z0 = cp.floor(z_float).astype(cp.int32)
-        z1 = z0 + 1
-        valid &= z0 >= 0
-        valid &= z1 < z
-
-        safe_z0 = cp.clip(z0, 0, z - 1)
-        safe_z1 = cp.clip(z1, 0, z - 1)
-        frac = z_float - safe_z0.astype(cp.float32)
-
-        data1 = scatter3d[safe_z0, y_idx, x_idx]
-        data2 = scatter3d[safe_z1, y_idx, x_idx]
-        interp = (np.float32(1.0) - frac) * data1 + frac * data2
-        projection = cp.where(valid, interp, projection)
+        data1 = scatter3d[
+            projection_geometry.safe_z0,
+            detector_geometry.y_idx,
+            detector_geometry.x_idx,
+        ]
+        data2 = scatter3d[
+            projection_geometry.safe_z1,
+            detector_geometry.y_idx,
+            detector_geometry.x_idx,
+        ]
+        interp = (
+            (np.float32(1.0) - projection_geometry.frac) * data1
+            + projection_geometry.frac * data2
+        )
+        projection = cp.where(projection_geometry.valid, interp, projection)
         return projection
 
     def _q_axes(self, morphology, cp):
+        detector_geometry = self._detector_geometry(morphology, cp)
+        return detector_geometry.qx, detector_geometry.qy, detector_geometry.qz
+
+    def _detector_geometry(self, morphology, cp):
         z, y, x = map(int, morphology.NumZYX)
         phys = np.float32(morphology.PhysSize)
+        cache_key = ("detector_geometry", z, y, x, float(phys))
+        cached = morphology._backend_runtime_state.get(cache_key)
+        if cached is not None:
+            return cached
+
         start = np.float32(-math.pi / float(phys))
-        qx = start + cp.arange(x, dtype=cp.float32) * np.float32((2.0 * math.pi / float(phys)) / max(x - 1, 1))
-        qy = start + cp.arange(y, dtype=cp.float32) * np.float32((2.0 * math.pi / float(phys)) / max(y - 1, 1))
+        x_step = np.float32((2.0 * math.pi / float(phys)) / max(x - 1, 1))
+        y_step = np.float32((2.0 * math.pi / float(phys)) / max(y - 1, 1))
+        qx = start + cp.arange(x, dtype=cp.float32) * x_step
+        qy = start + cp.arange(y, dtype=cp.float32) * y_step
         if z == 1:
             qz = cp.asarray([0.0], dtype=cp.float32)
+            qz0 = np.float32(0.0)
+            dz = np.float32(0.0)
         else:
-            qz = start + cp.arange(z, dtype=cp.float32) * np.float32((2.0 * math.pi / float(phys)) / max(z - 1, 1))
-        return qx, qy, qz
+            z_step = np.float32((2.0 * math.pi / float(phys)) / max(z - 1, 1))
+            qz = start + cp.arange(z, dtype=cp.float32) * z_step
+            qz0 = start
+            dz = z_step
+
+        x_idx = cp.arange(x, dtype=cp.int32)[None, :]
+        y_idx = cp.arange(y, dtype=cp.int32)[:, None]
+        border_valid = (x_idx != (x - 1)) & (y_idx != (y - 1))
+        radius_sq = qx[None, :] * qx[None, :] + qy[:, None] * qy[:, None]
+
+        detector_geometry = _DetectorGeometry(
+            qx=qx,
+            qy=qy,
+            qz=qz,
+            x_idx=x_idx,
+            y_idx=y_idx,
+            border_valid=border_valid,
+            radius_sq=radius_sq,
+            z_count=z,
+            y_count=y,
+            x_count=x,
+            qz0=qz0,
+            dz=dz,
+        )
+        morphology._backend_runtime_state[cache_key] = detector_geometry
+        return detector_geometry
+
+    def _detector_projection_geometry(self, morphology, energy, cp, detector_geometry):
+        cache_key = (
+            "detector_projection_geometry_current",
+            detector_geometry.z_count,
+            detector_geometry.y_count,
+            detector_geometry.x_count,
+            float(morphology.PhysSize),
+            float(energy),
+        )
+        cached = morphology._backend_runtime_state.get(cache_key)
+        if cached is not None:
+            return cached
+
+        k = np.float32(2.0 * math.pi / (1239.84197 / float(energy)))
+        val = np.float32(k * k) - detector_geometry.radius_sq
+        valid = (val >= 0) & detector_geometry.border_valid
+
+        if detector_geometry.z_count == 1:
+            projection_geometry = _DetectorProjectionGeometry(
+                valid=valid,
+                safe_z0=None,
+                safe_z1=None,
+                frac=None,
+            )
+            morphology._backend_runtime_state[cache_key] = projection_geometry
+            return projection_geometry
+
+        pos_z = -k + cp.sqrt(cp.where(valid, val, 0), dtype=cp.float32)
+        z_float = (pos_z - detector_geometry.qz0) / detector_geometry.dz
+        z0 = cp.floor(z_float).astype(cp.int32)
+        z1 = z0 + 1
+        valid &= z0 >= 0
+        valid &= z1 < detector_geometry.z_count
+
+        safe_z0 = cp.clip(z0, 0, detector_geometry.z_count - 1)
+        safe_z1 = cp.clip(z1, 0, detector_geometry.z_count - 1)
+        frac = z_float - safe_z0.astype(cp.float32)
+
+        projection_geometry = _DetectorProjectionGeometry(
+            valid=valid,
+            safe_z0=safe_z0,
+            safe_z1=safe_z1,
+            frac=frac,
+        )
+        morphology._backend_runtime_state[cache_key] = projection_geometry
+        return projection_geometry

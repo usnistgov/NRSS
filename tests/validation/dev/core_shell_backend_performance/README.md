@@ -58,6 +58,16 @@ Artifacts are written under:
 - `test-reports/core-shell-backend-performance-dev/<label>/primary_backend_speed_comparison_table.tsv`
 - `test-reports/core-shell-backend-performance-dev/<label>/primary_backend_speed_comparison_table.png`
 
+Latest snapshot tied to the accepted March 25 Segment `D` end state:
+
+- artifact root:
+  - `test-reports/core-shell-backend-performance-dev/principal_cross_backend_20260325_planD02b/`
+- headline results from the combined table:
+  - host speedup versus legacy `cyrsoxs`: about `1.9x` to `4.5x`,
+  - device speedup versus legacy pre-warm: about `2.6x` to `13.3x`,
+  - medium/large device rows: about `9.2x` to `13.3x` faster than the
+    matching legacy pre-warm rows.
+
 Historical full-energy comparison:
 
 - `run_core_shell_backend_performance_abstract.py`
