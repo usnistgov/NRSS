@@ -10,7 +10,9 @@ It holds workflow, tutorial, test, and implementation details that should versio
 - Docs: `docs/source`
 - Smoke tests: `tests/smoke`
 - Validation tests: `tests/validation`
-- Local upgrade plan: `UPGRADE_ROADMAP.md`
+- Repo upgrade plan: `REPO_UPGRADE_PLAN.md`
+- `cupy-rsoxs` backend spec: `CUPY_RSOXS_BACKEND_SPEC.md`
+- `cupy-rsoxs` optimization ledger: `CUPY_RSOXS_OPTIMIZATION_LEDGER.md`
 
 ## Source And Edit Map
 - `src/NRSS/morphology.py`: main `Morphology` / `Material` API, config handling, CyRSoXS object wiring, and run path.
@@ -30,8 +32,9 @@ It holds workflow, tutorial, test, and implementation details that should versio
 
 ## Runtime Assumptions
 - Preferred install path is a conda-installed `NRSS` package.
-- Current runtime also requires `CyRSoXS` bindings to be importable from Python.
-- Acceptable alternative when needed: `pip install nrss` plus conda-installed `cyrsoxs`.
+- Current maintained runtime requires CuPy and defaults to the `cupy-rsoxs` backend when both `cupy-rsoxs` and `cyrsoxs` are available.
+- `CyRSoXS` remains a supported legacy/reference backend rather than a required default runtime dependency.
+- Acceptable alternative when needed: `pip install nrss` plus environment-managed GPU/runtime dependencies.
 - Do not assume any machine-local environment name.
 - For repo verification, align with CI/local test entry points:
   - editable install path used in CI: `python -m pip install -e . pytest`
@@ -208,4 +211,6 @@ Practical guidance:
 - Keep CLI usage only for explicit historical reproduction requirements.
 
 ## Backend Upgrade Context
-- For backend modernization details, including CuPy mimic backend, backend contracts, input/output policies, and on-device data pathways, use `UPGRADE_ROADMAP.md` as the reference document.
+- For repo-wide modernization goals, validation status, packaging direction, and historical prep status, use `REPO_UPGRADE_PLAN.md`.
+- For stable `cupy-rsoxs` backend details, including the CuPy mimic backend, backend contracts, input/output policies, and on-device data pathways, use `CUPY_RSOXS_BACKEND_SPEC.md`.
+- For `cupy-rsoxs` speed plans, benchmark interpretation, and accepted or rejected optimization outcomes, use `CUPY_RSOXS_OPTIMIZATION_LEDGER.md`.

@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
+    "cupy-cuda12x",
     "h5py",
     "matplotlib",
     "numpy",
@@ -30,18 +31,10 @@ dependencies = [
 ]
 dynamic = ["version"]
 
-[project.optional-dependencies]
-# PEP 621 metadata cannot express "require one of these distributions" as a
-# single hard dependency. Expose the supported CuPy install lines explicitly and
-# enforce importability in the runtime environment/tests.
-cupy = ["cupy"]
-cupy-cuda12x = ["cupy-cuda12x"]
-cupy-cuda13x = ["cupy-cuda13x"]
-
 [project.urls]
 Homepage = "https://github.com/usnistgov/NRSS/"
 
-[tools.setuptools.packages.find]
+[tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools_scm]

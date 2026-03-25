@@ -8,8 +8,8 @@ import os
 from .contracts import resolve_backend_array_contract
 
 
-KNOWN_BACKEND_ORDER = ("cyrsoxs", "cupy-rsoxs")
-DEFAULT_BACKEND_ORDER = ("cyrsoxs", "cupy-rsoxs")
+KNOWN_BACKEND_ORDER = ("cupy-rsoxs", "cyrsoxs")
+DEFAULT_BACKEND_ORDER = ("cupy-rsoxs", "cyrsoxs")
 
 
 class BackendSelectionError(RuntimeError):
@@ -104,7 +104,7 @@ def _detect_cupy_rsoxs() -> BackendInfo:
             available=False,
             implemented=False,
             import_target=None,
-            reason="Planned backend is not implemented in NRSS yet.",
+            reason="CuPy backend module is not importable from this NRSS installation.",
             supports_cli=False,
             supports_reference_parity=True,
             supports_device_input=True,
@@ -114,7 +114,7 @@ def _detect_cupy_rsoxs() -> BackendInfo:
             default_dtype=contract["default_dtype"],
             supported_dtypes=contract["supported_dtypes"],
             supported_backend_options=contract["supported_backend_options"],
-            description="Planned CuPy-native NRSS backend.",
+            description="Pure-Python CuPy-native NRSS backend.",
         )
 
     cupy_spec = _find_import_target("cupy")
@@ -134,7 +134,7 @@ def _detect_cupy_rsoxs() -> BackendInfo:
             default_dtype=contract["default_dtype"],
             supported_dtypes=contract["supported_dtypes"],
             supported_backend_options=contract["supported_backend_options"],
-            description="Planned CuPy-native NRSS backend.",
+            description="Pure-Python CuPy-native NRSS backend.",
         )
 
     return BackendInfo(
@@ -152,7 +152,7 @@ def _detect_cupy_rsoxs() -> BackendInfo:
         default_dtype=contract["default_dtype"],
         supported_dtypes=contract["supported_dtypes"],
         supported_backend_options=contract["supported_backend_options"],
-        description="Planned CuPy-native NRSS backend.",
+        description="Pure-Python CuPy-native NRSS backend.",
     )
 
 

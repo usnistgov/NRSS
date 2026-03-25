@@ -39,9 +39,11 @@ Use the ``environment.yml`` file to create a new virtual environment, and activa
     conda env create -f environment.yml
     conda activate nrss
 
-CyRSoXS is listed as a dependency in ``environment.yml``, and will automatically be installed.
+CyRSoXS and the maintained CuPy runtime are listed as dependencies in
+``environment.yml``, and will automatically be installed.
 
-Now we can pip install NRSS, which will also install PyHyperScattering as a dependency:
+Now we can pip install NRSS, which will install the remaining Python package
+dependencies for the maintained runtime:
 
 .. code-block:: bash
 
@@ -327,4 +329,3 @@ This tutorial demonstrates how to simulate resonant soft X-ray scattering from p
 The model is based on published work examining polystyrene-grafted gold nanoparticles, and allows exploration of orientation decay 
 away from particle surfaces. The tutorial includes both morphology generation and NRSS simulation, with a focus on the carbon K-edge 
 energies relevant to polystyrene orientation.
-

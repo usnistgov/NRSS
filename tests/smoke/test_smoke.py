@@ -9,6 +9,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
+import NRSS.backends.registry as backend_registry
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +20,7 @@ if str(SRC_PATH) not in sys.path:
 from NRSS import SFieldMode
 from NRSS.reader import read_config
 from NRSS.backends import (
+    BackendInfo,
     BackendOptionError,
     assess_array_for_backend,
     available_backends,
@@ -27,6 +29,7 @@ from NRSS.backends import (
     get_backend_info,
     inspect_array,
     resolve_backend_array_contract,
+    resolve_backend_name,
     resolve_backend_runtime_contract,
     UnknownBackendError,
 )
@@ -44,8 +47,7 @@ def _import_required(module_name: str):
 
 
 def _import_cyrsoxs_required():
-    # CyRSoXS is required for the current backend.
-    # If/when NRSS supports multiple independent backends, this check can become optional.
+    # CyRSoXS remains an explicitly supported legacy backend and reference target.
     errors = []
     for name in ("CyRSoXS", "cyrsoxs"):
         try:
@@ -63,7 +65,7 @@ def _import_cupy_required():
         mod = importlib.import_module("cupy")
     except Exception as exc:  # pragma: no cover - exercised when import fails
         raise AssertionError(
-            "CuPy import failed for the NRSS backend-preparation environment. "
+            "CuPy import failed for the supported NRSS runtime environment. "
             f"Failure: {exc.__class__.__name__}({exc})"
         ) from exc
     assert mod is not None
@@ -509,9 +511,58 @@ def test_cyrsoxs_import_available_for_legacy_backend():
 
 
 @pytest.mark.backend_agnostic_contract
-def test_cupy_import_available_for_backend_preparation():
-    """Verify CuPy is importable in the supported NRSS backend-preparation environment."""
+def test_cupy_import_available_for_supported_runtime():
+    """Verify CuPy is importable in the supported NRSS runtime environment."""
     _import_cupy_required()
+
+
+@pytest.mark.backend_agnostic_contract
+def test_default_backend_resolution_prefers_cupy_rsoxs_when_available(monkeypatch):
+    """Ensure default backend resolution prefers cupy-rsoxs over cyrsoxs when both are available."""
+    monkeypatch.delenv("NRSS_BACKEND", raising=False)
+    cupy_info = get_backend_info("cupy-rsoxs")
+
+    def fake_get_backend_info(name):
+        if name == "cupy-rsoxs":
+            return BackendInfo(
+                name="cupy-rsoxs",
+                available=True,
+                implemented=True,
+                import_target="NRSS.backends.cupy_rsoxs",
+                reason=None,
+                supports_cli=False,
+                supports_reference_parity=True,
+                supports_device_input=True,
+                supports_backend_native_output=True,
+                default_resident_mode=cupy_info.default_resident_mode,
+                supported_resident_modes=cupy_info.supported_resident_modes,
+                default_dtype=cupy_info.default_dtype,
+                supported_dtypes=cupy_info.supported_dtypes,
+                supported_backend_options=cupy_info.supported_backend_options,
+                description="Pure-Python CuPy-native NRSS backend.",
+            )
+        if name == "cyrsoxs":
+            return BackendInfo(
+                name="cyrsoxs",
+                available=True,
+                implemented=True,
+                import_target="CyRSoXS",
+                reason=None,
+                supports_cli=True,
+                supports_reference_parity=True,
+                supports_device_input=False,
+                supports_backend_native_output=False,
+                default_resident_mode="host",
+                supported_resident_modes=("host",),
+                default_dtype="float32",
+                supported_dtypes=("float32",),
+                supported_backend_options=("dtype",),
+                description="Legacy CyRSoXS backend accessed through Python bindings.",
+            )
+        raise AssertionError(f"Unexpected backend {name!r}")
+
+    monkeypatch.setattr(backend_registry, "get_backend_info", fake_get_backend_info)
+    assert resolve_backend_name(None) == "cupy-rsoxs"
 
 
 @pytest.mark.backend_agnostic_contract
