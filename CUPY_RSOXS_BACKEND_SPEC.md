@@ -111,26 +111,34 @@ Build a new NRSS backend architecture that:
     NumPy/PyHyperScattering-friendly.
 12. Backend-native/on-device result access is deferred until after parity, but
     the result abstraction should preserve that path.
-13. `float16` is deferred until after parity; parity-sensitive compute remains
+13. Reduced-precision morphology handling is not modeled as a generic backend
+    `dtype` knob.
+14. The reduced-precision surface is a named mixed-precision mode, distinct
+    from `execution_path`, and parity-sensitive compute remains
     `float32/complex64`.
-14. Runtime instrumentation for timing/memory is desirable in development but
+15. Runtime instrumentation for timing/memory is desirable in development but
     must be fully disableable.
-15. The primary optimization wall metric starts immediately before
+16. The primary optimization wall metric starts immediately before
     `Morphology(...)` construction and ends immediately after synchronized
     `run(return_xarray=False)` completion.
-16. Large-box behavior should initially mirror current CyRSoXS policy during
+17. Large-box behavior should initially mirror current CyRSoXS policy during
     parity.
-17. Phase-1 should prefer freezing morphology mutation after result creation
+18. Phase-1 should prefer freezing morphology mutation after result creation
     until an explicit invalidation contract exists.
-18. The mutation freeze should begin at successful `run()` completion.
-19. Public optical constants may remain host-oriented for parity; backend
+19. The mutation freeze should begin at successful `run()` completion.
+20. Public optical constants may remain host-oriented for parity; backend
     staging to CuPy happens when math requires it.
-20. Preferred direct-CuPy morphology contract for parity is ZYX-shaped,
-    C-contiguous, `float32` arrays for each material field.
-21. Initial `cupy-rsoxs` parity validation should include both:
+21. Default parity contracts remain ZYX-shaped, C-contiguous, `float32`
+    morphology arrays for each material field unless the mixed-precision mode
+    is explicitly selected.
+22. Initial `cupy-rsoxs` parity validation should include both:
     - a NumPy-input contract case using `input_policy='coerce'`,
     - a CuPy-native borrowed case using `ownership_policy='borrow'` and
       `input_policy='strict'`.
+23. The mixed-precision mode is expert-only and double-gated:
+    - the user must opt into the named mode explicitly,
+    - and the submitted authoritative morphology arrays must already satisfy the
+      mode's strict namespace and dtype contract.
 
 ## Physics Reference (Ground Truth Equations)
 
@@ -178,7 +186,7 @@ This section is the implementation handoff for Phase 1.
    inputs).
 2. Resolve backend (`cyrsoxs`, `cupy-rsoxs`, future backends), `input_policy`,
    and `output_policy`.
-3. Normalize dtypes and device placement.
+3. Normalize namespace, mixed-precision contract, and device placement.
 
 Memory slimming:
 
@@ -309,12 +317,15 @@ Operational policy:
 ## Precision Policy
 
 1. Default compute precision: `float32` / `complex64`.
-2. Morphology storage in `float16`/`bfloat16` is allowed as a compression path.
-3. Decode/cast should occur in device kernels near use sites.
-4. FFT/q-space and projection math remain `float32/complex64` for
-   parity-sensitive runs.
-5. Avoid full pipeline compute in 16-bit when parity is required (high-q
-   deviations known risk).
+2. `cupy-rsoxs` does not expose a generic backend `dtype` knob.
+3. Reduced-precision work is exposed only through a named mixed-precision mode
+   whose purpose is morphology storage / transfer compression rather than a
+   general backend compute-depth toggle.
+4. In the mixed-precision mode, authoritative morphology storage is `float16`
+   while FFT/q-space and projection math remain `float32` / `complex64`.
+5. Avoid full pipeline compute in 16-bit when parity is required; the intended
+   ladder is reduced-precision morphology handling followed by promotion before
+   FFT ingress.
 
 Note on cast cost:
 
@@ -322,6 +333,58 @@ Note on cast cost:
    relative to 3D FFT cost.
 2. Cast overhead still needs profiling in end-to-end runs, but it is generally
    not the dominant term.
+
+## Mixed-Precision Mode
+
+This section defines the intended reduced-precision morphology path.
+
+Public surface:
+
+1. The option name should reflect that this is a specific mixed-precision mode
+   rather than a backend dtype toggle. Preferred naming:
+   `mixed_precision_mode`.
+2. The default mode is `None` (off).
+3. The first supported expert mode is
+   `mixed_precision_mode='reduced_morphology_bit_depth'`.
+4. `execution_path` and `mixed_precision_mode` are orthogonal backend-option
+   surfaces.
+5. The legacy backend `dtype` option should be removed rather than broadened.
+
+Authoritative input contract:
+
+1. This mode overrides the usual `input_policy` behavior and acts as strict
+   regardless of the user's `input_policy` value.
+2. No silent coercion should activate this mode.
+3. Host-resident mode requires authoritative morphology fields to already be
+   ZYX-shaped, C-contiguous, `numpy.float16` arrays.
+4. Device-resident mode requires authoritative morphology fields to already be
+   ZYX-shaped, C-contiguous, `cupy.float16` arrays.
+5. Inputs that do not satisfy the namespace + dtype contract must fail early
+   with a mode-specific error rather than being downcast automatically.
+
+Runtime-compute intent:
+
+1. The mixed-precision mode is a morphology-storage / transfer optimization.
+2. It is not a declaration that the backend compute dtype is `float16`.
+3. Pre-FFT compute may use reduced-precision morphology inputs where validation
+   and profiling permit, but parity-sensitive FFT ingress must be promoted to
+   `float32` / `complex64`.
+4. FFT/q-space and detector/projection math remain `float32` / `complex64` for
+   parity-sensitive runs.
+
+Validation contract:
+
+1. The physics-relevant closure invariant is voxelwise closure, not a
+   morphology-global total.
+2. Mixed-precision closure should therefore be expressed explicitly as a
+   voxelwise absolute-error bound on `abs(sum_i Vfrac_i - 1)`.
+3. The mixed-precision closure check should operate in the authoritative dtype
+   of the mode rather than allocating a widened full-volume validation buffer
+   by default.
+4. The initial mixed-precision closure budget is an expert-mode absolute
+   tolerance of `1e-3` per voxel.
+5. Other validator checks remain the same in spirit: populated fields, shape
+   agreement, float dtype, finite values, and `0 <= S,Vfrac <= 1`.
 
 ## Representation Roadmap (Euler, Vector, Tensor)
 
@@ -471,15 +534,19 @@ Current prep/implementation status to preserve:
 2. `Morphology(..., backend_options=...)` normalizes backend options at
    construction time.
 3. The current normalized option surface is intentionally small:
-   - `dtype` for `cyrsoxs`
-   - `dtype` for `cupy-rsoxs`
+   - no backend `dtype` knob,
+   - `execution_path` for `cupy-rsoxs`,
+   - a named `mixed_precision_mode` for future reduced-precision work in
+     `cupy-rsoxs`.
 4. Current contract table:
    - `cyrsoxs`: authoritative/runtime namespace `numpy`, device `cpu`, default
-     dtype `float32`, supported dtypes `float32`
+     dtype `float32`
    - `cupy-rsoxs`: default authoritative namespace `numpy` in
      `resident_mode='host'`, runtime namespace `cupy`, optional authoritative
-     namespace `cupy` in `resident_mode='device'`, default dtype `float32`,
-     supported dtypes `float32`
+     namespace `cupy` in `resident_mode='device'`, default authoritative
+     morphology precision `float32`, parity-sensitive runtime compute
+     `float32/complex64`, and an expert-only mixed-precision mode that requires
+     authoritative `float16` inputs in the correct namespace
 
 Implementation-phase direction:
 

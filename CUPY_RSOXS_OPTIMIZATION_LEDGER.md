@@ -1003,17 +1003,18 @@ Current campaign steps:
        - the device lane keeps the strong Segment `B` and aligned-angle
          `D/E` wins, with the known caveat that isotropic detection now lands
          in `A2`.
-10. `plan10_float16_followup_scaffold` - `completed`
+10. `plan10_mixed_precision_followup_scaffold` - `completed`
     - do not implement the mixed-precision campaign in this block,
     - only leave the execution-path surface and roadmap notes in a form that
-      allows an orthogonal future backend-options extension for reduced
-      storage/transfer precision,
+      allows an orthogonal future backend-options extension for a named
+      mixed-precision mode,
     - outcome:
-      - completed on March 24, 2026 with no float16 compute-path work landed,
-      - `backend_options["execution_path"]` and the accompanying roadmap notes
-        now provide the intended light scaffold for a future orthogonal reduced
-        precision option surface,
-      - the existing float16-rejection smoke continues to pass in this state.
+      - completed on March 24, 2026 with no mixed-precision execution-path work
+        landed,
+      - `execution_path` remains orthogonal to future mixed-precision work,
+      - the old generic backend `dtype` framing should be considered stale and
+        replaced by a named mixed-precision mode,
+      - no reduced-precision compute-path work was accepted in this state.
 11. `plan11_elementwise_kernel_experiment` - `rejected`
     - try one last `ElementwiseKernel` implementation aimed at Segment `B`,
     - scope it narrowly to the aligned-angle/default-lane path first rather
@@ -1124,21 +1125,36 @@ Precision and option-surface notes for this campaign:
 1. `backend_options` is being resurrected as the explicit backend-specific
    runtime-behavior surface rather than overloading `AlgorithmType` directly in
    `cupy-rsoxs`.
-2. The float16 plan is orthogonal to `execution_path`.
+2. The mixed-precision plan is orthogonal to `execution_path`.
    - intended future direction:
-     - reduced storage / host->device transfer precision as the first target,
-     - optional Segment `B` low-precision experiment if validation permits,
-     - cast to `float32` / `complex64` before FFT ingress for parity-sensitive
-       math.
-3. No float16 compute-path implementation should be accepted in this campaign
-   beyond the light option-surface scaffolding needed so a later block can add
-   it cleanly.
-4. Segment `D` should keep a note for future pruning and scratch-reuse work:
+     - reduced morphology storage / host->device transfer precision as the
+       first target,
+     - optional low-precision pre-FFT experiments only if validation permits,
+     - promotion to `float32` / `complex64` before FFT ingress for
+       parity-sensitive math.
+3. Reduced precision should not be exposed as a generic backend `dtype` knob.
+   - the agreed option surface is a named mixed-precision mode,
+   - the mode overrides `input_policy` and behaves as strict regardless of the
+     user's `input_policy` value,
+   - host-resident mode requires authoritative `numpy.float16` morphology
+     inputs,
+   - device-resident mode requires authoritative `cupy.float16` morphology
+     inputs,
+   - non-conforming inputs fail immediately rather than being silently
+     downcast.
+4. The validator change should be narrow and physics-driven:
+   - closure remains a voxelwise invariant,
+   - the mixed-precision closure rule should be expressed as
+     `abs(sum_i Vfrac_i - 1) <= 1e-3` per voxel,
+   - this rule should operate in the authoritative dtype of the mixed-precision
+     mode by default,
+   - other validator checks remain materially unchanged.
+5. Segment `D` should keep a note for future pruning and scratch-reuse work:
    - axis-family cases may avoid building `proj_xy` and one of the x/y
      projection families,
    - algebraic factoring and scratch reuse around basis/projection assembly may
      be worthwhile there after the Segment `B` pass is measured.
-5. Immediate continuation order for the next Segment `D` block is now:
+6. Immediate continuation order for the next Segment `D` block is now:
    - detector/Ewald geometry caching,
    - `tensor_coeff` general-angle projection-family fusion,
    - direct detector-output kernel work,
@@ -1218,16 +1234,20 @@ Precision and option-surface notes for this campaign:
 
 ### Explicit experiments and deferred directions
 
-1. `float16` and mixed-precision work remain deferred until after the next
+1. Mixed-precision morphology handling remains deferred until after the next
    speed campaigns; parity-sensitive compute remains `float32/complex64`.
    - near-term intended shape of that work:
-     - `backend_options` should carry reduced-precision storage/runtime flags
+     - `backend_options` should carry a named `mixed_precision_mode`
        orthogonally to `execution_path`,
      - the first target is host/device storage and transfer reduction rather
        than end-to-end low-precision FFT/projection math,
-     - the expected precision ladder is reduced-precision storage or Segment
-       `B` staging followed by promotion to `float32` / `complex64` before FFT
-       ingress.
+     - the expert mixed-precision mode should be double-gated: the user must
+       opt into the mode and must already submit conforming authoritative
+       `float16` arrays in the correct namespace,
+     - the expected precision ladder is reduced-precision morphology handling
+       followed by promotion to `float32` / `complex64` before FFT ingress,
+     - the closure validator for this mode should use a voxelwise absolute
+       tolerance budget of `1e-3`.
 2. Reduced angle sampling, alternate interpolation rules, and multi-GPU fan-out
    remain outside the current exact-tuning track.
 3. Host-resident staged mode creates room for explicit experiments with deeper

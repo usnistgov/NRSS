@@ -551,8 +551,10 @@ Not part of the prep milestone, but enabled by it:
      time for the selected backend contract
    - `Morphology(..., backend_options=...)` now validates and normalizes
      backend-specific options at construction time
-   - backend dtype selection is now part of the explicit contract layer instead
-     of being hardcoded inside array coercion
+   - backend-specific option handling is now part of the explicit contract layer
+     instead of being hardcoded inside array coercion; this should support
+     narrow surfaces like `execution_path` and the planned named
+     mixed-precision mode rather than a generic backend `dtype` knob
    - `input_policy='strict'` now fails early when normalization would require
      dtype/layout/device coercion
    - unsupported input array types now fail cleanly during `Morphology`
