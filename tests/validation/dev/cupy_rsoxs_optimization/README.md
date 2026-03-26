@@ -446,6 +446,136 @@ Latest multi-angle execution-path comparison:
   - but for angle-heavy workloads the default `tensor_coeff` path is the one
     to optimize and benchmark first.
 
+Current Segment `E` continuation focus:
+
+- use `execution_path='tensor_coeff'` for this pass,
+- use explicit rotation sets, not the aligned no-rotation lane, as the main
+  ranking surface because the accepted identity-rotation bypass already
+  removed most of the easy `E` cost from `0°`,
+- quick-rank candidates on the small device-resident rotation lanes first,
+- recheck host-resident steady-state timing with
+  `--cuda-prewarm before_prepare_inputs` before accepting a change,
+- require the maintained CoreShell sim-regression physics gates before
+  accepting any Segment `E` change:
+  - `pytest tests/validation/test_core_shell_reference.py -k "test_core_shell_sim_regression_pybind" --nrss-backend cupy-rsoxs -v`,
+  - `pytest tests/validation/test_core_shell_reference.py -k "test_core_shell_sim_regression_cupy_borrow_strict" --nrss-backend cupy-rsoxs -v`,
+  - these are the required physics-pass gates for this Segment `E` block
+    because the maintained CoreShell workflow uses
+    `EAngleRotation=[0.0, 1.0, 360.0]`.
+
+Current Segment `E` priority order:
+
+1. `planE01_rotation_accumulation_scratch_reuse`
+2. `planE02_texture_affine_transform_probe`
+3. `planE03_rotmask_zero_fast_path`
+4. `planE04_rotate_accumulate_kernel_fusion`
+5. `planE05_tensor_coeff_projection_rotation_fusion`
+6. `planE06_exact_quarter_turn_fast_path`
+
+Latest Segment `E` continuation outcome:
+
+- `planE01_rotation_accumulation_scratch_reuse`
+  - artifacts:
+    - current-tree baseline roots:
+      `test-reports/cupy-rsoxs-optimization-dev/planE00_device_baseline_20260325/summary.json`
+      `test-reports/cupy-rsoxs-optimization-dev/planE00_host_warm_20260325/summary.json`
+    - attempt roots:
+      `test-reports/cupy-rsoxs-optimization-dev/planE01_rotation_accumulation_scratch_reuse/summary.json`
+      `test-reports/cupy-rsoxs-optimization-dev/planE01_rotation_accumulation_scratch_reuse_host_warm/summary.json`
+  - measured host-prewarmed outcome versus the current-tree host baseline:
+    - no-rotation host lane:
+      `primary 0.254s -> 0.219s`, `E 0.00158 -> 0.00168`
+    - explicit `0:15:165` host lane:
+      `primary 0.272s -> 0.273s`, `E 0.00706 -> 0.00717`
+    - explicit `0:5:165` host lane:
+      `primary 0.285s -> 0.282s`, `E 0.01387 -> 0.01400`
+  - interpretation:
+    - reject as non-material for the maintained explicit-rotation acceptance
+      surface,
+    - the current-tree device cold baseline clearly paid a first-use cost, so
+      the lower later device `E` numbers were not treated as sufficient
+      acceptance evidence by themselves.
+- `planE02_texture_affine_transform_probe`
+  - artifacts:
+    - attempt roots:
+      `test-reports/cupy-rsoxs-optimization-dev/planE02_texture_affine_transform_probe/summary.json`
+      `test-reports/cupy-rsoxs-optimization-dev/planE02_texture_affine_transform_probe_host_warm/summary.json`
+  - measured host-prewarmed outcome versus the current-tree host baseline:
+    - no-rotation host lane:
+      `primary 0.254s -> 0.256s`, `E 0.00158 -> 0.00154`
+    - explicit `0:15:165` host lane:
+      `primary 0.272s -> 0.303s`, `E 0.00706 -> 0.00815`
+    - explicit `0:5:165` host lane:
+      `primary 0.285s -> 0.282s`, `E 0.01387 -> 0.01825`
+  - interpretation:
+    - reject; the texture-backed affine path materially regressed the main
+      host-prewarmed `0:15:165` authority lane and did not produce a credible
+      `E` win on the broader host surface.
+- `planE03_rotmask_zero_fast_path`
+  - artifact:
+    - `test-reports/cupy-rsoxs-optimization-dev/planE03_rotmask_zero_fast_path/summary.json`
+  - measured device outcome versus the current-tree device rerun surface:
+    - no-rotation device lane:
+      `primary 0.165s -> 0.340s`, `E 0.00146 -> 0.171`
+    - explicit `0:15:165` device lane:
+      `primary 0.181s -> 0.378s`, `E 0.00672 -> 0.195`
+    - explicit `0:5:165` device lane:
+      `primary 0.224s -> 0.198s`, `E 0.01444 -> 0.0250`
+  - interpretation:
+    - reject immediately; reconstructing the strict no-mask validity surface
+      by rotating a support mask adds too much extra Segment `E` work to be
+      competitive on the actual device authority lane.
+- `planE04_rotate_accumulate_kernel_fusion`
+  - artifact:
+    - `test-reports/cupy-rsoxs-optimization-dev/planE04_rotate_accumulate_kernel_fusion/summary.json`
+  - status:
+    - not fully tried; only an exploratory device-resident screen was run
+      before the code was reverted back to the accepted baseline
+  - interpretation:
+    - keep the idea on the priority list, but do not treat the current
+      artifact as an acceptance candidate because it was not carried through
+      the host-prewarmed comparator or the required CoreShell physics gates.
+
+Recommended inner-loop command for the Segment `E` device ranking pass:
+
+```bash
+/home/deand/mambaforge/envs/nrss-dev/bin/python \
+  tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
+  --label e_focus \
+  --size-labels small \
+  --resident-modes device \
+  --execution-paths tensor_coeff \
+  --rotation-specs '0:15:165,0:5:165' \
+  --timing-segments E
+```
+
+Recommended broader Segment `E` spillover check before acceptance:
+
+```bash
+/home/deand/mambaforge/envs/nrss-dev/bin/python \
+  tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
+  --label e_regression \
+  --size-labels small \
+  --resident-modes host,device \
+  --execution-paths tensor_coeff \
+  --rotation-specs '0:15:165,0:5:165' \
+  --timing-segments B,C,D,E
+```
+
+Recommended host steady-state follow-up for the same pass:
+
+```bash
+/home/deand/mambaforge/envs/nrss-dev/bin/python \
+  tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
+  --label e_host_warm \
+  --size-labels small \
+  --resident-modes host \
+  --execution-paths tensor_coeff \
+  --rotation-specs '0:15:165,0:5:165' \
+  --timing-segments B,C,D,E \
+  --cuda-prewarm before_prepare_inputs
+```
+
 Rejected late experiments:
 
 - `plan08_segment_b_algebraic_rewrite`

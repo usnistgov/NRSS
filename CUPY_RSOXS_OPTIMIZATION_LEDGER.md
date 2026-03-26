@@ -551,6 +551,150 @@ Current maintained parity route for this continuation pass:
   - host-resident regression smoke:
     `pytest tests/validation/test_core_shell_reference.py -k "test_core_shell_sim_regression_pybind" --nrss-backend cupy-rsoxs -v`.
 
+### Current Segment E continuation plan (March 25, 2026)
+
+This subsection records the prioritized next-pass plan for Segment `E`
+rotation and angle accumulation after the accepted March 25 Segment `D`
+state:
+
+1. the execution path for this pass is `tensor_coeff`,
+2. the quick-ranking lane is the small device-resident explicit-rotation
+   CoreShell case family because the default `0°` lane already bypasses the
+   affine path,
+3. accepted changes must also clear host-resident steady-state regression
+   checks with `--cuda-prewarm before_prepare_inputs`,
+4. accepted changes must clear maintained CoreShell sim-regression physics
+   gates on both the default host-resident and device strict/borrow
+   `cupy-rsoxs` paths because that validation uses the maintained
+   full-rotation `EAngleRotation=[0.0, 1.0, 360.0]` CoreShell workflow,
+5. and the optimization ledger should be updated after each attempted Segment
+   `E` step or any important intermediate result.
+
+Current Segment `E` ranking baseline from the latest explicit multi-angle
+artifact:
+
+1. source artifact:
+   `test-reports/cupy-rsoxs-optimization-dev/execution_path_multiangle_5_vs_15_20260324/summary.json`
+2. ranking lanes for `tensor_coeff`:
+   - host / `EAngleRotation=[0, 15, 165]`:
+     `primary 2.742s`, `E 0.00734`,
+   - host / `EAngleRotation=[0, 5, 165]`:
+     `primary 2.921s`, `E 0.01559`,
+   - device / `EAngleRotation=[0, 15, 165]`:
+     `primary 0.419s`, `E 0.01466`,
+   - device / `EAngleRotation=[0, 5, 165]`:
+     `primary 0.412s`, `E 0.02937`.
+3. interpretation:
+   - Segment `E` is still minor on the no-rotation lane,
+   - but it scales roughly with the number of sampled angles and is visible on
+     the maintained explicit-rotation `tensor_coeff` workload,
+   - therefore explicit multi-angle `tensor_coeff` device timing is the right
+     first ranking surface for this pass.
+
+Priority order for the Segment `E` pass:
+
+1. `planE01_rotation_accumulation_scratch_reuse` - `rejected`
+   - preallocate Segment `E` accumulation buffers and avoid repeated
+     projection-average reallocations inside the per-angle loop,
+   - use `output=` where supported in the CuPy affine path,
+   - keep this step low-risk and semantics-preserving.
+   - outcome:
+     - authoritative artifacts:
+       - current-tree baseline roots:
+         `test-reports/cupy-rsoxs-optimization-dev/planE00_device_baseline_20260325/summary.json`,
+         `test-reports/cupy-rsoxs-optimization-dev/planE00_host_warm_20260325/summary.json`,
+       - attempt roots:
+         `test-reports/cupy-rsoxs-optimization-dev/planE01_rotation_accumulation_scratch_reuse/summary.json`,
+         `test-reports/cupy-rsoxs-optimization-dev/planE01_rotation_accumulation_scratch_reuse_host_warm/summary.json`,
+     - measured host-prewarmed outcome versus the current-tree host baseline:
+       - no-rotation host lane improved on primary only:
+         `primary 0.254s -> 0.219s`, `E 0.00158 -> 0.00168`,
+       - explicit `EAngleRotation=[0, 15, 165]` host lane stayed flat:
+         `primary 0.272s -> 0.273s`, `E 0.00706 -> 0.00717`,
+       - explicit `EAngleRotation=[0, 5, 165]` host lane stayed effectively flat:
+         `primary 0.285s -> 0.282s`, `E 0.01387 -> 0.01400`,
+     - device interpretation:
+       - the first explicit-rotation device baseline in this continuation pass
+         clearly paid a large cold first-use cost, so the later lower device
+         `E` timings from this attempt are not enough on their own to justify
+         acceptance,
+       - the host-prewarmed explicit-rotation lanes are therefore the
+         acceptance authority for this step.
+     - interpretation:
+       - this allocator/scratch-only rewrite did not materially improve the
+         maintained explicit-rotation `tensor_coeff` authority surface,
+       - reject it and proceed to the next Segment `E` priority step.
+2. `planE02_texture_affine_transform_probe` - `rejected`
+   - probe CuPy `ndimage.affine_transform(..., texture_memory=True)` on the
+     2D projection path using cached float32 homogeneous transforms,
+   - rank it on both cold and steady-state surfaces before accepting it.
+   - outcome:
+     - authoritative artifacts:
+       - attempt roots:
+         `test-reports/cupy-rsoxs-optimization-dev/planE02_texture_affine_transform_probe/summary.json`,
+         `test-reports/cupy-rsoxs-optimization-dev/planE02_texture_affine_transform_probe_host_warm/summary.json`,
+       - compare against the current-tree host baseline at
+         `test-reports/cupy-rsoxs-optimization-dev/planE00_host_warm_20260325/summary.json`,
+     - measured host-prewarmed outcome versus the current-tree host baseline:
+       - no-rotation host lane stayed flat:
+         `primary 0.254s -> 0.256s`, `E 0.00158 -> 0.00154`,
+       - explicit `EAngleRotation=[0, 15, 165]` host lane regressed materially:
+         `primary 0.272s -> 0.303s`, `E 0.00706 -> 0.00815`,
+       - explicit `EAngleRotation=[0, 5, 165]` host lane stayed near-flat on
+         primary but regressed on Segment `E`:
+         `primary 0.285s -> 0.282s`, `E 0.01387 -> 0.01825`,
+     - device interpretation:
+       - the explicit `EAngleRotation=[0, 15, 165]` device lane also regressed
+         sharply on this cold surface:
+         `primary 0.409s`, `E 0.153`,
+       - the texture path therefore does not offer a compelling cold-surface
+         or steady-state advantage in this pass.
+     - interpretation:
+       - reject the texture-backed affine path for this Segment `E` campaign
+         and return to the accepted non-texture baseline before the next step.
+3. `planE03_rotmask_zero_fast_path` - `rejected`
+   - separate the common `RotMask=0` path from the `RotMask=1` valid-count
+     averaging path so the default no-mask lane does not pay for per-angle
+     validity bookkeeping,
+   - preserve the current `RotMask=1` semantics, which average over valid
+     angles rather than applying only a final post hoc crop.
+   - outcome:
+     - authoritative artifact:
+       `test-reports/cupy-rsoxs-optimization-dev/planE03_rotmask_zero_fast_path/summary.json`,
+     - measured device-lane outcome:
+       - no-rotation device lane regressed heavily:
+         `primary 0.165s -> 0.340s`, `E 0.00146 -> 0.171`,
+       - explicit `EAngleRotation=[0, 15, 165]` device lane regressed:
+         `primary 0.181s -> 0.378s`, `E 0.00672 -> 0.195`,
+       - explicit `EAngleRotation=[0, 5, 165]` device lane also regressed:
+         `primary 0.224s -> 0.198s`, `E 0.01444 -> 0.0250`,
+     - interpretation:
+       - rebuilding the strict no-mask validity surface by rotating a support
+         mask adds too much extra Segment `E` work to be viable on this
+         authority surface,
+       - reject without host or physics follow-up.
+4. `planE04_rotate_accumulate_kernel_fusion` - `not fully tried`
+   - fuse rotate, validity handling, and accumulation into one GPU helper for
+     the shared projection path if the lower-risk steps do not materially cut
+     Segment `E`.
+   - partial outcome:
+     - exploratory device artifact:
+       `test-reports/cupy-rsoxs-optimization-dev/planE04_rotate_accumulate_kernel_fusion/summary.json`,
+     - the exploratory device screen showed a promising explicit-rotation
+       reduction but also changed unrelated surface timing enough that the
+       implementation needed one more cleanup pass before host-prewarmed
+       acceptance timing or physics gates,
+     - the backend code was therefore reverted before the change was carried
+       through the required host-resident and CoreShell sim-regression gates.
+5. `planE05_tensor_coeff_projection_rotation_fusion` - `planned`
+   - if needed, target the maintained `tensor_coeff` path more aggressively by
+     eliminating the intermediate per-angle detector projection image and
+     combining x/y/xy weighting with rotation accumulation.
+6. `planE06_exact_quarter_turn_fast_path` - `planned`
+   - add exact `90°/180°/270°` image-space transforms for rotation sets that
+     land exactly on the detector grid so those cases avoid generic affine
+     interpolation.
+
 ### Current Segment B/D campaign plan (March 24, 2026)
 
 This subsection is the live plan and outcome ledger for the current Segment `B`

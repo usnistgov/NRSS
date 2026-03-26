@@ -675,6 +675,12 @@ Not part of the prep milestone, but enabled by it:
    refinement, segment-targeted optimization, export timing, and deeper memory
    instrumentation follow-up. See `CUPY_RSOXS_OPTIMIZATION_LEDGER.md` for the
    current detailed state.
+   - current next-pass optimization focus is Segment `E` rotation and angle
+     accumulation on the maintained `tensor_coeff` path,
+   - accepted Segment `E` changes now require the maintained CoreShell
+     sim-regression physics gates on both the default host-resident and device
+     strict/borrow `cupy-rsoxs` workflows because that validation exercises
+     the maintained full-rotation CoreShell workflow.
 2. The principal cross-backend primary-time comparison now lives at
    `tests/validation/dev/core_shell_backend_performance/run_primary_backend_speed_comparison.py`
    and emits a combined summary, TSV, and PNG table for the fixed single-energy
