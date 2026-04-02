@@ -2,7 +2,7 @@
 
 This document is the authoritative speed-optimization ledger for `cupy-rsoxs`. It records timing methodology, accepted and rejected experiments, current benchmark authority, and deferred optimization directions.
 
-Stable backend contract and phase-1 behavior live in `CUPY_RSOXS_BACKEND_SPEC.md`. Repo-wide upgrade planning and test-program status live in `REPO_UPGRADE_PLAN.md`.
+Stable backend contract and phase-1 behavior live in `CUPY_RSOXS_BACKEND_SPEC.md`. Repo-wide upgrade planning and test-program status live in `REPO_UPGRADE_PLAN.md`. Path-specific `direct_polarization` optimization notes now live in `CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md`.
 
 ## Current Optimization Guidance And Ledger
 
@@ -14,6 +14,20 @@ recover:
 - the official resident-mode guidance,
 - the optimization campaign strategy,
 - and the work that has already been tried, accepted, or rejected.
+
+### Path-specific companion notes
+
+1. This ledger remains the authoritative backend-wide optimization record.
+2. When one execution path becomes a distinct optimization thread with its own
+   timing caveats and priorities, keep the accepted backend-wide conclusions
+   here and track the path-specific campaign in a companion note.
+3. Current companion note:
+   - `CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md`
+     - current authoritative `direct_polarization` timing surface,
+     - host-resident peak-memory context,
+     - historical execution-path benchmark context transferred from the
+       March 24 campaign,
+     - and the current ranked direct-path speed priorities.
 
 ### Current state and authoritative artifacts
 
@@ -226,7 +240,13 @@ recover:
      remain visibly faster than host-resident staging,
    - default future speed work should focus on Segments `B` and `D` unless new
      timing evidence changes the ranking.
-11. Maintained parity remains a post-optimization check through the test suite
+11. Path-specific follow-up note:
+   - `execution_path='direct_polarization'` is now tracked in
+     `CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md`,
+   - use that companion note for the current authoritative direct-path timing
+     surface, current memory observations, historical execution-path context,
+     and ranked direct-path experiment list.
+12. Maintained parity remains a post-optimization check through the test suite
    rather than through a `cyrsoxs` timing harness.
 
 ### Official resident-mode guidance
@@ -260,6 +280,227 @@ recover:
    - `resident_mode='host'` keeps authoritative morphology fields on CPU,
    - `resident_mode='device'` keeps authoritative morphology fields on GPU
      when the backend supports that mode.
+
+### Memory concerns and March 26, 2026 host-resident comparison probe
+
+1. Recent user feedback raised a different question from the post-run
+   allocator-retention issue:
+   - the main concern is sustained GPU usage during long runs in shared-GPU
+     environments,
+   - the relevant comparison is in-run and mid-run device pressure rather than
+     only post-run cleanup.
+2. Comparison rule for memory claims:
+   - when comparing `cupy-rsoxs` against legacy `cyrsoxs` for GPU-memory
+     footprint, use `resident_mode='host'` for `cupy-rsoxs`,
+   - this is the directly comparable lane because both workflows begin from
+     host-resident authoritative morphology and stage GPU data only for
+     compute,
+   - do not treat `resident_mode='device'` as the fairness authority for
+     cross-backend memory claims, because that lane intentionally keeps the
+     authoritative morphology arrays on GPU and therefore models a different
+     workflow class.
+3. Ad hoc comparison probe run on March 26, 2026:
+   - host machine / device lane:
+     - `CUDA_VISIBLE_DEVICES=0`,
+     - GPU: `Quadro RTX 8000`,
+   - morphology source:
+     - maintained CoreShell helper
+       `tests.validation.lib.core_shell.build_core_shell_morphology(...)`,
+     - `scenario='baseline'`,
+     - shape `SHAPE = (32, 512, 512)`,
+     - `create_cy_object=False`,
+   - run conditions:
+     - single energy set to the midpoint CoreShell energy (`285.0 eV`),
+     - `EAngleRotation=[0.0, 0.0, 0.0]`,
+     - `return_xarray=False`,
+     - `WindowingType=0`,
+   - legacy lane:
+     - `backend='cyrsoxs'`,
+     - authoritative NumPy fields,
+   - host-resident CuPy lane:
+     - `backend='cupy-rsoxs'`,
+     - `resident_mode='host'`,
+     - `input_policy='coerce'`,
+     - `ownership_policy='borrow'`,
+     - `field_namespace='numpy'`,
+   - non-comparable device-resident context lane:
+     - `backend='cupy-rsoxs'`,
+     - `resident_mode='device'`,
+     - `input_policy='strict'`,
+     - `ownership_policy='borrow'`,
+     - `field_namespace='cupy'`,
+   - measurement method:
+     - clear the CuPy default memory pool, pinned pool, and FFT plan cache
+       before the baseline snapshot,
+     - sample `cupy.cuda.runtime.memGetInfo()` every `5 ms` in a side thread
+       during `run(...)`,
+     - for CuPy runs also record post-run `pool.total_bytes()` and
+       `pool.used_bytes()` to separate live arrays from allocator-retained free
+       blocks.
+4. Measured results on this probe:
+   - `cupy-rsoxs` host-resident lane:
+     - baseline driver-used: about `165 MB`,
+     - peak driver-used during `run(...)`: about `1227 MB`,
+     - peak delta versus baseline: about `+1062 MB`,
+     - post-run driver-used before release: about `1227 MB`,
+     - post-run CuPy pool state before release:
+       - `pool.total_bytes() ~= 1056 MB`,
+       - `pool.used_bytes() ~= 5.5 MB`,
+     - post-run after `release_runtime()`:
+       - driver-used fell to about `203 MB`,
+       - interpretation: nearly all of the extra post-run host-lane residency
+         was allocator-retained free memory rather than still-live arrays.
+   - `cyrsoxs` legacy lane:
+     - baseline driver-used: about `165 MB`,
+     - peak driver-used during `run(...)`: about `759 MB`,
+     - peak delta versus baseline: about `+594 MB`,
+     - post-run driver-used: about `171 MB`.
+   - non-comparable device-resident context lane:
+     - baseline driver-used: about `165 MB`,
+     - post-construction driver-used: about `641 MB`,
+     - peak driver-used during `run(...)`: about `1253 MB`,
+     - peak delta versus baseline: about `+1088 MB`,
+     - post-run after `release_runtime()`: about `557 MB`,
+     - interpretation: device-resident mode intentionally retains the
+       authoritative morphology arrays on GPU and should not be used as the
+       fairness baseline versus `cyrsoxs`.
+   - interpretation:
+     - the host-resident `cupy-rsoxs` lane shows a real in-run peak-memory gap
+       versus `cyrsoxs` on this maintained CoreShell case of about `468 MB`,
+     - this gap is therefore not only a post-run allocator-retention artifact,
+     - however the large post-run apparent residency in host mode is still
+       mostly pool-retained free memory and should not be confused with
+       steady-state live arrays.
+5. Current lifetime interpretation from code inspection for
+   `execution_path='tensor_coeff'`:
+   - host-resident staged morphology (`runtime_materials`, including staged
+     `Vfrac`, `S`, `theta`, and `psi`) is created before the per-energy loop
+     and is currently kept alive until the end of the outer run scope,
+   - in the maintained `tensor_coeff` path, those staged morphology arrays are
+     only needed through Segment `B` while `_compute_nt_components(...)` is
+     building `nt`,
+   - after Segment `B`, later Segments `C`, `D`, and `E` operate on `nt`,
+     FFT-domain `nt`, detector/projection geometry, and projection families
+     rather than on the staged morphology fields,
+   - the `nt` buffer allocated in Segment `B` is transformed in place by
+     Segment `C`,
+   - therefore there is no separate real-space `nt` live set after Segment
+     `C`,
+   - the FFT-domain `nt` alias remains needed through Segment `D`,
+   - after Segment `D`, Segment `E` uses `proj_x`, `proj_y`, and `proj_xy`, so
+     `nt` / `fft_nt` is no longer needed,
+   - `proj_x`, `proj_y`, and `proj_xy` are still needed through Segment `E`
+     and are not early-release candidates in this pass.
+6. Resulting memory hypotheses for the maintained `tensor_coeff` host lane:
+   - candidate early release point 1:
+     - drop host-staged `runtime_materials` immediately after Segment `B`,
+     - if the goal is shared-GPU relief rather than same-process reuse, pair
+       that drop with an explicit
+       `cp.cuda.Stream.null.synchronize()` plus pool trim
+       (`cp.get_default_memory_pool().free_all_blocks()` and
+       `cp.get_default_pinned_memory_pool().free_all_blocks()`) rather than
+       relying on Python scope exit alone.
+   - candidate early release point 2:
+     - drop `nt` / FFT-domain `nt` immediately after Segment `D` and before
+       Segment `E`,
+     - again treat allocator trimming as a separate experimental control rather
+       than assuming reference deletion alone will return memory to other
+       processes.
+7. Tensor-coeff-only experiment plan for the next memory pass:
+   - scope rule:
+     - limit the pass to `execution_path='tensor_coeff'`,
+     - do not broaden this pass to `direct_polarization` or
+       `nt_polarization`,
+     - keep host-resident `cupy-rsoxs` as the comparison authority against
+       legacy `cyrsoxs`.
+   - baseline measurement:
+     - rerun the March 26 small single-energy no-rotation host lane with the
+       current code,
+     - record:
+       - primary wall time,
+       - segments `B`, `C`, `D`, and `E`,
+       - peak driver-used memory,
+       - explicit snapshots immediately after Segment `B`, immediately after
+         Segment `D`, and after `run(...)`,
+       - CuPy `pool.total_bytes()` and `pool.used_bytes()` at the same
+         checkpoints when available.
+   - experiment `mem01_drop_runtime_materials_no_trim`:
+     - delete / release `runtime_materials` immediately after Segment `B`,
+     - do not synchronize or trim the pool,
+     - purpose:
+       - distinguish same-process allocator reuse from actual driver-visible
+         memory return.
+   - experiment `mem02_drop_runtime_materials_sync_only`:
+     - delete `runtime_materials` after Segment `B`,
+     - explicitly call `cp.cuda.Stream.null.synchronize()`,
+     - do not trim the pool,
+     - purpose:
+       - test whether queued work or stream semantics are hiding the usable
+         lifetime boundary.
+   - experiment `mem03_drop_runtime_materials_sync_free_pool`:
+     - delete `runtime_materials` after Segment `B`,
+     - call `cp.cuda.Stream.null.synchronize()`,
+     - call `cp.get_default_memory_pool().free_all_blocks()` and
+       `cp.get_default_pinned_memory_pool().free_all_blocks()`,
+     - purpose:
+       - test whether the long `C` / `D` / `E` window can materially reduce
+         driver-visible memory in shared-GPU conditions,
+       - quantify the latency penalty of the synchronize plus trim boundary.
+   - experiment `mem04_drop_fft_nt_no_trim`:
+     - delete `nt` / FFT-domain `nt` immediately after Segment `D`,
+     - do not synchronize or trim the pool,
+     - purpose:
+       - distinguish same-process allocator reuse from actual driver-visible
+         memory return in the `D -> E` boundary.
+   - experiment `mem05_drop_fft_nt_sync_only`:
+     - delete `nt` / FFT-domain `nt` after Segment `D`,
+     - call `cp.cuda.Stream.null.synchronize()`,
+     - do not trim the pool,
+     - purpose:
+       - test whether queued work delays the usable release boundary after
+         Segment `D`.
+   - experiment `mem06_drop_fft_nt_sync_free_pool`:
+     - delete `nt` / FFT-domain `nt` after Segment `D`,
+     - call `cp.cuda.Stream.null.synchronize()`,
+     - call `cp.get_default_memory_pool().free_all_blocks()` and
+       `cp.get_default_pinned_memory_pool().free_all_blocks()`,
+     - purpose:
+       - measure whether Segment `E` can run with materially lower
+         driver-visible memory,
+       - quantify the latency penalty of the `D -> E` synchronize plus trim
+         boundary.
+   - experiment `mem07_combined_low_memory_tensor_coeff`:
+     - combine the best-performing Segment `B` and Segment `D` early-release
+       candidates in one host-resident `tensor_coeff` run,
+     - measure whether the combined strategy reduces the long-lived footprint
+       enough to matter on shared GPUs without an unacceptable primary-time
+       regression.
+   - escalation rule:
+     - only if a small-case host result is promising, repeat the winning
+       candidate on:
+       - the `medium` single-energy host lane,
+       - and one explicit general-angle host lane such as
+         `EAngleRotation=[0, 15, 165]`,
+     - keep `cyrsoxs` comparison on the same host-authoritative single-energy
+       lane rather than comparing device-resident `cupy-rsoxs` against legacy.
+8. Acceptance criteria for this memory pass:
+   - prioritize sustained driver-visible memory reduction during the long later
+     segments rather than post-run cleanup alone,
+   - require the comparison table to show both:
+     - memory effect:
+       - peak driver-used delta,
+       - after-`B` and after-`D` driver-used deltas,
+       - and post-run driver-used / pool totals for interpretation,
+     - time effect:
+       - primary wall time,
+       - and segment deltas around the inserted synchronize / trim points,
+   - if a candidate only moves pool-retained free memory without materially
+     lowering driver-visible usage during the later segments, treat it as
+     insufficient for the shared-GPU problem,
+   - if a candidate materially lowers sustained driver-visible usage but
+     regresses primary time too heavily, record it and reject it or keep it as
+     an opt-in low-memory policy rather than silently adopting it as the
+     default.
 
 ### Optimization campaign strategy going forward
 

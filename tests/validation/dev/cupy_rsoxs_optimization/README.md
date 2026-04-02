@@ -79,6 +79,12 @@ Current contents:
 - `run_cupy_rsoxs_optimization_matrix_legacy_pre_isotropic_contract.py`
   - frozen pre-enum snapshot of the timing harness kept so the older CLI and
     case-construction behavior remain available unchanged if needed.
+- `../../../CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md`
+  - path-specific optimization note for
+    `execution_path='direct_polarization'`,
+  - keeps the direct-path timing history, current bottleneck interpretation,
+    and ranked next experiments separate from the maintained backend-wide
+    ledger.
 
 Recommended workflow:
 
@@ -87,6 +93,13 @@ Segment `A` is nominally complete for the common workflow.
 - `resident_mode='device'` is expected to be faster when morphology fields
   already live on GPU, and that distinction should remain visible in the
   timing results.
+- For cross-backend GPU-memory comparisons against legacy `cyrsoxs`, use the
+  host-resident `cupy-rsoxs` lane as the comparison authority.
+  `resident_mode='device'` is a different workflow class because it keeps the
+  authoritative morphology arrays on GPU.
+- The March 26, 2026 host-vs-legacy memory probe and the tensor-coeff-only
+  early-release experiment plan live in
+  `CUPY_RSOXS_OPTIMIZATION_LEDGER.md`.
 - Repeated-run host-resident staging reuse inside the backend remains only a
   low-priority niche future idea.
 - If the goal is to model many morphologies inside one already-warm subprocess,
@@ -99,6 +112,12 @@ Segment `A` is nominally complete for the common workflow.
     them as optimization guidance,
   - treat future float16 work as orthogonal to execution path rather than as a
     replacement for it.
+- Current path-specific follow-up note:
+  - use `CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md` for the current
+    `direct_polarization` authority surface and next-ranked direct-path speed
+    work,
+  - keep `CUPY_RSOXS_OPTIMIZATION_LEDGER.md` as the backend-wide authority and
+    the maintained `tensor_coeff` optimization ledger.
 - Current Segment `D` continuation focus for the next pass:
   - use `execution_path='tensor_coeff'` as the maintained default target,
   - use device-resident timing only for the inner-loop ranking pass,

@@ -13,6 +13,9 @@ Related planning documents:
 - `CUPY_RSOXS_OPTIMIZATION_LEDGER.md`
   - timing methodology, resident-mode benchmark interpretation, and accepted or
     rejected optimization experiments
+- `CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md`
+  - path-specific optimization note for
+    `execution_path='direct_polarization'`
 
 ## Current Backend Reality and Scope
 

@@ -457,6 +457,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 angle_family_plan=angle_family_plan,
             ),
         )
+        del nt, fft_nt
         angle_projections = recorder.measure(
             "E",
             lambda: self._rotate_and_accumulate_projection_coefficients(
@@ -469,7 +470,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 angle_family_plan=angle_family_plan,
             ),
         )
-        del nt, fft_nt, proj_x, proj_y, proj_xy
+        del proj_x, proj_y, proj_xy
         return angle_projections
 
     def _run_single_energy_nt_polarization(
