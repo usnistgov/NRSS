@@ -178,3 +178,34 @@ def test_core_shell_sim_regression_cupy_borrow_strict(nrss_backend):
 
     if not passed:
         raise AssertionError("; ".join(failures))
+
+
+@pytest.mark.gpu
+@pytest.mark.slow
+@pytest.mark.backend_specific
+@pytest.mark.reference_parity
+def test_core_shell_sim_regression_cupy_direct_polarization_borrow_strict(nrss_backend):
+    """
+    Compare the maintained CuPy borrowed direct_polarization CoreShell workflow
+    to the local sim-derived regression golden.
+    """
+    if not has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for CoreShell direct-path validation.")
+    if nrss_backend != "cupy-rsoxs":
+        pytest.skip("CoreShell direct-path validation is only applicable to cupy-rsoxs.")
+
+    awedge = _baseline_awedge(
+        "cupy-rsoxs",
+        "device",
+        "strict",
+        "borrow",
+        "cupy",
+        backend_options_items=(("execution_path", "direct_polarization"),),
+    )
+    reference = load_sim_reference_awedge()
+    comparison = awedge_comparison_slices(awedge=awedge, reference=reference)
+    metrics = compute_awedge_metrics(comparison)
+    passed, failures = metrics_within_thresholds(metrics, SIM_THRESHOLDS)
+
+    if not passed:
+        raise AssertionError("; ".join(failures))

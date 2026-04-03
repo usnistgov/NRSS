@@ -1162,25 +1162,81 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 del isotropic_term
                 continue
 
-            phi_a = vfrac * material.S
-            sx, sy, sz = self._orientation_components(material, cp)
-            if angle_plan.family == "x":
-                field_projection = sx * mx
-            elif angle_plan.family == "y":
-                field_projection = sy * my
-            else:
-                field_projection = sx * mx + sy * my
-
-            p_x += phi_a * (mx * aligned_base + anisotropic_delta * sx * field_projection)
-            p_y += phi_a * (my * aligned_base + anisotropic_delta * sy * field_projection)
-            p_z += phi_a * anisotropic_delta * sz * field_projection
-
-            del isotropic_term, phi_a, sx, sy, sz, field_projection
+            self._direct_generic_kernel(cp)(
+                ((vfrac.size + 255) // 256,),
+                (256,),
+                (
+                    vfrac,
+                    material.S,
+                    material.theta,
+                    material.psi,
+                    aligned_base,
+                    anisotropic_delta,
+                    np.float32(mx),
+                    np.float32(my),
+                    p_x,
+                    p_y,
+                    p_z,
+                    np.uint64(vfrac.size),
+                ),
+            )
+            del isotropic_term
 
         p_x *= self._one_by_four_pi
         p_y *= self._one_by_four_pi
         p_z *= self._one_by_four_pi
         return p_x, p_y, p_z
+
+    def _direct_generic_kernel(self, cp):
+        kernel = _CUPY_KERNEL_CACHE.get("direct_polarization_generic_complex64")
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            r"""
+            extern "C" __global__
+            void direct_polarization_generic_complex64(
+                const float* vfrac,
+                const float* s,
+                const float* theta,
+                const float* psi,
+                const float2 aligned_base,
+                const float2 anisotropic_delta,
+                const float mx,
+                const float my,
+                float2* p_x,
+                float2* p_y,
+                float2* p_z,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+
+                const float phi = vfrac[idx] * s[idx];
+                const float theta_i = theta[idx];
+                const float psi_i = psi[idx];
+                const float sin_theta = sinf(theta_i);
+                const float sx = cosf(psi_i) * sin_theta;
+                const float sy = sinf(psi_i) * sin_theta;
+                const float sz = cosf(theta_i);
+                const float field_projection = sx * mx + sy * my;
+
+                p_x[idx].x += phi * (mx * aligned_base.x + anisotropic_delta.x * sx * field_projection);
+                p_x[idx].y += phi * (mx * aligned_base.y + anisotropic_delta.y * sx * field_projection);
+                p_y[idx].x += phi * (my * aligned_base.x + anisotropic_delta.x * sy * field_projection);
+                p_y[idx].y += phi * (my * aligned_base.y + anisotropic_delta.y * sy * field_projection);
+                p_z[idx].x += phi * (anisotropic_delta.x * sz * field_projection);
+                p_z[idx].y += phi * (anisotropic_delta.y * sz * field_projection);
+            }
+            """,
+            "direct_polarization_generic_complex64",
+        )
+        _CUPY_KERNEL_CACHE["direct_polarization_generic_complex64"] = kernel
+        return kernel
 
     def _projection_from_polarization(self, morphology, energy, cp, p_x, p_y, p_z, window):
         fft_x, fft_y, fft_z = self._fft_polarization_fields(

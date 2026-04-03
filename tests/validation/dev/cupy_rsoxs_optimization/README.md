@@ -74,6 +74,12 @@ Current contents:
     - device-resident cases record this as redundant because that lane already
       touches CuPy before `primary_start`,
     - the prewarm mode does not change allocator/pool refresh behavior,
+  - supports a dev-only fully-hot worker mode via `--worker-warmup-runs`:
+    - each worker subprocess performs the requested number of untimed
+      identical warm-up runs before the timed boundary,
+    - use this only for kernel-heavy studies where first-use compile/load
+      cost would otherwise contaminate the timing readout,
+    - keep `--worker-warmup-runs 0` as the cold-subprocess authority path,
   - runs each benchmark case in a subprocess so crashes or OOMs are isolated to
     the individual case.
 - `run_cupy_rsoxs_optimization_matrix_legacy_pre_isotropic_contract.py`
@@ -105,6 +111,9 @@ Segment `A` is nominally complete for the common workflow.
 - If the goal is to model many morphologies inside one already-warm subprocess,
   use `--cuda-prewarm before_prepare_inputs` in this dev harness rather than
   changing backend residency or pool-refresh behavior.
+- If the candidate uses custom kernels, add `--worker-warmup-runs 1` before
+  judging steady-state speed so first-use compile/load cost is measured
+  separately from the maintained cold-subprocess surface.
 - Current Segment `B` / `D` campaign focus:
   - establish execution-path baselines before changing math,
   - keep timing results execution-path-specific,

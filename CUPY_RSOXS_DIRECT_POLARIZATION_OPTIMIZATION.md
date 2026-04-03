@@ -531,6 +531,265 @@ Interpretation:
 3. and repair or explicitly select a working CUDA/NVRTC runtime before the
    next optimization pass.
 
+### April 3 2026 progress update
+
+Current status after resuming work on April 3, 2026:
+
+1. the April 2 runtime blocker is no longer active:
+   - `/home/deand/mambaforge/envs/nrss-dev/bin/python`
+   - CuPy `14.0.1`
+   - three visible Quadro RTX 8000 GPUs
+   - tiny CuPy arithmetic plus a tiny JIT-backed `ElementwiseKernel` probe
+     both succeeded in `nrss-dev`
+2. the dev harness now has a fully-hot measurement mode:
+   - `--worker-warmup-runs N`
+   - this keeps the existing cold-subprocess authority path unchanged at
+     `N=0`
+   - for kernel-heavy experiments, `N=1` performs one untimed identical warm-up
+     run inside the worker subprocess before the timed boundary
+3. maintained CoreShell sim-regression coverage for
+   `backend_options={'execution_path': 'direct_polarization'}` has been wired
+   into `tests/validation/test_core_shell_reference.py`
+   - the maintained direct-path gate now targets the device-resident borrowed
+     CuPy CoreShell surface because the host-resident direct-path regression
+     was too slow to use as a practical iterative acceptance command
+4. current policy for this direct-path pass is stricter than the April 2 retry
+   list:
+   - keep `direct_polarization` low-memory by default
+   - defer any experiment that caches `3D` or larger arrays, including
+     `phi_a`, `sx/sy/sz`, or fuller multi-angle volume caches
+   - keep custom kernels in scope
+
+### April 3 2026 first A/B experiment
+
+Experiment:
+
+1. narrowed item `1`
+   - pre-split isotropic versus anisotropic materials once per run
+   - precompute per-energy optical scalars once per energy
+   - no `3D` cache added
+
+Same-GPU A/B artifacts on `CUDA_VISIBLE_DEVICES=2`:
+
+1. baseline cold:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_ab_baseline_cold_gpu2_seq_20260403/summary.json`
+2. experiment cold:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_ab_exp1_cold_gpu2_seq_20260403/summary.json`
+3. baseline hot:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_ab_baseline_hot_gpu2_seq_20260403/summary.json`
+4. experiment hot:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_ab_exp1_hot_gpu2_seq_20260403/summary.json`
+
+Measured outcome:
+
+1. cold no-rotation lane:
+   - `primary 0.197 s -> 0.208 s`
+   - regression of about `+5.6%`
+2. cold `0:5:165` lane:
+   - `primary 1.236 s -> 1.229 s`
+   - effectively flat at about `-0.6%`
+3. hot no-rotation lane:
+   - `primary 0.118 s -> 0.117 s`
+   - effectively flat at about `-0.8%`
+4. hot `0:5:165` lane:
+   - `primary 1.148 s -> 1.135 s`
+   - effectively flat at about `-1.1%`
+5. hot `B` segment on `0:5:165`:
+   - `0.725 s -> 0.725 s`
+   - no meaningful change
+
+Disposition:
+
+1. reject the narrowed item `1` experiment
+2. keep the backend code at the pre-experiment direct-path baseline
+3. do not spend more time on pure scalar-hoist / material-split refactors
+   unless a later kernel rewrite can reuse them as scaffolding
+4. next active speed candidate under the current low-memory policy is:
+   - fully fused Segment `B` custom-kernel work measured on the fully-hot
+     harness surface
+
+### April 3 2026 second A/B experiment
+
+Experiment:
+
+1. detector-plane direct projection path for Segment `D`
+   - direct-path-only rewrite
+   - no `3D` cache added
+   - bypass full `scatter3d` materialization in the direct path
+
+Same-GPU A/B artifacts on `CUDA_VISIBLE_DEVICES=2`:
+
+1. baseline cold:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_ab_baseline_cold_gpu2_seq_20260403/summary.json`
+2. experiment cold:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_cand_d_directproj_cold_gpu2_seq_20260403/summary.json`
+3. baseline hot:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_ab_baseline_hot_gpu2_seq_20260403/summary.json`
+4. experiment hot:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_cand_d_directproj_hot_gpu2_seq_20260403/summary.json`
+
+Measured outcome:
+
+1. cold no-rotation lane:
+   - `primary 0.197 s -> 0.202 s`
+   - regression of about `+2.5%`
+2. cold `0:5:165` lane:
+   - `primary 1.236 s -> 1.232 s`
+   - effectively flat at about `-0.3%`
+3. hot no-rotation lane:
+   - `primary 0.118 s -> 0.121 s`
+   - regression of about `+2.5%`
+4. hot `0:5:165` lane:
+   - `primary 1.148 s -> 1.156 s`
+   - regression of about `+0.7%`
+5. hot `D` segment on `0:5:165`:
+   - `0.223 s -> 0.229 s`
+   - regression of about `+2.7%`
+
+Disposition:
+
+1. reject the detector-plane direct projection experiment
+2. keep the backend code at the pre-experiment direct-path baseline
+3. do not spend more time on detector-plane `D` work for `direct_polarization`
+   unless a materially different formulation is available
+4. next active low-memory candidates remain:
+   - aligned-family custom kernels for Segment `B`
+   - generic fused Segment `B` custom-kernel work
+
+### April 3 2026 third A/B experiment
+
+Experiment:
+
+1. aligned-family custom kernels for Segment `B`
+   - direct-path-only raw-kernel rewrite for aligned `x` / `y` families
+   - general-angle route kept on the existing Python/CuPy path
+   - no `3D` cache added
+
+Same-GPU A/B artifacts on `CUDA_VISIBLE_DEVICES=2`:
+
+1. baseline cold:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_ab_baseline_cold_gpu2_seq_20260403/summary.json`
+2. experiment cold:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_cand_b_alignedkernel_cold_gpu2_seq_20260403/summary.json`
+3. baseline hot:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_ab_baseline_hot_gpu2_seq_20260403/summary.json`
+4. experiment hot:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_cand_b_alignedkernel_hot_gpu2_seq_20260403/summary.json`
+
+Measured outcome:
+
+1. cold no-rotation lane:
+   - `primary 0.197 s -> 0.258 s`
+   - regression of about `+31.0%`
+2. cold `0:5:165` lane:
+   - `primary 1.236 s -> 1.282 s`
+   - regression of about `+3.7%`
+3. hot no-rotation lane:
+   - `primary 0.118 s -> 0.108 s`
+   - improvement of about `-8.5%`
+4. hot `0:5:165` lane:
+   - `primary 1.148 s -> 1.125 s`
+   - improvement of about `-2.0%`
+5. hot `B` segment on no-rotation:
+   - `0.021 s -> 0.007 s`
+   - improvement of about `-66.7%`
+6. hot `B` segment on `0:5:165`:
+   - `0.725 s -> 0.697 s`
+   - improvement of about `-3.9%`
+
+Disposition:
+
+1. reject the aligned-family kernel experiment as a default-path change
+2. reason:
+   - it is a real fully-hot no-rotation win,
+   - but it regresses the maintained cold authority lane badly enough that it
+     does not qualify for unconditional adoption
+3. no parity run was used for acceptance because the timing gate already failed
+   for the maintained default surface
+4. this remains useful evidence that fused direct-path kernels can pay off once
+   compile/load cost is isolated or amortized
+5. next active candidate:
+   - generic fused Segment `B` custom-kernel work
+
+### April 3 2026 fourth A/B experiment
+
+Experiment:
+
+1. generic fused Segment `B` custom-kernel rewrite
+   - direct-path-only raw-kernel rewrite for the anisotropic contribution
+   - no `3D` cache added
+   - isotropic terms remain on the existing path
+
+Same-GPU A/B artifacts on `CUDA_VISIBLE_DEVICES=2`:
+
+1. baseline cold:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_ab_baseline_cold_gpu2_seq_20260403/summary.json`
+2. experiment cold:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_cand_b_generickernel_cold_gpu2_seq_20260403/summary.json`
+3. baseline hot:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_ab_baseline_hot_gpu2_seq_20260403/summary.json`
+4. experiment hot:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_cand_b_generickernel_hot_gpu2_seq_20260403/summary.json`
+
+Measured outcome:
+
+1. cold no-rotation lane:
+   - `primary 0.197 s -> 0.261 s`
+   - regression of about `+32.5%`
+2. cold `0:5:165` lane:
+   - `primary 1.236 s -> 0.786 s`
+   - improvement of about `-36.4%`
+3. hot no-rotation lane:
+   - `primary 0.118 s -> 0.108 s`
+   - improvement of about `-8.5%`
+4. hot `0:5:165` lane:
+   - `primary 1.148 s -> 0.701 s`
+   - improvement of about `-38.9%`
+5. hot `B` segment on `0:5:165`:
+   - `0.725 s -> 0.275 s`
+   - improvement of about `-62.1%`
+
+Parity evidence used for this pass:
+
+1. maintained isotropic execution-path smoke:
+   - `pytest tests/smoke/test_smoke.py -k "test_cupy_execution_paths_and_isotropic_representations_match_on_fully_isotropic_morphology" -v`
+   - passed
+2. new anisotropic execution-path smoke:
+   - `pytest tests/smoke/test_smoke.py -k "test_cupy_direct_polarization_matches_tensor_coeff_on_anisotropic_sphere" -v`
+   - passed
+   - covers both `EAngleRotation=[0, 0, 0]` and `EAngleRotation=[0, 5, 165]`
+3. additional CoreShell helper comparison against `tensor_coeff` on the active
+   timing surface:
+   - no-rotation:
+     - `max_abs 0.046875`
+     - `max_rel ~= 5.36e-05`
+     - `mean_abs ~= 1.71e-06`
+   - `0:5:165`:
+     - `max_abs 0.03125`
+     - `max_rel ~= 2.15e-06`
+     - `mean_abs ~= 1.48e-06`
+4. note on the slower maintained direct-path CoreShell regression:
+   - the dedicated pytest-facing direct-path sim-regression hook is wired, but
+     remained too slow to serve as a practical iterative acceptance command
+     during this pass
+
+Disposition:
+
+1. accept the generic fused Segment `B` custom-kernel rewrite
+2. reason:
+   - it exceeds the `5%` speed gate decisively on the maintained
+     host-prewarmed `0:5:165` lane,
+   - it also improves the fully-hot no-rotation lane,
+   - and the parity evidence above did not reveal a meaningful physics drift
+3. interpretation:
+   - this is an accepted `0:5:165`-oriented speed win for the low-memory
+     direct path,
+   - it is not a clean cold no-rotation win because first-use compile/load
+     cost is still visible there
+4. current next-step implication:
+   - with this kernel accepted, no higher-priority low-memory direct-path
+     candidate remains from the current list
+
 ### Revised retry order for the next pass
 
 The next retry should use the following order.

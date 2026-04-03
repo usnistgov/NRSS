@@ -26,8 +26,20 @@ recover:
      - current authoritative `direct_polarization` timing surface,
      - host-resident peak-memory context,
      - historical execution-path benchmark context transferred from the
-       March 24 campaign,
+      March 24 campaign,
      - and the current ranked direct-path speed priorities.
+4. Latest backend-wide direct-path cross-reference:
+   - April 3, 2026 accepted a fused custom-kernel Segment `B` rewrite for
+     `execution_path='direct_polarization'`
+   - accepted lane:
+     - small host-prewarmed `EAngleRotation=[0, 5, 165]`
+   - accepted evidence lives in:
+     - `CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md`
+   - interpretation:
+     - this materially improves the maintained multi-angle direct-path timing
+       surface while preserving the low-memory identity of that path,
+     - but it does not replace `tensor_coeff` as the maintained default
+       execution path
 
 ### Current state and authoritative artifacts
 

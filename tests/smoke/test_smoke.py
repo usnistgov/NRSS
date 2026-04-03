@@ -1250,6 +1250,47 @@ def test_cupy_execution_paths_and_isotropic_representations_match_on_fully_isotr
 
 
 @pytest.mark.gpu
+def test_cupy_direct_polarization_matches_tensor_coeff_on_anisotropic_sphere():
+    """Ensure direct_polarization remains numerically aligned with tensor_coeff on a small anisotropic sphere."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for anisotropic execution-path comparison.")
+
+    for eangle_rotation in ([0.0, 0.0, 0.0], [0.0, 5.0, 165.0]):
+        outputs = {}
+        for execution_path in ("tensor_coeff", "direct_polarization"):
+            morph = None
+            try:
+                morph = _build_two_material_sphere_morphology(
+                    energies=[285.0],
+                    eangle_rotation=eangle_rotation,
+                    backend="cupy-rsoxs",
+                    backend_options={"execution_path": execution_path},
+                    resident_mode="host",
+                    input_policy="strict",
+                    ownership_policy="borrow",
+                )
+                outputs[execution_path] = morph.run(
+                    stdout=False,
+                    stderr=False,
+                    return_xarray=True,
+                ).values.copy()
+            finally:
+                if morph is not None:
+                    try:
+                        morph.release_runtime()
+                    except Exception:
+                        pass
+                _release_cupy_memory()
+
+        np.testing.assert_allclose(
+            outputs["direct_polarization"],
+            outputs["tensor_coeff"],
+            rtol=1e-4,
+            atol=5e-2,
+        )
+
+
+@pytest.mark.gpu
 def test_cupy_private_segment_timing_is_opt_in_and_subsettable():
     """Ensure cupy-rsoxs segment timing is disabled by default and records only requested segments."""
     cp = _import_cupy_required()
@@ -2260,6 +2301,11 @@ def _build_two_material_sphere_morphology(
     sphere_diameter_vox: int = 16,
     eangle_rotation: list[float] | None = None,
     config_overrides: dict | None = None,
+    backend: str = "cyrsoxs",
+    backend_options: dict | None = None,
+    resident_mode: str | None = None,
+    input_policy: str = "coerce",
+    ownership_policy: str | None = None,
 ) -> Morphology:
     zz, yy, xx = np.indices(shape)
     cz = (shape[0] - 1) / 2.0
@@ -2325,6 +2371,11 @@ def _build_two_material_sphere_morphology(
         PhysSize=5.0,
         config=config,
         create_cy_object=True,
+        backend=backend,
+        backend_options=backend_options,
+        resident_mode=resident_mode,
+        input_policy=input_policy,
+        ownership_policy=ownership_policy,
     )
     morph.check_materials(quiet=True)
     morph.validate_all(quiet=True)

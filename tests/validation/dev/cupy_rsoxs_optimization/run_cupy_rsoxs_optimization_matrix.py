@@ -94,6 +94,7 @@ class BenchmarkCase:
     backend_options: dict[str, Any] | None = None
     timing_segments: tuple[str, ...] = ()
     create_cy_object: bool = True
+    worker_warmup_runs: int = 0
     validation_baseline_name: str | None = None
     notes: str | None = None
 
@@ -281,6 +282,16 @@ def _parse_cuda_prewarm_mode(raw: str) -> str:
             f"Unsupported cuda_prewarm {raw!r}. Valid values: {CUDA_PREWARM_MODES!r}."
         )
     return cleaned
+
+
+def _parse_worker_warmup_runs(raw: int) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(f"worker_warmup_runs must be an integer, got {raw!r}.") from exc
+    if value < 0:
+        raise SystemExit(f"worker_warmup_runs must be non-negative, got {value!r}.")
+    return value
 
 
 def _resolve_core_shell_energy(value: float, *, available: tuple[float, ...]) -> float:
@@ -929,6 +940,59 @@ def _synchronize_cupy_default_stream() -> None:
     cp.cuda.Stream.null.synchronize()
 
 
+def _run_case_once(
+    *,
+    case: BenchmarkCase,
+    prepared_inputs: dict[str, Any],
+    collect_timing: bool,
+) -> dict[str, Any]:
+    morphology = None
+    backend_result = None
+    try:
+        start_time = time.perf_counter() if collect_timing else None
+        morphology = _construct_morphology_for_timing_case(case, prepared_inputs)
+        run_result: dict[str, Any] = {
+            "resolved_backend_options": dict(morphology.backend_options),
+        }
+        if collect_timing:
+            segment_seconds: dict[str, float] = {}
+            if "A1" in case.timing_segments and start_time is not None:
+                segment_seconds["A1"] = time.perf_counter() - start_time
+
+            morphology._set_private_backend_timing_segments(case.timing_segments)
+
+        backend_result = morphology.run(stdout=False, stderr=False, return_xarray=False)
+        _synchronize_cupy_default_stream()
+
+        if collect_timing:
+            backend_timings = morphology.backend_timings
+            if backend_timings:
+                segment_seconds.update(backend_timings.get("segment_seconds", {}))
+
+            run_result.update(
+                primary_seconds=time.perf_counter() - start_time,
+                segment_seconds={
+                    segment: float(segment_seconds[segment])
+                    for segment in TIMING_SEGMENTS
+                    if segment in segment_seconds
+                },
+                backend_timing_details=backend_timings,
+            )
+        run_result["panel_shape"] = list(backend_result.to_backend_array().shape)
+        return run_result
+    finally:
+        if morphology is not None:
+            try:
+                morphology._clear_private_backend_timing_segments()
+            except Exception:
+                pass
+            try:
+                morphology.release_runtime()
+            except Exception:
+                pass
+        del backend_result, morphology
+
+
 def _worker_main(case_path: Path, result_path: Path) -> int:
     case = BenchmarkCase(**json.loads(case_path.read_text()))
     result: dict[str, Any] = {
@@ -948,6 +1012,7 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         "timing_segments_requested": list(case.timing_segments),
         "timing_boundary": PRIMARY_TIMING_BOUNDARY,
         "note": _case_note(case),
+        "worker_warmup_runs_requested": int(case.worker_warmup_runs),
         "status": "error",
     }
 
@@ -971,29 +1036,31 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         if case.field_namespace == "cupy":
             _synchronize_cupy_default_stream()
 
-        primary_start = time.perf_counter()
-        morphology = _construct_morphology_for_timing_case(case, prepared_inputs)
-        result["resolved_backend_options"] = dict(morphology.backend_options)
-        segment_seconds: dict[str, float] = {}
-        if "A1" in case.timing_segments:
-            segment_seconds["A1"] = time.perf_counter() - primary_start
+        warmup_seconds_total = 0.0
+        warmup_runs_completed = 0
+        for _ in range(case.worker_warmup_runs):
+            warmup_started = time.perf_counter()
+            warmup_result = _run_case_once(
+                case=case,
+                prepared_inputs=prepared_inputs,
+                collect_timing=False,
+            )
+            warmup_seconds_total += time.perf_counter() - warmup_started
+            warmup_runs_completed += 1
+            if "resolved_backend_options" not in result:
+                result["resolved_backend_options"] = warmup_result["resolved_backend_options"]
+            del warmup_result
 
-        morphology._set_private_backend_timing_segments(case.timing_segments)
-        backend_result = morphology.run(stdout=False, stderr=False, return_xarray=False)
-        _synchronize_cupy_default_stream()
+        result["worker_warmup_runs_completed"] = warmup_runs_completed
+        if warmup_runs_completed:
+            result["worker_warmup_seconds_total"] = warmup_seconds_total
 
-        backend_timings = morphology.backend_timings
-        if backend_timings:
-            segment_seconds.update(backend_timings.get("segment_seconds", {}))
-
-        result["primary_seconds"] = time.perf_counter() - primary_start
-        result["segment_seconds"] = {
-            segment: float(segment_seconds[segment])
-            for segment in TIMING_SEGMENTS
-            if segment in segment_seconds
-        }
-        result["backend_timing_details"] = backend_timings
-        result["panel_shape"] = list(backend_result.to_backend_array().shape)
+        timed_result = _run_case_once(
+            case=case,
+            prepared_inputs=prepared_inputs,
+            collect_timing=True,
+        )
+        result.update(timed_result)
         result["status"] = "ok"
 
     except BaseException as exc:  # noqa: BLE001 - worker must serialize failures
@@ -1086,6 +1153,7 @@ def _timing_cases(
     no_rotation_energy_counts: tuple[int, ...],
     rotation_specs: tuple[tuple[float, float, float], ...],
     energy_lists: tuple[tuple[float, ...], ...],
+    worker_warmup_runs: int,
 ) -> list[BenchmarkCase]:
     cases: list[BenchmarkCase] = []
     include_representation_in_label = (
@@ -1126,6 +1194,7 @@ def _timing_cases(
                             ownership_policy=variant.ownership_policy,
                             backend_options=backend_options,
                             timing_segments=timing_segments,
+                            worker_warmup_runs=worker_warmup_runs,
                             notes=notes,
                         )
                     )
@@ -1301,6 +1370,7 @@ def run_matrix(args: argparse.Namespace) -> int:
     no_rotation_energy_counts = _parse_positive_int_csv(args.no_rotation_energy_counts)
     rotation_specs = _parse_rotation_specs(args.rotation_specs)
     energy_lists = _parse_energy_lists(args.energy_lists)
+    worker_warmup_runs = _parse_worker_warmup_runs(args.worker_warmup_runs)
 
     run_dir = OUT_ROOT / run_label
     output_dir = run_dir / "cases"
@@ -1311,6 +1381,7 @@ def run_matrix(args: argparse.Namespace) -> int:
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
         "timing_boundary": PRIMARY_TIMING_BOUNDARY,
         "timing_segments": list(timing_segments),
+        "worker_warmup_runs": worker_warmup_runs,
         "resident_modes": list(resident_modes),
         "isotropic_material_representations": list(isotropic_representations),
         "cuda_prewarm_mode": cuda_prewarm_mode,
@@ -1342,6 +1413,7 @@ def run_matrix(args: argparse.Namespace) -> int:
         no_rotation_energy_counts=no_rotation_energy_counts,
         rotation_specs=rotation_specs,
         energy_lists=energy_lists,
+        worker_warmup_runs=worker_warmup_runs,
     ):
         result = _run_case_subprocess(case=case, output_dir=output_dir)
         summary["timing_cases"][case.label] = result
@@ -1412,6 +1484,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Comma-separated timing segments to record, or 'all'. "
             "Supported segments: A1,A2,B,C,D,E,F. Alias 'A' expands to A1,A2."
+        ),
+    )
+    parser.add_argument(
+        "--worker-warmup-runs",
+        type=int,
+        default=0,
+        help=(
+            "Development-only fully-hot mode. Run this many untimed identical warm-up passes "
+            "inside each worker subprocess before the timed boundary. Default: 0."
         ),
     )
     parser.add_argument(
