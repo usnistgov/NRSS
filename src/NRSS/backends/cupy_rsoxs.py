@@ -396,16 +396,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 window=window,
                 recorder=recorder,
             )
-        if execution_path == "nt_polarization":
-            return self._run_single_energy_nt_polarization(
-                morphology=morphology,
-                runtime_materials=runtime_materials,
-                energy=energy,
-                cp=cp,
-                ndimage=ndimage,
-                window=window,
-                recorder=recorder,
-            )
         if execution_path == "direct_polarization":
             return self._run_single_energy_direct_polarization(
                 morphology=morphology,
@@ -471,39 +461,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             ),
         )
         del proj_x, proj_y, proj_xy
-        return angle_projections
-
-    def _run_single_energy_nt_polarization(
-        self,
-        morphology,
-        runtime_materials,
-        energy,
-        cp,
-        ndimage,
-        window,
-        recorder,
-    ):
-        angle_family_plan = self._angle_family_plan(morphology)
-        nt = recorder.measure(
-            "B",
-            lambda: self._compute_nt_components(
-                runtime_materials,
-                energy,
-                cp,
-                required_components=angle_family_plan.required_nt_components,
-            ),
-        )
-        angle_projections = self._project_from_nt(
-            morphology=morphology,
-            energy=energy,
-            cp=cp,
-            ndimage=ndimage,
-            nt=nt,
-            window=window,
-            angle_family_plan=angle_family_plan,
-            recorder=recorder,
-        )
-        del nt
         return angle_projections
 
     def _run_single_energy_direct_polarization(
@@ -740,63 +697,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             del phi_a, sx, sy, sz
 
         return nt
-
-    def _project_from_nt(
-        self,
-        morphology,
-        energy,
-        cp,
-        ndimage,
-        nt,
-        window,
-        angle_family_plan,
-        recorder=None,
-    ):
-        recorder = _NullSegmentRecorder() if recorder is None else recorder
-        projection_average = None
-        valid_counts = None
-        use_rot_mask = bool(morphology.RotMask)
-        num_angles = len(angle_family_plan.angles)
-        for angle_plan, (matrix_yx, offset_yx) in zip(
-            angle_family_plan.angles,
-            self._rotation_transforms(morphology, cp),
-        ):
-            fft_x, fft_y, fft_z = recorder.measure(
-                "C",
-                lambda angle_plan=angle_plan: self._fft_polarization_from_nt(
-                    nt=nt,
-                    angle_plan=angle_plan,
-                    window=window,
-                    cp=cp,
-                ),
-            )
-            projection = recorder.measure(
-                "D",
-                lambda fft_x=fft_x, fft_y=fft_y, fft_z=fft_z: self._projection_from_fft_polarization(
-                    morphology=morphology,
-                    energy=energy,
-                    cp=cp,
-                    fft_x=fft_x,
-                    fft_y=fft_y,
-                    fft_z=fft_z,
-                ),
-            )
-            projection_average, valid_counts = recorder.measure(
-                "E",
-                lambda projection=projection, projection_average=projection_average, valid_counts=valid_counts, angle_plan=angle_plan: self._accumulate_rotated_projection(
-                    cp=cp,
-                    ndimage=ndimage,
-                    projection=projection,
-                    matrix_yx=matrix_yx,
-                    offset_yx=offset_yx,
-                    projection_average=projection_average,
-                    valid_counts=valid_counts,
-                    use_rot_mask=use_rot_mask,
-                    skip_rotation=angle_plan.is_identity_rotation,
-                ),
-            )
-            del fft_x, fft_y, fft_z, projection
-        return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
 
     def _compute_fft_nt_components(self, nt, cp, window, component_indices=None):
         component_indices = tuple(range(nt.shape[0])) if component_indices is None else tuple(component_indices)
@@ -1110,36 +1010,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             )
             del fft_x, fft_y, fft_z, projection
         return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
-
-    def _polarization_from_nt(self, nt, angle_plan):
-        if angle_plan.family == "x":
-            p_x = nt[0] * angle_plan.mx * self._one_by_four_pi
-            p_y = nt[1] * angle_plan.mx * self._one_by_four_pi
-            p_z = nt[2] * angle_plan.mx * self._one_by_four_pi
-            return p_x, p_y, p_z
-        if angle_plan.family == "y":
-            p_x = nt[1] * angle_plan.my * self._one_by_four_pi
-            p_y = nt[3] * angle_plan.my * self._one_by_four_pi
-            p_z = nt[4] * angle_plan.my * self._one_by_four_pi
-            return p_x, p_y, p_z
-
-        p_x = (nt[0] * angle_plan.mx + nt[1] * angle_plan.my) * self._one_by_four_pi
-        p_y = (nt[1] * angle_plan.mx + nt[3] * angle_plan.my) * self._one_by_four_pi
-        p_z = (nt[2] * angle_plan.mx + nt[4] * angle_plan.my) * self._one_by_four_pi
-        return p_x, p_y, p_z
-
-    def _fft_polarization_from_nt(self, nt, angle_plan, cp, window):
-        p_x, p_y, p_z = self._polarization_from_nt(nt, angle_plan)
-        try:
-            return self._fft_polarization_fields(
-                cp=cp,
-                p_x=p_x,
-                p_y=p_y,
-                p_z=p_z,
-                window=window,
-            )
-        finally:
-            del p_x, p_y, p_z
 
     def _compute_direct_polarization(self, runtime_materials, energy, angle_plan, cp):
         shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)

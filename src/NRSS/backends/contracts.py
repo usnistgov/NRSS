@@ -50,7 +50,6 @@ _BACKEND_ARRAY_CONTRACTS = {
         "supported_execution_paths": (
             "tensor_coeff",
             "direct_polarization",
-            "nt_polarization",
         ),
         "supported_backend_options": ("dtype", "execution_path"),
     },
@@ -128,7 +127,6 @@ def normalize_backend_options(
             "default": spec["default_execution_path"],
             "tensor": "tensor_coeff",
             "direct": "direct_polarization",
-            "nt": "nt_polarization",
         }
         execution_path = aliases.get(execution_path, execution_path)
         if execution_path not in spec["supported_execution_paths"]:

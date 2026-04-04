@@ -2,6 +2,10 @@ This directory is for development-only `cupy-rsoxs` optimization studies.
 
 Nothing here is part of the maintained pytest validation surface.
 
+Current supported `cupy-rsoxs` execution paths are `tensor_coeff` and
+`direct_polarization`. Historical references to `nt_polarization` below are
+archival benchmark context from the earlier three-path campaign.
+
 For the principal cross-backend comparison panel, use:
 
 - `tests/validation/dev/core_shell_backend_performance/run_primary_backend_speed_comparison.py`
@@ -46,7 +50,6 @@ Current contents:
     - supported execution-path values are:
       - `tensor_coeff` for the current accepted route,
       - `direct_polarization` for the CyRSoXS communication-minimizing analog,
-      - `nt_polarization` for the CyRSoXS memory-minimizing analog,
   - defines the primary timing boundary as:
     - start immediately before `Morphology(...)`,
     - end immediately after synchronized `run(return_xarray=False)`,
@@ -449,7 +452,7 @@ Latest multi-angle execution-path comparison:
   - small CoreShell,
   - single energy `285.0`,
   - `resident_modes=host,device`,
-  - `execution_paths=tensor_coeff,direct_polarization,nt_polarization`,
+  - `execution_paths=tensor_coeff,direct_polarization`,
   - rotation sets equivalent to `--rotation-specs '0:15:165,0:5:165'`,
 - result:
   - once multi-angle work matters, `tensor_coeff` is the clear winner,
@@ -691,7 +694,7 @@ Typical commands:
   --label explicit-rotation \
   --size-labels small \
   --resident-modes host,device \
-  --execution-paths tensor_coeff,direct_polarization,nt_polarization \
+  --execution-paths tensor_coeff,direct_polarization \
   --rotation-specs '0:15:165,0:5:165' \
   --timing-segments B,C,D,E
 ```

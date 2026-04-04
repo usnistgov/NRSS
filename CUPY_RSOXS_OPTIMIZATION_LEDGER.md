@@ -4,6 +4,10 @@ This document is the authoritative speed-optimization ledger for `cupy-rsoxs`. I
 
 Stable backend contract and phase-1 behavior live in `CUPY_RSOXS_BACKEND_SPEC.md`. Repo-wide upgrade planning and test-program status live in `REPO_UPGRADE_PLAN.md`. Path-specific `direct_polarization` optimization notes now live in `CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md`.
 
+Current supported `cupy-rsoxs` execution paths are `tensor_coeff` and
+`direct_polarization`. Historical `nt_polarization` references below are kept
+as archival benchmark context from the earlier three-path optimization campaign.
+
 ## Current Optimization Guidance And Ledger
 
 This section replaces the earlier optimization-inventory framing with a more
@@ -975,7 +979,7 @@ Current campaign steps:
      for `cupy-rsoxs`,
    - add an explicit `execution_path` option with default
      `execution_path='tensor_coeff'`,
-   - initial intended values:
+   - historical initial values for that March 24, 2026 surface:
      - `tensor_coeff`: current accepted `Nt -> FFT(Nt) -> projection-coefficient`
        route,
      - `direct_polarization`: CyRSoXS `AlgorithmType=0`
@@ -984,7 +988,8 @@ Current campaign steps:
        memory-minimizing analog,
    - outcome:
      - completed on March 24, 2026,
-     - `cupy-rsoxs` now accepts `backend_options["execution_path"]` with
+     - at that time `cupy-rsoxs` accepted
+       `backend_options["execution_path"]` with
        supported values `tensor_coeff`, `direct_polarization`, and
        `nt_polarization`,
      - aliases now normalize as:
@@ -992,7 +997,10 @@ Current campaign steps:
        - `tensor -> tensor_coeff`,
        - `direct -> direct_polarization`,
        - `nt -> nt_polarization`,
-     - default behavior remains unchanged at `execution_path='tensor_coeff'`.
+     - default behavior remained unchanged at `execution_path='tensor_coeff'`,
+     - current supported values are `tensor_coeff` and
+       `direct_polarization`; `nt_polarization` has since been removed from the
+       maintained surface.
 3. `plan03_core_shell_backend_options_plumbing` - `completed`
    - thread `backend_options` through the maintained CoreShell construction and
      backend-run helpers so execution-path validation can use the official

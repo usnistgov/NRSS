@@ -32,6 +32,10 @@ This note does not replace the backend-wide ledger. If a path-specific result
 changes the accepted backend-wide optimization state, record it in
 `CUPY_RSOXS_OPTIMIZATION_LEDGER.md` as well.
 
+Current supported `cupy-rsoxs` execution paths are `tensor_coeff` and
+`direct_polarization`. Historical comparisons against `nt_polarization` remain
+in this note as archival context from the earlier three-path campaign.
+
 ## Path Identity
 
 Current execution-path mapping:
@@ -41,15 +45,12 @@ Current execution-path mapping:
 2. `direct_polarization`
    - CyRSoXS `AlgorithmType=0` analog
    - communication-minimizing / polarization-first analog
-3. `nt_polarization`
-   - CyRSoXS `AlgorithmType=1` analog
-   - lower-memory `Nt`-first analog
 
 `direct_polarization` remains useful because it:
 
 1. is the closest conceptual match to the legacy polarization-first path,
-2. keeps a lower GPU memory footprint than `tensor_coeff` and
-   `nt_polarization` on the maintained host-resident CoreShell lane,
+2. keeps a lower GPU memory footprint than `tensor_coeff` on the maintained
+   host-resident CoreShell lane,
 3. and is the cleanest place to study low-memory direct-field computation
    without reusing `Nt` across angles.
 

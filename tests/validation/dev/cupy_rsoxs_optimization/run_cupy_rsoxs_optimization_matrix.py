@@ -1469,8 +1469,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="tensor_coeff",
         help=(
             "Comma-separated cupy-rsoxs execution paths to run. "
-            "Supported values: tensor_coeff,direct_polarization,nt_polarization "
-            "plus aliases default,tensor,direct,nt."
+            "Supported values: tensor_coeff,direct_polarization "
+            "plus aliases default,tensor,direct."
         ),
     )
     parser.add_argument(

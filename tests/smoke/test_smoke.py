@@ -798,6 +798,14 @@ def test_cupy_backend_rejects_unknown_execution_path_backend_option():
             create_cy_object=False,
         )
 
+    with pytest.raises(BackendOptionError, match="does not support execution_path"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"execution_path": "nt"},
+            create_cy_object=False,
+        )
+
 
 @pytest.mark.backend_specific
 @pytest.mark.cpu
@@ -1326,10 +1334,11 @@ def test_cupy_execution_paths_and_isotropic_representations_match_on_fully_isotr
     if not _has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for isotropic execution-path comparison.")
 
+    execution_paths = ("tensor_coeff", "direct_polarization")
     outputs = {}
     for isotropic_representation in ("legacy_zero_array", "enum_contract"):
         outputs[isotropic_representation] = {}
-        for execution_path in ("tensor_coeff", "direct_polarization", "nt_polarization"):
+        for execution_path in execution_paths:
             morph = None
             try:
                 morph = _build_two_material_isotropic_block_morphology(
@@ -1357,14 +1366,8 @@ def test_cupy_execution_paths_and_isotropic_representations_match_on_fully_isotr
             rtol=0.0,
             atol=1e-6,
         )
-        np.testing.assert_allclose(
-            outputs[isotropic_representation]["nt_polarization"],
-            outputs[isotropic_representation]["tensor_coeff"],
-            rtol=0.0,
-            atol=1e-6,
-        )
 
-    for execution_path in ("tensor_coeff", "direct_polarization", "nt_polarization"):
+    for execution_path in execution_paths:
         np.testing.assert_allclose(
             outputs["legacy_zero_array"][execution_path],
             outputs["enum_contract"][execution_path],
