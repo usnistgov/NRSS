@@ -218,6 +218,61 @@ def _build_two_material_isotropic_block_morphology(
     )
 
 
+def _build_two_material_isotropic_single_slice_morphology(
+    *,
+    backend_options: dict | None = None,
+) -> Morphology:
+    shape = (1, 16, 16)
+    energies = [285.0]
+    vfrac_1 = np.zeros(shape, dtype=np.float32)
+    vfrac_1[0, 4:12, 5:11] = 1.0
+    vfrac_2 = np.float32(1.0) - vfrac_1
+    zeros = np.zeros(shape, dtype=np.float32)
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=vfrac_1,
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [1e-4, 2e-4, 1e-4, 2e-4]},
+        name="block",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=vfrac_2,
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="matrix",
+    )
+    config = {
+        "CaseType": 0,
+        "MorphologyType": 0,
+        "Energies": energies,
+        "EAngleRotation": [0.0, 0.0, 0.0],
+        "RotMask": 0,
+        "WindowingType": 0,
+        "AlgorithmType": 0,
+        "ReferenceFrame": 1,
+        "EwaldsInterpolation": 1,
+    }
+    return Morphology(
+        2,
+        materials={1: mat1, 2: mat2},
+        PhysSize=5.0,
+        config=config,
+        backend="cupy-rsoxs",
+        backend_options=backend_options,
+        resident_mode="host",
+        input_policy="strict",
+        create_cy_object=True,
+    )
+
+
 @pytest.mark.backend_agnostic_contract
 def test_explicit_isotropic_contract_accepts_missing_orientation_arrays():
     """Ensure enum-backed isotropic materials validate without concrete S/theta/psi arrays."""
@@ -635,6 +690,7 @@ def test_backend_registry_reports_known_backends():
     assert get_backend_info("cupy-rsoxs").supported_resident_modes == ("host", "device")
     assert "execution_path" in get_backend_info("cupy-rsoxs").supported_backend_options
     assert "mixed_precision_mode" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "z_collapse_mode" in get_backend_info("cupy-rsoxs").supported_backend_options
 
 
 @pytest.mark.backend_agnostic_contract
@@ -725,12 +781,15 @@ def test_cupy_backend_array_contract_defaults_to_host_resident_numpy():
     assert contract["namespace"] == "numpy"
     assert contract["device"] == "cpu"
     assert contract["mixed_precision_mode"] is None
+    assert contract["z_collapse_mode"] is None
     assert contract["options"]["execution_path"] == "tensor_coeff"
     assert contract["options"]["mixed_precision_mode"] is None
+    assert contract["options"]["z_collapse_mode"] is None
     assert runtime_contract["namespace"] == "cupy"
     assert runtime_contract["device"] == "gpu"
     assert runtime_contract["options"]["execution_path"] == "tensor_coeff"
     assert runtime_contract["options"]["mixed_precision_mode"] is None
+    assert runtime_contract["options"]["z_collapse_mode"] is None
     assert plan.target_namespace == "numpy"
     assert plan.target_device == "cpu"
     assert plan.transfer == "none"
@@ -803,6 +862,7 @@ def test_cupy_backend_accepts_mixed_precision_backend_option():
     assert morph.backend_options == {
         "execution_path": "tensor_coeff",
         "mixed_precision_mode": "reduced_morphology_bit_depth",
+        "z_collapse_mode": None,
     }
     assert morph.backend_array_contract["dtype"] == "float16"
     assert morph.runtime_compute_contract["dtype"] == "float16"
@@ -835,6 +895,7 @@ def test_cupy_backend_accepts_execution_path_backend_option():
     assert morph.backend_options == {
         "execution_path": "direct_polarization",
         "mixed_precision_mode": None,
+        "z_collapse_mode": None,
     }
 
 
@@ -857,6 +918,106 @@ def test_cupy_backend_rejects_unknown_execution_path_backend_option():
             backend_options={"execution_path": "nt"},
             create_cy_object=False,
         )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_z_collapse_backend_option():
+    """Ensure cupy-rsoxs normalizes the expert-only z_collapse_mode surface."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"z_collapse_mode": "mean"},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == {
+        "execution_path": "tensor_coeff",
+        "mixed_precision_mode": None,
+        "z_collapse_mode": "mean",
+    }
+    assert morph.z_collapse_mode == "mean"
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_z_collapse_aliases_and_orthogonal_options():
+    """Ensure z_collapse_mode stays orthogonal to execution_path."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={
+            "execution_path": "direct",
+            "z_collapse_mode": "off",
+        },
+        create_cy_object=False,
+    )
+    assert morph.backend_options == {
+        "execution_path": "direct_polarization",
+        "mixed_precision_mode": None,
+        "z_collapse_mode": None,
+    }
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_unknown_z_collapse_backend_option():
+    """Ensure cupy-rsoxs rejects unsupported z_collapse_mode values up front."""
+    with pytest.raises(BackendOptionError, match="does not support z_collapse_mode"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"z_collapse_mode": "definitely-not-a-mode"},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_z_collapse_with_mixed_precision_mode():
+    """Ensure z_collapse_mode is mutually exclusive with the half-input mixed-precision path for now."""
+    with pytest.raises(
+        BackendOptionError,
+        match="does not yet support combining z_collapse_mode with mixed_precision_mode",
+    ):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={
+                "z_collapse_mode": "mean",
+                "mixed_precision_mode": "reduced_morphology_bit_depth",
+            },
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.gpu
+def test_cupy_tensor_coeff_z_collapse_is_exact_identity_for_native_single_slice():
+    """Ensure z_collapse_mode='mean' is a no-op for native z=1 tensor-coeff runs."""
+    base = None
+    collapsed = None
+    try:
+        base = _build_two_material_isotropic_single_slice_morphology(
+            backend_options={"execution_path": "tensor_coeff"},
+        )
+        collapsed = _build_two_material_isotropic_single_slice_morphology(
+            backend_options={"execution_path": "tensor_coeff", "z_collapse_mode": "mean"},
+        )
+
+        base_result = base.run(stdout=False, stderr=False, return_xarray=True)
+        collapsed_result = collapsed.run(stdout=False, stderr=False, return_xarray=True)
+
+        np.testing.assert_array_equal(base_result.values, collapsed_result.values)
+        np.testing.assert_array_equal(base_result.qx.values, collapsed_result.qx.values)
+        np.testing.assert_array_equal(base_result.qy.values, collapsed_result.qy.values)
+    finally:
+        for morph in (base, collapsed):
+            if morph is None:
+                continue
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
 
 
 @pytest.mark.backend_specific
@@ -904,6 +1065,7 @@ def test_morphology_normalizes_material_arrays_eagerly_for_selected_backend_defa
         expected_backend_options = {
             "execution_path": "tensor_coeff",
             "mixed_precision_mode": None,
+            "z_collapse_mode": None,
         }
     else:
         expected_backend_options = {"dtype": expected_dtype}

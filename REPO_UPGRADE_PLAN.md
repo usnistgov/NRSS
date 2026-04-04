@@ -161,6 +161,16 @@ If this proposal is resumed in a fresh context, the intended order is:
 4. and only after that decide whether the mode deserves maintained validation
    support or should remain a dev-only exploratory path.
 
+Detailed resume note:
+
+1. The canonical detailed implementation and validation proposal for this work
+   now lives in `CUPY_RSOXS_Z_COLLAPSE_PROPOSAL.md`.
+2. That document records the intended first-pass `tensor_coeff` scope, the
+   internal shape-aware helper refactor, and the preferred primary validation
+   surface:
+   - full `3D` analytical sphere versus collapsed `3D` analytical sphere
+     through the maintained `I(q)` reduction.
+
 ### Separate but related optimization goal
 
 The approximate `z`-collapse mode should not be conflated with the distinct

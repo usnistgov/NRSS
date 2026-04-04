@@ -491,16 +491,36 @@ Execution-path scope:
 
 ## Proposed Expert Approximation: `z_collapse_mode`
 
-This section records a proposed future expert-only approximation mode. It is
-not implemented as of April 4, 2026 and is not part of the current normalized
-option surface, but it is documented here so a fresh context can resume the
-design with the decisions already made.
+This section records the current expert-only approximation mode status.
+
+As of April 4, 2026:
+
+1. `z_collapse_mode` is now part of the normalized `cupy-rsoxs` option
+   surface.
+2. implemented mode:
+   - `backend_options={"z_collapse_mode": "mean"}`
+3. currently implemented only for:
+   - `execution_path='tensor_coeff'`
+4. currently not implemented for:
+   - `execution_path='direct_polarization'`
+5. the current `tensor_coeff` implementation collapses during `Nt`
+   construction and therefore avoids materializing the full `3D` `Nt` tensor.
+6. the current implementation intentionally rejects combination with
+   `mixed_precision_mode`; that half-input combination remains future work.
+
+For the detailed implementation history, exploratory validation results, and
+the recommended next-step plan, see `CUPY_RSOXS_Z_COLLAPSE_PROPOSAL.md`.
 
 ### Intent
 
 Provide an opt-in fast approximate-physics path for arbitrary `3D`
 morphologies by collapsing the locally composed field through `z` before FFT
 and then continuing as an effective `z=1` problem.
+
+For the full resumption blueprint, including first-pass implementation scope,
+internal helper refactor recommendations, and the analytical-sphere
+full-`3D`-versus-collapsed-`3D` validation proposal, see
+`CUPY_RSOXS_Z_COLLAPSE_PROPOSAL.md`.
 
 This mode is explicitly:
 
@@ -521,7 +541,8 @@ Current design intent:
 1. default is off / `None`,
 2. the first supported reduction would be `"mean"`,
 3. `z_collapse_mode` should remain orthogonal to `execution_path`,
-4. `z_collapse_mode` should remain orthogonal to `mixed_precision_mode`,
+4. the original design intended orthogonality with `mixed_precision_mode`,
+   but the current implementation deliberately rejects that combination,
 5. and this should be documented as an approximation mode rather than an
    alternate exact execution algorithm.
 
@@ -543,16 +564,20 @@ The following design choices were explicitly selected on April 4, 2026:
 
 For `execution_path='tensor_coeff'`:
 
-1. compute the usual energy-specific `Nt` component fields,
-2. collapse the required `Nt` components through `z` by `mean`,
-3. treat the result as a reusable `2D` tensor field,
-4. then continue with effective-`z=1` FFT and detector logic.
+1. current implementation:
+   - accumulate directly into collapsed `(components, 1, y, x)` `Nt`
+   - do not materialize full `3D` `Nt`
+2. then continue with effective-`z=1` FFT and detector logic.
 
 For `execution_path='direct_polarization'`:
 
-1. compute the usual angle-specific `p_x`, `p_y`, `p_z` fields,
-2. collapse those polarization fields through `z` by `mean`,
-3. then continue with effective-`z=1` FFT and detector logic.
+1. desired next step:
+   - apply the same construction-time collapse idea used for `tensor_coeff`
+2. build angle-specific collapsed `p_x`, `p_y`, `p_z` fields without
+   materializing the full `3D` polarization volumes,
+3. then continue with effective-`z=1` FFT and detector logic,
+4. validate with the same style of sphere comparison and native-`z=1`
+   identity checks used for the current `tensor_coeff` pass.
 
 ### Current effective-`2D` behavior note
 
@@ -573,12 +598,15 @@ This mode is intentionally not yet part of the maintained validation contract.
 
 Current planned evaluation order:
 
-1. prototype `tensor_coeff` first,
-2. compare against the maintained full `3D` path on representative cases such
-   as CoreShell,
-3. include at least one `I(q)` / form-factor style comparison surface,
-4. then decide whether the mode is useful enough to justify maintained tests,
-5. and only after that broaden any official support claims.
+1. `tensor_coeff` prototype is now implemented,
+2. maintained analytical sphere form-factor tests pass with the normal paths
+   unchanged,
+3. the current exploratory comparison surface is the full-`3D` versus
+   collapsed-`3D` sphere `I(q)` dev harness plus generated plots,
+4. the next implementation/validation step should be the same treatment for
+   `direct_polarization`,
+5. and only after that should support claims or maintained-test promotion be
+   revisited.
 
 ### Separate optimization thread: effective-`2D` detector simplification
 

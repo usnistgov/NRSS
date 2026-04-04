@@ -500,6 +500,10 @@ class Morphology:
         return self._backend_options.get("mixed_precision_mode")
 
     @property
+    def z_collapse_mode(self):
+        return self._backend_options.get("z_collapse_mode")
+
+    @property
     def backend_array_contract(self):
         return self.authoritative_array_contract
 

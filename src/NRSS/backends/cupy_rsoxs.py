@@ -264,7 +264,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         projections = []
         window = None
         try:
-            window = recorder.measure("C", lambda: self._window_tensor(morphology, cp))
+            window = recorder.measure(
+                "C",
+                lambda: self._window_tensor(
+                    morphology,
+                    cp,
+                    shape_override=self._segment_c_shape_override(morphology),
+                ),
+            )
 
             for energy in energies:
                 projection = self._run_single_energy(
@@ -365,10 +372,26 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 "EAngleRotation with zero increment must use identical start/end angles."
             )
 
-    def _window_tensor(self, morphology, cp):
+    def _shape_tuple(self, morphology, shape_override=None):
+        if shape_override is not None:
+            return tuple(int(v) for v in shape_override)
+        return tuple(int(v) for v in morphology.NumZYX)
+
+    def _z_collapse_mode(self, morphology) -> str | None:
+        return morphology.z_collapse_mode
+
+    def _segment_c_shape_override(self, morphology):
+        if self._execution_path(morphology) != "tensor_coeff":
+            return None
+        if self._z_collapse_mode(morphology) != "mean":
+            return None
+        _, y, x = self._shape_tuple(morphology)
+        return (1, y, x)
+
+    def _window_tensor(self, morphology, cp, shape_override=None):
         if morphology.WindowingType == 0:
             return None
-        z, y, x = morphology.NumZYX
+        z, y, x = self._shape_tuple(morphology, shape_override=shape_override)
         wz = cp.asarray(np.hanning(z), dtype=cp.float32)[:, None, None]
         wy = cp.asarray(np.hanning(y), dtype=cp.float32)[None, :, None]
         wx = cp.asarray(np.hanning(x), dtype=cp.float32)[None, None, :]
@@ -447,12 +470,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         recorder,
     ):
         angle_family_plan = self._angle_family_plan(morphology)
+        shape_override = self._segment_c_shape_override(morphology)
         nt = recorder.measure(
             "B",
-            lambda: self._compute_nt_components(
-                runtime_materials,
-                energy,
-                cp,
+            lambda: self._compute_nt_components_for_tensor_coeff(
+                morphology=morphology,
+                runtime_materials=runtime_materials,
+                energy=energy,
+                cp=cp,
                 required_components=angle_family_plan.required_nt_components,
             ),
         )
@@ -473,6 +498,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 cp=cp,
                 fft_nt=fft_nt,
                 angle_family_plan=angle_family_plan,
+                shape_override=shape_override,
             ),
         )
         del nt, fft_nt
@@ -734,6 +760,96 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
         return nt
 
+    def _compute_nt_components_for_tensor_coeff(
+        self,
+        morphology,
+        runtime_materials,
+        energy,
+        cp,
+        required_components=None,
+    ):
+        if self._z_collapse_mode(morphology) == "mean":
+            return self._compute_nt_components_collapsed_mean(
+                runtime_materials,
+                energy,
+                cp,
+                required_components=required_components,
+            )
+        return self._compute_nt_components(
+            runtime_materials,
+            energy,
+            cp,
+            required_components=required_components,
+        )
+
+    def _compute_nt_components_collapsed_mean(
+        self,
+        runtime_materials,
+        energy,
+        cp,
+        required_components=None,
+    ):
+        if cp.dtype(runtime_materials[0].Vfrac.dtype).name == "float16":
+            raise NotImplementedError(
+                "cupy-rsoxs z_collapse_mode='mean' does not yet support the half-input "
+                "mixed-precision path."
+            )
+
+        required = {0, 1, 2, 3, 4} if required_components is None else set(required_components)
+        need0 = 0 in required
+        need1 = 1 in required
+        need2 = 2 in required
+        need3 = 3 in required
+        need4 = 4 in required
+        _, y, x = (int(v) for v in runtime_materials[0].Vfrac.shape)
+        z_count = np.float32(runtime_materials[0].Vfrac.shape[0])
+        nt = cp.zeros((5, 1, y, x), dtype=cp.complex64)
+
+        for material in runtime_materials:
+            isotropic_diag, aligned_base, anisotropic_delta = self._material_optical_scalars(
+                material,
+                energy,
+            )
+            vfrac = material.Vfrac
+            if need0 or need3:
+                vfrac_sum = cp.sum(vfrac, axis=0, dtype=cp.float32, keepdims=True)
+                isotropic_collapsed = (vfrac_sum / z_count).astype(cp.complex64, copy=False)
+                if need0:
+                    nt[0] += isotropic_collapsed * isotropic_diag
+                if need3:
+                    nt[3] += isotropic_collapsed * isotropic_diag
+                del vfrac_sum, isotropic_collapsed
+            if material.is_full_isotropic:
+                continue
+
+            phi_a = vfrac * material.S
+            sx, sy, sz = self._orientation_components(material, cp)
+
+            if need0:
+                contrib0 = phi_a * (aligned_base + anisotropic_delta * sx * sx)
+                nt[0] += cp.sum(contrib0, axis=0, dtype=cp.complex64, keepdims=True) / z_count
+                del contrib0
+            if need1:
+                contrib1 = phi_a * anisotropic_delta * sx * sy
+                nt[1] += cp.sum(contrib1, axis=0, dtype=cp.complex64, keepdims=True) / z_count
+                del contrib1
+            if need2:
+                contrib2 = phi_a * anisotropic_delta * sx * sz
+                nt[2] += cp.sum(contrib2, axis=0, dtype=cp.complex64, keepdims=True) / z_count
+                del contrib2
+            if need3:
+                contrib3 = phi_a * (aligned_base + anisotropic_delta * sy * sy)
+                nt[3] += cp.sum(contrib3, axis=0, dtype=cp.complex64, keepdims=True) / z_count
+                del contrib3
+            if need4:
+                contrib4 = phi_a * anisotropic_delta * sy * sz
+                nt[4] += cp.sum(contrib4, axis=0, dtype=cp.complex64, keepdims=True) / z_count
+                del contrib4
+
+            del phi_a, sx, sy, sz
+
+        return nt
+
     def _compute_nt_components_half_input(self, runtime_materials, energy, cp, required_components=None):
         required = {0, 1, 2, 3, 4} if required_components is None else set(required_components)
         need0 = np.int32(0 in required)
@@ -985,7 +1101,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             del projection, rotated
         return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
 
-    def _projection_coefficients_from_fft_nt(self, morphology, energy, cp, fft_nt, angle_family_plan):
+    def _projection_coefficients_from_fft_nt(
+        self,
+        morphology,
+        energy,
+        cp,
+        fft_nt,
+        angle_family_plan,
+        shape_override=None,
+    ):
         basis_x = None
         basis_y = None
         proj_x = None
@@ -1012,6 +1136,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 cp=cp,
                 basis_x=basis_x,
                 basis_y=basis_y,
+                shape_override=shape_override,
             )
 
         # Even aligned families only need detector-plane values, so avoid
@@ -1023,6 +1148,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 cp=cp,
                 basis_x=basis_x,
                 basis_y=basis_y,
+                shape_override=shape_override,
             )
             return proj_x, proj_y, None
 
@@ -1033,6 +1159,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 cp=cp,
                 basis_x=basis_x,
                 basis_y=basis_x,
+                shape_override=shape_override,
             )
 
         if angle_family_plan.needs_proj_y:
@@ -1042,17 +1169,27 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 cp=cp,
                 basis_x=basis_y,
                 basis_y=basis_y,
+                shape_override=shape_override,
             )
 
         return proj_x, proj_y, None
 
-    def _projection_coefficients_from_fft_pair(self, morphology, energy, cp, basis_x, basis_y):
-        detector_geometry = self._detector_geometry(morphology, cp)
+    def _projection_coefficients_from_fft_pair(
+        self,
+        morphology,
+        energy,
+        cp,
+        basis_x,
+        basis_y,
+        shape_override=None,
+    ):
+        detector_geometry = self._detector_geometry(morphology, cp, shape_override=shape_override)
         projection_geometry = self._detector_projection_geometry(
             morphology=morphology,
             energy=energy,
             cp=cp,
             detector_geometry=detector_geometry,
+            shape_override=shape_override,
         )
         k = np.float32(2.0 * math.pi / (1239.84197 / float(energy)))
         d = np.float32(k * k)
@@ -1818,12 +1955,12 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         projection = cp.where(projection_geometry.valid, interp, projection)
         return projection
 
-    def _q_axes(self, morphology, cp):
-        detector_geometry = self._detector_geometry(morphology, cp)
+    def _q_axes(self, morphology, cp, shape_override=None):
+        detector_geometry = self._detector_geometry(morphology, cp, shape_override=shape_override)
         return detector_geometry.qx, detector_geometry.qy, detector_geometry.qz
 
-    def _detector_geometry(self, morphology, cp):
-        z, y, x = map(int, morphology.NumZYX)
+    def _detector_geometry(self, morphology, cp, shape_override=None):
+        z, y, x = self._shape_tuple(morphology, shape_override=shape_override)
         phys = np.float32(morphology.PhysSize)
         cache_key = ("detector_geometry", z, y, x, float(phys))
         cached = morphology._backend_runtime_state.get(cache_key)
@@ -1867,12 +2004,20 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         morphology._backend_runtime_state[cache_key] = detector_geometry
         return detector_geometry
 
-    def _detector_projection_geometry(self, morphology, energy, cp, detector_geometry):
+    def _detector_projection_geometry(
+        self,
+        morphology,
+        energy,
+        cp,
+        detector_geometry,
+        shape_override=None,
+    ):
+        z, y, x = self._shape_tuple(morphology, shape_override=shape_override)
         cache_key = (
             "detector_projection_geometry_current",
-            detector_geometry.z_count,
-            detector_geometry.y_count,
-            detector_geometry.x_count,
+            z,
+            y,
+            x,
             float(morphology.PhysSize),
             float(energy),
         )

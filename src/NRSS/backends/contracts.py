@@ -60,7 +60,16 @@ _BACKEND_ARRAY_CONTRACTS = {
             None,
             "reduced_morphology_bit_depth",
         ),
-        "supported_backend_options": ("execution_path", "mixed_precision_mode"),
+        "default_z_collapse_mode": None,
+        "supported_z_collapse_modes": (
+            None,
+            "mean",
+        ),
+        "supported_backend_options": (
+            "execution_path",
+            "mixed_precision_mode",
+            "z_collapse_mode",
+        ),
         "runtime_compute_dtype": "float32",
         "runtime_complex_dtype": "complex64",
     },
@@ -96,6 +105,20 @@ def normalize_mixed_precision_mode_name(mode: Any) -> str | None:
         "off": None,
         "default": None,
         "reduced-morphology-bit-depth": "reduced_morphology_bit_depth",
+    }
+    return aliases.get(cleaned, cleaned)
+
+
+def normalize_z_collapse_mode_name(mode: Any) -> str | None:
+    if mode is None:
+        return None
+
+    cleaned = str(mode).strip().lower()
+    aliases = {
+        "": None,
+        "none": None,
+        "off": None,
+        "default": None,
     }
     return aliases.get(cleaned, cleaned)
 
@@ -186,6 +209,30 @@ def normalize_backend_options(
                 f"{mixed_precision_mode!r}. Supported modes: {', '.join(supported_modes)}."
             )
         normalized_options["mixed_precision_mode"] = mixed_precision_mode
+    if "z_collapse_mode" in spec["supported_backend_options"]:
+        z_collapse_mode = normalize_z_collapse_mode_name(
+            options.get("z_collapse_mode", spec.get("default_z_collapse_mode"))
+        )
+        if z_collapse_mode not in spec.get("supported_z_collapse_modes", (None,)):
+            supported_modes = tuple(
+                "None" if mode is None else mode
+                for mode in spec.get("supported_z_collapse_modes", (None,))
+            )
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support z_collapse_mode "
+                f"{z_collapse_mode!r}. Supported modes: {', '.join(supported_modes)}."
+            )
+        normalized_options["z_collapse_mode"] = z_collapse_mode
+
+    if (
+        backend_name == "cupy-rsoxs"
+        and normalized_options.get("z_collapse_mode") is not None
+        and normalized_options.get("mixed_precision_mode") is not None
+    ):
+        raise BackendOptionError(
+            "Backend 'cupy-rsoxs' does not yet support combining z_collapse_mode "
+            "with mixed_precision_mode. Disable one of those expert options."
+        )
 
     return normalized_options
 
@@ -236,6 +283,8 @@ def resolve_backend_array_contract(
         "supported_execution_paths": spec.get("supported_execution_paths", ()),
         "default_mixed_precision_mode": spec.get("default_mixed_precision_mode"),
         "supported_mixed_precision_modes": spec.get("supported_mixed_precision_modes", (None,)),
+        "default_z_collapse_mode": spec.get("default_z_collapse_mode"),
+        "supported_z_collapse_modes": spec.get("supported_z_collapse_modes", (None,)),
         "supported_backend_options": spec["supported_backend_options"],
         "dtype": precision["authoritative_dtype"],
         "authoritative_dtype": precision["authoritative_dtype"],
@@ -243,6 +292,7 @@ def resolve_backend_array_contract(
         "runtime_compute_dtype": precision["runtime_compute_dtype"],
         "runtime_complex_dtype": precision["runtime_complex_dtype"],
         "mixed_precision_mode": precision["mixed_precision_mode"],
+        "z_collapse_mode": normalized_options.get("z_collapse_mode"),
         "options": normalized_options,
     }
 
@@ -266,6 +316,8 @@ def resolve_backend_runtime_contract(
         "supported_execution_paths": spec.get("supported_execution_paths", ()),
         "default_mixed_precision_mode": spec.get("default_mixed_precision_mode"),
         "supported_mixed_precision_modes": spec.get("supported_mixed_precision_modes", (None,)),
+        "default_z_collapse_mode": spec.get("default_z_collapse_mode"),
+        "supported_z_collapse_modes": spec.get("supported_z_collapse_modes", (None,)),
         "supported_backend_options": spec["supported_backend_options"],
         "dtype": precision["runtime_dtype"],
         "authoritative_dtype": precision["authoritative_dtype"],
@@ -273,5 +325,6 @@ def resolve_backend_runtime_contract(
         "runtime_compute_dtype": precision["runtime_compute_dtype"],
         "runtime_complex_dtype": precision["runtime_complex_dtype"],
         "mixed_precision_mode": precision["mixed_precision_mode"],
+        "z_collapse_mode": normalized_options.get("z_collapse_mode"),
         "options": normalized_options,
     }
