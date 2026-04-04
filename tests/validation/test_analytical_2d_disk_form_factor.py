@@ -1,7 +1,6 @@
 import gc
 import os
 import subprocess
-import sys
 from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
@@ -14,10 +13,12 @@ import pytest
 import xarray as xr
 from scipy.special import j1
 
-from tests.validation.lib.lazy_cyrsoxs import cy
+from NRSS import SFieldMode
+from NRSS.morphology import Material, Morphology
+from tests.path_matrix import ComputationPath
 
 
-pytestmark = [pytest.mark.cyrsoxs_only, pytest.mark.reference_parity]
+pytestmark = [pytest.mark.path_matrix, pytest.mark.reference_parity]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -83,6 +84,27 @@ def _cyrsoxs_detector_axis(n: int, phys_size_nm: float) -> np.ndarray:
     start = -np.pi / float(phys_size_nm)
     step = (2.0 * np.pi / float(phys_size_nm)) / float(int(n) - 1)
     return start + np.arange(int(n), dtype=np.float64) * step
+
+
+def _to_backend_namespace(array: np.ndarray, field_namespace: str):
+    if field_namespace == "numpy":
+        return np.ascontiguousarray(array.astype(np.float32, copy=False))
+    if field_namespace != "cupy":
+        raise AssertionError(f"Unsupported field namespace {field_namespace!r}.")
+    import cupy as cp
+
+    return cp.ascontiguousarray(cp.asarray(array, dtype=cp.float32))
+
+
+def _path_runtime_kwargs(nrss_path: ComputationPath) -> dict[str, object]:
+    return {
+        "backend": nrss_path.backend,
+        "backend_options": nrss_path.backend_options,
+        "resident_mode": nrss_path.resident_mode,
+        "input_policy": "strict" if nrss_path.category == "cupy" else "coerce",
+        "ownership_policy": nrss_path.ownership_policy,
+        "field_namespace": nrss_path.field_namespace,
+    }
 
 
 def _release_runtime_memory() -> None:
@@ -156,72 +178,73 @@ def _disk_and_vacuum_vfrac(diameter_nm: float, superresolution: int) -> tuple[np
     return disk, vacuum
 
 
-def _scattering_to_xarray(scattering_pattern, energies_eV: list[float]) -> xr.DataArray:
-    scattering_data = scattering_pattern.writeAllToNumpy(kID=0)
-    qy = _cyrsoxs_detector_axis(SHAPE[1], PHYS_SIZE_NM)
-    qx = _cyrsoxs_detector_axis(SHAPE[2], PHYS_SIZE_NM)
-    return xr.DataArray(
-        scattering_data,
-        dims=["energy", "qy", "qx"],
-        coords={"energy": list(map(float, energies_eV)), "qy": qy, "qx": qx},
-    )
-
-
-def _run_disk_pybind(
+def _run_disk_backend(
     diameter_nm: float,
     superresolution: int,
     energies_eV: list[float],
+    runtime_kwargs: dict[str, object],
 ) -> xr.DataArray:
     disk_vfrac, vacuum_vfrac = _disk_and_vacuum_vfrac(
         diameter_nm=diameter_nm,
         superresolution=superresolution,
     )
+    field_namespace = str(runtime_kwargs["field_namespace"])
+    disk_vfrac = _to_backend_namespace(disk_vfrac, field_namespace)
+    vacuum_vfrac = _to_backend_namespace(vacuum_vfrac, field_namespace)
 
-    input_data = cy.InputData(NumMaterial=2)
-    input_data.setEnergies(list(map(float, energies_eV)))
-    input_data.setERotationAngle(StartAngle=0.0, EndAngle=0.0, IncrementAngle=0.0)
-    input_data.setPhysSize(PHYS_SIZE_NM)
-    input_data.setDimensions(SHAPE, cy.MorphologyOrder.ZYX)
-    input_data.setCaseType(cy.CaseType.Default)
-    input_data.setMorphologyType(cy.MorphologyType.EulerAngles)
-    input_data.setAlgorithm(AlgorithmID=0, MaxStreams=1)
-    input_data.interpolationType = cy.InterpolationType.Linear
-    input_data.windowingType = cy.FFTWindowing.NoPadding
-    input_data.rotMask = True
-    input_data.referenceFrame = 1
-    if not input_data.validate():
-        raise AssertionError("CyRSoXS InputData validation failed.")
-
-    optical_constants = cy.RefractiveIndex(input_data)
-    for energy_eV in energies_eV:
-        optical_constants.addData(
-            OpticalConstants=[list(DISK_OC[float(energy_eV)]), [0.0, 0.0, 0.0, 0.0]],
-            Energy=float(energy_eV),
-        )
-    if not optical_constants.validate():
-        raise AssertionError("CyRSoXS optical-constants validation failed.")
-
-    voxel_data = cy.VoxelData(InputData=input_data)
-    voxel_data.addVoxelData(Vfrac=disk_vfrac, MaterialID=1)
-    voxel_data.addVoxelData(Vfrac=vacuum_vfrac, MaterialID=2)
-    if not voxel_data.validate():
-        raise AssertionError("CyRSoXS VoxelData validation failed.")
-
-    scattering_pattern = cy.ScatteringPattern(InputData=input_data)
-    with cy.ostream_redirect(stdout=False, stderr=False):
-        cy.launch(
-            VoxelData=voxel_data,
-            RefractiveIndexData=optical_constants,
-            InputData=input_data,
-            ScatteringPattern=scattering_pattern,
-        )
-
-    data = _scattering_to_xarray(scattering_pattern, energies_eV=energies_eV).copy(deep=True)
-
-    del scattering_pattern, voxel_data, optical_constants, input_data
-    del disk_vfrac, vacuum_vfrac
-    _release_runtime_memory()
-    return data
+    mat1 = Material(
+        materialID=1,
+        Vfrac=disk_vfrac,
+        S=SFieldMode.ISOTROPIC,
+        theta=None,
+        psi=None,
+        energies=energies_eV,
+        opt_constants={float(energy_eV): list(DISK_OC[float(energy_eV)]) for energy_eV in energies_eV},
+        name="disk",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=vacuum_vfrac,
+        S=SFieldMode.ISOTROPIC,
+        theta=None,
+        psi=None,
+        energies=energies_eV,
+        opt_constants={float(energy_eV): [0.0, 0.0, 0.0, 0.0] for energy_eV in energies_eV},
+        name="vacuum",
+    )
+    config = {
+        "CaseType": 0,
+        "MorphologyType": 0,
+        "Energies": energies_eV,
+        "EAngleRotation": [0.0, 0.0, 0.0],
+        "RotMask": 1,
+        "WindowingType": 0,
+        "AlgorithmType": 0,
+        "ReferenceFrame": 1,
+        "EwaldsInterpolation": 1,
+    }
+    morph = Morphology(
+        2,
+        materials={1: mat1, 2: mat2},
+        PhysSize=PHYS_SIZE_NM,
+        config=config,
+        backend=str(runtime_kwargs["backend"]),
+        backend_options=dict(runtime_kwargs["backend_options"]),
+        resident_mode=runtime_kwargs["resident_mode"],
+        input_policy=str(runtime_kwargs["input_policy"]),
+        ownership_policy=runtime_kwargs["ownership_policy"],
+        create_cy_object=True,
+    )
+    try:
+        data = morph.run(stdout=False, stderr=False, return_xarray=True)
+        if data is None:
+            raise AssertionError("Analytical 2D disk backend run returned no scattering data.")
+        return data.copy(deep=True)
+    finally:
+        morph.release_runtime()
+        del morph
+        del disk_vfrac, vacuum_vfrac
+        _release_runtime_memory()
 
 
 def _pyhyper_iq_by_energy(scattering) -> dict[float, tuple[np.ndarray, np.ndarray]]:
@@ -389,6 +412,7 @@ def _write_dev_plot(
     point_metrics_by_superres: dict[int, dict[str, float]],
     minima_metrics_by_superres: dict[int, dict[str, float]],
     timing_by_superres: dict[int, dict[str, float]],
+    path_id: str,
 ) -> Path:
     PLOT_DIR.mkdir(parents=True, exist_ok=True)
     fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(8.0, 8.2), sharex=True)
@@ -488,21 +512,23 @@ def _write_dev_plot(
         bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "none"},
     )
     fig.tight_layout(rect=[0, 0.18, 1, 0.97])
-    out = PLOT_DIR / f"disk_ff_2d_d{int(round(diameter_nm))}_e{energy_eV:.1f}.png"
+    out = PLOT_DIR / f"{path_id}__disk_ff_2d_d{int(round(diameter_nm))}_e{energy_eV:.1f}.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
     return out
 
 
-def _evaluate_geometry_case(diameter_nm: float) -> dict[str, object]:
+def _evaluate_geometry_case(diameter_nm: float, nrss_path: ComputationPath) -> dict[str, object]:
     iq_by_superres = {}
     timing_by_superres = {}
+    runtime_kwargs = _path_runtime_kwargs(nrss_path)
     for superresolution in SUPERRESOLUTIONS:
         sim_t0 = perf_counter()
-        data = _run_disk_pybind(
+        data = _run_disk_backend(
             diameter_nm=diameter_nm,
             superresolution=superresolution,
             energies_eV=[ENERGY_EV],
+            runtime_kwargs=runtime_kwargs,
         )
         sim_seconds = perf_counter() - sim_t0
         iq_t0 = perf_counter()
@@ -566,8 +592,18 @@ def _assert_geometry_case_result(diameter_nm: float, result: dict[str, object]) 
     assert sr1_minima["rmse_abs_dq"] <= thresholds["sr1_min_rmse_max"]
 
 
-def _run_validated_geometry_case(diameter_nm: float) -> None:
-    result = _evaluate_geometry_case(diameter_nm)
+@pytest.mark.gpu
+@pytest.mark.slow
+@pytest.mark.physics_validation
+@pytest.mark.toolchain_validation
+@pytest.mark.parametrize("diameter_nm", DIAMETERS_NM, ids=["dia70", "dia128"])
+def test_analytical_2d_disk_form_factor_pybind(diameter_nm: float, nrss_path: ComputationPath):
+    """Validate direct analytical 2D disk form-factor agreement and minima alignment through the pybind-to-PyHyper workflow."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for analytical 2D disk form-factor test.")
+
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+    result = _evaluate_geometry_case(diameter_nm, nrss_path)
 
     if WRITE_VALIDATION_PLOTS:
         _write_dev_plot(
@@ -579,6 +615,7 @@ def _run_validated_geometry_case(diameter_nm: float) -> None:
             point_metrics_by_superres=result["point_metrics_by_superres"],
             minima_metrics_by_superres=result["minima_metrics_by_superres"],
             timing_by_superres=result["timing_by_superres"],
+            path_id=nrss_path.id,
         )
 
     print("assert_point_metrics", result["assert_metrics"])
@@ -590,44 +627,3 @@ def _run_validated_geometry_case(diameter_nm: float) -> None:
         print(line)
 
     _assert_geometry_case_result(diameter_nm, result)
-
-
-def _run_geometry_case_subprocess(diameter_nm: float) -> None:
-    env = os.environ.copy()
-    env.setdefault("CUDA_VISIBLE_DEVICES", "0")
-    code = (
-        "from tests.validation.test_analytical_2d_disk_form_factor import "
-        f"_run_validated_geometry_case; _run_validated_geometry_case({float(diameter_nm)!r})"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        cwd=str(REPO_ROOT),
-        env=env,
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    if result.stdout:
-        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
-    assert result.returncode == 0, (
-        f"Isolated 2D analytical disk run failed for diameter {diameter_nm:.1f} nm "
-        f"with exit code {result.returncode}."
-    )
-
-
-@pytest.mark.gpu
-@pytest.mark.slow
-@pytest.mark.physics_validation
-@pytest.mark.toolchain_validation
-@pytest.mark.parametrize("diameter_nm", DIAMETERS_NM, ids=["dia70", "dia128"])
-def test_analytical_2d_disk_form_factor_pybind(diameter_nm: float):
-    """Validate direct analytical 2D disk form-factor agreement and minima alignment through the pybind-to-PyHyper workflow."""
-    if not _has_visible_gpu():
-        pytest.skip("No visible NVIDIA GPU found for analytical 2D disk form-factor test.")
-
-    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
-    # Under a single visible GPU, the second large 2D analytical CyRSoXS run in the
-    # same Python process can hit an upstream illegal-memory-access failure. Isolating
-    # each diameter preserves the sphere-style harness while keeping the test stable.
-    _run_geometry_case_subprocess(diameter_nm)

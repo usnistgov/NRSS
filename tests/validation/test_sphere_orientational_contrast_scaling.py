@@ -15,14 +15,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from tests.validation.lib.lazy_cyrsoxs import cy
+from NRSS.morphology import Material, Morphology
+from tests.path_matrix import ComputationPath
 from tests.validation.lib.orientational_contrast import (
     UniaxialOpticalState,
     predict_uniaxial_vacuum_far_field_contrast,
 )
 
 
-pytestmark = [pytest.mark.cyrsoxs_only, pytest.mark.reference_parity]
+pytestmark = [pytest.mark.path_matrix, pytest.mark.reference_parity]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -185,6 +186,27 @@ def _release_runtime_memory() -> None:
             pass
 
 
+def _to_backend_namespace(array: np.ndarray, field_namespace: str):
+    if field_namespace == "numpy":
+        return np.ascontiguousarray(array.astype(np.float32, copy=False))
+    if field_namespace != "cupy":
+        raise AssertionError(f"Unsupported field namespace {field_namespace!r}.")
+    import cupy as cp
+
+    return cp.ascontiguousarray(cp.asarray(array, dtype=cp.float32))
+
+
+def _path_runtime_kwargs(nrss_path: ComputationPath) -> dict[str, object]:
+    return {
+        "backend": nrss_path.backend,
+        "backend_options": nrss_path.backend_options,
+        "resident_mode": nrss_path.resident_mode,
+        "input_policy": "strict" if nrss_path.category == "cupy" else "coerce",
+        "ownership_policy": nrss_path.ownership_policy,
+        "field_namespace": nrss_path.field_namespace,
+    }
+
+
 def _cyrsoxs_detector_axis(n: int, phys_size_nm: float) -> np.ndarray:
     if int(n) < 2:
         raise AssertionError(f"CyRSoXS detector axis needs at least 2 points, got n={n}.")
@@ -241,90 +263,93 @@ def _sphere_and_vacuum_vfrac() -> tuple[np.ndarray, np.ndarray]:
     return sphere, vacuum
 
 
-def _run_sphere_scenario(scenario: OrientationalScenario) -> dict[str, float]:
-    sphere_vfrac, vacuum_vfrac = _sphere_and_vacuum_vfrac()
-    zeros = np.zeros_like(sphere_vfrac, dtype=np.float32)
+def _run_sphere_scenario(
+    scenario: OrientationalScenario,
+    runtime_kwargs: dict[str, object],
+) -> dict[str, float]:
+    sphere_vfrac_host, vacuum_vfrac_host = _sphere_and_vacuum_vfrac()
+    field_namespace = str(runtime_kwargs["field_namespace"])
+    sphere_vfrac = _to_backend_namespace(sphere_vfrac_host, field_namespace)
+    vacuum_vfrac = _to_backend_namespace(vacuum_vfrac_host, field_namespace)
+    s_field = _to_backend_namespace((scenario.S * sphere_vfrac_host).astype(np.float32), field_namespace)
+    theta = _to_backend_namespace((scenario.theta * sphere_vfrac_host).astype(np.float32), field_namespace)
+    psi = _to_backend_namespace((scenario.psi * sphere_vfrac_host).astype(np.float32), field_namespace)
 
-    input_data = cy.InputData(NumMaterial=2)
-    input_data.setEnergies([family.energy_ev for family in FAMILY_SPECS])
-    input_data.setERotationAngle(StartAngle=0.0, EndAngle=0.0, IncrementAngle=0.0)
-    input_data.setPhysSize(PHYS_SIZE_NM)
-    input_data.setDimensions(SHAPE, cy.MorphologyOrder.ZYX)
-    input_data.setCaseType(cy.CaseType.Default)
-    input_data.setMorphologyType(cy.MorphologyType.EulerAngles)
-    input_data.setAlgorithm(AlgorithmID=0, MaxStreams=1)
-    input_data.interpolationType = cy.InterpolationType.Linear
-    input_data.windowingType = cy.FFTWindowing.NoPadding
-    input_data.rotMask = True
-    input_data.referenceFrame = 1
-    if not input_data.validate():
-        raise AssertionError("CyRSoXS InputData validation failed for orientational contrast sphere.")
-
-    optical_constants = cy.RefractiveIndex(input_data)
-    for family in FAMILY_SPECS:
-        optical_constants.addData(
-            OpticalConstants=[
-                [
-                    family.delta_para,
-                    family.beta_para,
-                    family.delta_perp,
-                    family.beta_perp,
-                ],
-                [0.0, 0.0, 0.0, 0.0],
-            ],
-            Energy=family.energy_ev,
-        )
-    if not optical_constants.validate():
-        raise AssertionError("CyRSoXS optical-constants validation failed for orientational contrast sphere.")
-
-    voxel_data = cy.VoxelData(InputData=input_data)
-    voxel_data.addVoxelData(
-        S=(scenario.S * sphere_vfrac).astype(np.float32),
-        Theta=(scenario.theta * sphere_vfrac).astype(np.float32),
-        Psi=(scenario.psi * sphere_vfrac).astype(np.float32),
+    energies = [family.energy_ev for family in FAMILY_SPECS]
+    mat1 = Material(
+        materialID=1,
         Vfrac=sphere_vfrac,
-        MaterialID=1,
+        S=s_field,
+        theta=theta,
+        psi=psi,
+        energies=energies,
+        opt_constants={
+            family.energy_ev: [
+                family.delta_para,
+                family.beta_para,
+                family.delta_perp,
+                family.beta_perp,
+            ]
+            for family in FAMILY_SPECS
+        },
+        name="sphere",
     )
-    voxel_data.addVoxelData(
-        S=zeros,
-        Theta=zeros,
-        Psi=zeros,
+    mat2 = Material(
+        materialID=2,
         Vfrac=vacuum_vfrac,
-        MaterialID=2,
+        S=None,
+        theta=None,
+        psi=None,
+        energies=energies,
+        opt_constants={family.energy_ev: [0.0, 0.0, 0.0, 0.0] for family in FAMILY_SPECS},
+        name="vacuum",
     )
-    if not voxel_data.validate():
-        raise AssertionError("CyRSoXS VoxelData validation failed for orientational contrast sphere.")
-
-    scattering_pattern = cy.ScatteringPattern(InputData=input_data)
-    with cy.ostream_redirect(stdout=False, stderr=False):
-        cy.launch(
-            VoxelData=voxel_data,
-            RefractiveIndexData=optical_constants,
-            InputData=input_data,
-            ScatteringPattern=scattering_pattern,
-        )
-
-    detector_stack = np.array(
-        scattering_pattern.writeAllToNumpy(kID=0),
-        dtype=np.float64,
-        copy=True,
-    )
-    intensities = {
-        family.name: _detector_annulus_intensity(detector_stack[idx])
-        for idx, family in enumerate(FAMILY_SPECS)
+    config = {
+        "CaseType": 0,
+        "MorphologyType": 0,
+        "Energies": energies,
+        "EAngleRotation": [0.0, 0.0, 0.0],
+        "RotMask": 1,
+        "WindowingType": 0,
+        "AlgorithmType": 0,
+        "ReferenceFrame": 1,
+        "EwaldsInterpolation": 1,
     }
+    morph = Morphology(
+        2,
+        materials={1: mat1, 2: mat2},
+        PhysSize=PHYS_SIZE_NM,
+        config=config,
+        backend=str(runtime_kwargs["backend"]),
+        backend_options=dict(runtime_kwargs["backend_options"]),
+        resident_mode=runtime_kwargs["resident_mode"],
+        input_policy=str(runtime_kwargs["input_policy"]),
+        ownership_policy=runtime_kwargs["ownership_policy"],
+        create_cy_object=True,
+    )
+    try:
+        scattering = morph.run(stdout=False, stderr=False, return_xarray=True)
+        if scattering is None:
+            raise AssertionError("Orientational contrast backend run returned no scattering data.")
+        intensities = {}
+        for family in FAMILY_SPECS:
+            detector_image = np.asarray(scattering.sel(energy=float(family.energy_ev)).values, dtype=np.float64)
+            intensities[family.name] = _detector_annulus_intensity(detector_image)
+        return intensities
+    finally:
+        morph.release_runtime()
+        del morph
+        del sphere_vfrac, vacuum_vfrac, s_field, theta, psi
+        _release_runtime_memory()
 
-    del scattering_pattern, voxel_data, optical_constants, input_data, zeros, detector_stack
-    _release_runtime_memory()
-    return intensities
 
-
-def evaluate_orientational_ratio_rows() -> list[dict[str, float | str]]:
+def evaluate_orientational_ratio_rows(nrss_path: ComputationPath) -> list[dict[str, float | str]]:
+    runtime_kwargs = _path_runtime_kwargs(nrss_path)
     observed_by_label = {
-        REFERENCE_SCENARIO.label: _run_sphere_scenario(REFERENCE_SCENARIO),
+        REFERENCE_SCENARIO.label: _run_sphere_scenario(REFERENCE_SCENARIO, runtime_kwargs),
     }
     for scenario in ORIENTATION_SCENARIOS:
-        observed_by_label[scenario.label] = _run_sphere_scenario(scenario)
+        observed_by_label[scenario.label] = _run_sphere_scenario(scenario, runtime_kwargs)
 
     rows: list[dict[str, float | str]] = []
     for family in FAMILY_SPECS:
@@ -398,9 +423,9 @@ def _series_rows(
     return series_rows
 
 
-def _write_ratio_rows_tsv(rows: list[dict[str, float | str]]) -> Path:
+def _write_ratio_rows_tsv(rows: list[dict[str, float | str]], path_id: str) -> Path:
     PLOT_DIR.mkdir(parents=True, exist_ok=True)
-    out = PLOT_DIR / "orientational_ratio_rows.tsv"
+    out = PLOT_DIR / f"{path_id}__orientational_ratio_rows.tsv"
     fieldnames = [
         "family",
         "energy_ev",
@@ -424,6 +449,7 @@ def _write_ratio_rows_tsv(rows: list[dict[str, float | str]]) -> Path:
 def _write_family_plot(
     family_name: str,
     rows: list[dict[str, float | str]],
+    path_id: str,
 ) -> Path:
     PLOT_DIR.mkdir(parents=True, exist_ok=True)
     family_rows = [row for row in rows if row["family"] == family_name]
@@ -588,7 +614,7 @@ def _write_family_plot(
 
     fig.suptitle("Sphere Orientational Contrast Scaling", fontsize=14)
     fig.tight_layout()
-    out = PLOT_DIR / f"{family_name}_orientational_contrast.png"
+    out = PLOT_DIR / f"{path_id}__{family_name}_orientational_contrast.png"
     fig.savefig(out, dpi=160)
     plt.close(fig)
     return out
@@ -596,10 +622,11 @@ def _write_family_plot(
 
 def write_orientational_validation_artifacts(
     rows: list[dict[str, float | str]],
+    path_id: str,
 ) -> list[Path]:
-    outputs = [_write_ratio_rows_tsv(rows)]
+    outputs = [_write_ratio_rows_tsv(rows, path_id=path_id)]
     for family in FAMILY_SPECS:
-        outputs.append(_write_family_plot(family.name, rows))
+        outputs.append(_write_family_plot(family.name, rows, path_id=path_id))
     return outputs
 
 
@@ -607,7 +634,7 @@ def write_orientational_validation_artifacts(
 @pytest.mark.slow
 @pytest.mark.physics_validation
 @pytest.mark.toolchain_validation
-def test_sphere_orientational_contrast_scaling_pybind():
+def test_sphere_orientational_contrast_scaling_pybind(nrss_path: ComputationPath):
     """Validate helper-predicted orientational contrast ratios for a sphere in vacuum.
 
     This physics test keeps the sphere form factor fixed and varies contrast only
@@ -633,9 +660,9 @@ def test_sphere_orientational_contrast_scaling_pybind():
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
     assert len(ORIENTATION_SCENARIOS) == 18
 
-    rows = evaluate_orientational_ratio_rows()
+    rows = evaluate_orientational_ratio_rows(nrss_path)
     if WRITE_VALIDATION_PLOTS:
-        write_orientational_validation_artifacts(rows)
+        write_orientational_validation_artifacts(rows, path_id=nrss_path.id)
 
     non_ref_rows = [row for row in rows if row["series"] != "reference"]
     max_rel_err = 0.0

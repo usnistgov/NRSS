@@ -67,6 +67,324 @@ refactors.
 7. Core-shell.
 8. MWCNT.
 
+### Next development priority (April 4, 2026)
+
+Refactor the maintained test surface so the three prioritized computation paths
+are first-class peers:
+
+1. `legacy_cyrsoxs`
+   - `backend="cyrsoxs"`
+2. `cupy_tensor_coeff`
+   - `backend="cupy-rsoxs"`
+   - `backend_options={"execution_path": "tensor_coeff"}`
+3. `cupy_direct_polarization`
+   - `backend="cupy-rsoxs"`
+   - `backend_options={"execution_path": "direct_polarization"}`
+
+This refactor should replace the current backend-first test routing model with
+a path-first matrix model. The maintained smoke and physics suites should name
+the computation path(s) they validate directly rather than relying on the
+implicit default `cupy-rsoxs` execution path.
+
+Required changes:
+
+1. Add shared path metadata and fixtures for the maintained pytest surface, for
+   example a canonical `ComputationPath` definition plus an `nrss_path`
+   fixture.
+2. Extend test-routing plumbing so the standard local report and the physics
+   runner can execute per-path lanes rather than only a single
+   `NRSS_BACKEND`-selected lane.
+3. Convert maintained validation builders so they accept explicit
+   `backend` / `backend_options` inputs anywhere a test is intended to run on
+   more than one computation path.
+4. Replace broad backend-oriented markers as the primary maintained routing
+   mechanism with path-oriented routing, while retaining explicit legacy-only
+   compatibility markers where scientifically justified.
+
+Migration guidance for tests that are currently backend specific:
+
+1. Current `backend_specific` tests should be split into one of two groups:
+   - path-matrix tests that run on all three prioritized computation paths,
+   - true compatibility tests that remain intentionally legacy-only.
+2. `tests/validation/test_bragg_2d_lattice.py`,
+   `tests/validation/test_bragg_3d_lattice.py`, and
+   `tests/validation/test_mwcnt_reference.py` should become path-matrix
+   physics tests. Their morphology builders should accept explicit
+   `backend` / `backend_options` arguments and should be exercised in the
+   `legacy_cyrsoxs`, `cupy_tensor_coeff`, and
+   `cupy_direct_polarization` lanes.
+3. `tests/validation/test_core_shell_reference.py` already has partial path
+   plumbing and should be normalized into the same path-matrix structure so
+   the maintained `cupy_tensor_coeff` and `cupy_direct_polarization` workflows
+   are represented symmetrically rather than as a default-plus-extra pattern.
+4. Tests that are currently marked `cyrsoxs_only` should be reviewed
+   individually:
+   - if they express general physics expectations, convert them into
+     path-matrix tests with per-path thresholds if needed,
+   - if they exercise true CyRSoXS-only compatibility behavior, move them into
+     an explicit legacy-compatibility lane rather than leaving them in the
+     principal peer-path physics matrix.
+5. Keep CLI-vs-pybind checks as explicit legacy compatibility tests. They
+   remain valuable, but they should not define the maintained peer structure
+   for the three primary computation paths.
+
+### Path-matrix refactor details for resumption
+
+The goal of this refactor is not just to add more parametrization. It is to
+make the maintained test program structurally path-first so that a fresh
+resumer can see, run, and extend the three prioritized computation paths
+without reconstructing hidden defaults from the current backend-first routing.
+
+#### Canonical path definition
+
+Add a maintained shared path definition module, for example
+`tests/path_matrix.py`, with one canonical object per peer computation path.
+
+Recommended shape:
+
+1. `id`
+2. `backend`
+3. `backend_options`
+4. `category`
+5. `supports_cli`
+6. `supports_reference_parity`
+
+Initial path set:
+
+1. `legacy_cyrsoxs`
+   - `backend="cyrsoxs"`
+   - `backend_options={}`
+   - `category="legacy"`
+2. `cupy_tensor_coeff`
+   - `backend="cupy-rsoxs"`
+   - `backend_options={"execution_path": "tensor_coeff"}`
+   - `category="cupy"`
+3. `cupy_direct_polarization`
+   - `backend="cupy-rsoxs"`
+   - `backend_options={"execution_path": "direct_polarization"}`
+   - `category="cupy"`
+
+#### Required routing changes
+
+Current test routing is centered on `tests/conftest.py` plus
+`--nrss-backend` / `NRSS_BACKEND`. The refactor should preserve backend
+selection compatibility while making the maintained route path-aware.
+
+Planned changes:
+
+1. Add `--nrss-path` to `tests/conftest.py`.
+2. Add `NRSS_PATH` environment support, checked before implicit default
+   backend resolution.
+3. If no path selector is provided, expand maintained path-matrix tests to all
+   three peer paths by default rather than collapsing to the backend default.
+4. If `--nrss-path` / `NRSS_PATH` and `--nrss-backend` / `NRSS_BACKEND`
+   disagree, fail fast instead of silently choosing one selector.
+5. Add a session fixture `nrss_path`.
+6. Add a parametrized maintained-path fixture for path-matrix tests so a plain
+   `pytest` run expands those tests across all three peer paths.
+7. Keep `nrss_backend` temporarily as a compatibility fixture during the
+   migration, but treat it as a derived field from `nrss_path`.
+8. Update pytest report headers so they show both the selected path id and the
+   effective backend/backend-options pair.
+9. Update collection-time skip logic so path-only and legacy-only tests route
+   cleanly without relying on `backend_specific` as the main concept.
+
+#### Scripts that must be updated
+
+The path-first model is incomplete unless the standard scripts can run path
+lanes directly. The following files are part of the required edit set:
+
+1. `tests/conftest.py`
+   - add path option/env parsing and `nrss_path` fixture
+2. `scripts/run_local_test_report.sh`
+   - add `--nrss-path`
+   - support running repeated standard lanes per path
+   - emit path-specific metadata and artifacts
+3. `scripts/run_physics_validation_suite.py`
+   - add `--nrss-path`
+   - pass path metadata to row-level pytest invocations
+4. optionally `pyproject.toml`
+   - add/adjust markers if new maintained path markers are introduced
+
+#### Maintained file migration order
+
+To minimize risk, convert the maintained shared builders first, then their
+tests, then the report scripts.
+
+Recommended implementation order:
+
+1. `tests/path_matrix.py` new shared path-definition module.
+2. `tests/conftest.py` path fixture and routing compatibility layer.
+3. `tests/validation/lib/bragg.py`
+   - add `backend` / `backend_options` plumbing to both Bragg builders
+4. `tests/validation/lib/mwcnt.py`
+   - add `backend` / `backend_options` plumbing to the maintained MWCNT
+     builder/run helpers
+5. `tests/validation/lib/core_shell.py`
+   - normalize existing partial path support into the same interface used by
+     Bragg and MWCNT
+6. `tests/validation/test_bragg_2d_lattice.py`
+7. `tests/validation/test_bragg_3d_lattice.py`
+8. `tests/validation/test_mwcnt_reference.py`
+9. `tests/validation/test_core_shell_reference.py`
+10. `tests/smoke/test_smoke.py`
+11. `scripts/run_physics_validation_suite.py`
+12. `scripts/run_local_test_report.sh`
+
+#### Marker migration policy
+
+Current markers encode the old model and should be reinterpreted explicitly.
+
+1. `backend_specific`
+   - stop using this as the primary maintained routing label
+   - replace with one of:
+     - path-matrix test,
+     - path-subset test,
+     - backend-contract test,
+     - legacy-compatibility test
+2. `cyrsoxs_only`
+   - keep only for true legacy-compatibility behavior during migration
+   - for general physics checks, convert away from this marker
+3. `reference_parity`
+   - keep this meaning intact
+   - path conversion should not weaken reference-parity expectations
+4. `physics_validation`, `experimental_validation`, and
+   `toolchain_validation`
+   - keep these categories intact
+   - they describe test intent, not route selection
+
+#### Test-by-test migration guidance
+
+Validation surface:
+
+1. `tests/validation/test_bragg_2d_lattice.py`
+   - convert to a path-matrix physics test
+   - run on `legacy_cyrsoxs`, `cupy_tensor_coeff`, and
+     `cupy_direct_polarization`
+   - accept `nrss_path` and pass explicit path settings into the Bragg builder
+2. `tests/validation/test_bragg_3d_lattice.py`
+   - same conversion as 2D Bragg
+3. `tests/validation/test_mwcnt_reference.py`
+   - convert to a path-matrix physics test
+   - use shared maintained observables for all three peer paths
+   - keep path-specific thresholds only if empirical variance justifies them
+4. `tests/validation/test_core_shell_reference.py`
+   - collapse the current asymmetry between the default cupy path and the
+     explicit direct-path case
+   - make the maintained experimental/sim-regression tests run through the
+     path matrix
+   - drop the extra strict/borrow CuPy stress cases unless they still provide
+     unique coverage not already represented in the principal matrix
+
+Smoke surface:
+
+1. `test_pybind_runtime_tiny_deterministic_pattern`
+   - convert from `backend_specific` to path-matrix smoke
+2. `test_pyhyperscattering_integrator_to_xarray_smoke`
+   - convert from `backend_specific` to path-matrix smoke
+3. `test_pybind_runtime_2d_disk_smoke`
+   - convert from `backend_specific` to path-matrix smoke
+4. `test_eangle_rotation_endpoint_behavior_smoke`
+   - convert from `backend_specific` to path-matrix smoke
+5. CuPy backend-option contract tests
+   - keep as implementation-specific tests
+   - relabel as backend-contract or CuPy-only rather than peer-path tests
+6. CLI-vs-pybind smoke tests
+   - keep as legacy-compatibility tests
+7. CyRSoXS object-lifecycle or pybind-ownership tests
+   - keep as legacy-compatibility unless a parallel cupy-specific lifecycle
+     requirement emerges
+
+#### CuPy residency policy for peer-path lanes
+
+The two maintained `cupy-rsoxs` peer paths should use device residency for the
+standard smoke and physics matrix after lightweight parity checks establish
+that host-resident and device-resident execution agree on the maintained
+observables.
+
+Required policy:
+
+1. Add at least two simple parity checks before switching the shared CuPy lanes
+   to device residency:
+   - host vs device parity for `cupy_tensor_coeff`
+   - host vs device parity for `cupy_direct_polarization`
+2. Keep backend-contract tests that explicitly exercise host-side staging in
+   host residency; do not erase host-resident coverage.
+3. Do not reuse mutable `Morphology` instances across tests as a speed
+   optimization. Runtime reuse may occur only at the pytest-process / imported
+   CuPy-runtime level, with each test owning its own morphology and releasing
+   runtime state normally.
+4. Prefer CuPy-native fields plus `ownership_policy="borrow"` for maintained
+   CuPy lanes when the builder can supply them without distorting the test
+   intent.
+5. When a builder still originates fields on the host, `resident_mode="device"`
+   is still acceptable for the maintained CuPy matrix if construction performs
+   a one-time transfer and the resulting lane remains deterministic.
+6. Note the current limitation that `scripts/run_physics_validation_suite.py`
+   executes each physics row in a separate pytest process, so this residency
+   speedup applies within a row/runtime rather than across all maintained
+   physics modules.
+
+#### Expected lane structure after refactor
+
+The standard report should expose the maintained program as:
+
+1. one shared environment snapshot
+2. one shared CPU contract lane
+3. `legacy_cyrsoxs` GPU smoke lane
+4. `legacy_cyrsoxs` physics-validation lane
+5. `cupy_tensor_coeff` GPU smoke lane
+6. `cupy_tensor_coeff` physics-validation lane
+7. `cupy_direct_polarization` GPU smoke lane
+8. `cupy_direct_polarization` physics-validation lane
+9. optional legacy-compatibility lane for CLI-only checks if kept outside the
+   main path matrix
+
+Artifact layout should avoid lane collisions. Use per-path directories or
+path-prefixed filenames under `test-reports/`.
+
+#### Acceptance criteria
+
+The refactor is only complete when the following are true:
+
+1. a developer can select a maintained path directly via pytest and the two
+   report scripts
+2. all four maintained shared physics modules
+   - `Bragg 2D`,
+   - `Bragg 3D`,
+   - `CoreShell`,
+   - `MWCNT`
+   run through the path matrix rather than through hidden default backend
+   resolution
+3. the maintained shared smoke surface has at least one deterministic 3D
+   run, one deterministic 2D run, one PyHyperScattering reduction run, and one
+   `EAngleRotation` run on each peer path
+4. direct-polarization is no longer represented only by ad hoc extra tests;
+   it appears as its own first-class standard lane
+5. legacy CLI checks still exist, but they are clearly separated from the
+   peer-path matrix
+6. `pytest --collect-only` output and the local report summary make the active
+   path visible without inspecting environment variables
+
+#### Resume-here checklist
+
+If this work is resumed in a fresh context, start from this exact sequence:
+
+1. read `tests/conftest.py`
+2. read `scripts/run_local_test_report.sh`
+3. read `scripts/run_physics_validation_suite.py`
+4. read `tests/validation/lib/core_shell.py`
+5. read `tests/validation/lib/bragg.py`
+6. read `tests/validation/lib/mwcnt.py`
+7. convert the path fixture and path-definition module first
+8. convert Bragg, MWCNT, and CoreShell builders next
+9. convert the validation tests
+10. convert smoke and report plumbing last
+
+Do not start by mass-editing markers across the suite before the shared path
+fixture and builder interfaces exist; that would create a partially migrated
+state with ambiguous routing semantics.
+
 ### Required test qualities
 
 1. Deterministic fixtures and fixed RNG seeds if randomness appears anywhere.

@@ -14,6 +14,8 @@ Options:
   --cyrsoxs-cli-dir PATH    Prepend PATH to CLI lookup inside each conda-run step.
   --cyrsoxs-pybind-dir PATH Prepend PATH to PYTHONPATH inside each conda-run step.
   --nrss-backend NAME       Export NRSS_BACKEND=NAME inside each test step.
+  --nrss-path ID            Export NRSS_PATH=ID inside each test step. When omitted,
+                            the default suite runs all three maintained peer paths.
   --cmd "COMMAND"           Add a test command to run in conda env.
                             Can be passed multiple times. Custom commands run after the
                             default suite unless --skip-defaults is set.
@@ -27,16 +29,21 @@ Environment overrides:
   NRSS_TEST_CYRSOXS_CLI_DIR     Same as --cyrsoxs-cli-dir.
   NRSS_TEST_CYRSOXS_PYBIND_DIR  Same as --cyrsoxs-pybind-dir.
   NRSS_TEST_BACKEND             Same as --nrss-backend.
+  NRSS_TEST_PATH                Same as --nrss-path.
   NRSS_TEST_ENV                 Same as --env.
 
 Behavior:
-  By default, the standard local report runs four steps:
+  By default, the standard local report runs eight steps:
     1. Environment Snapshot
     2. Smoke Tests (CPU Fast)
-    3. Smoke Tests (GPU)
-    4. Physics Validation Tests
+    3. legacy_cyrsoxs GPU Smoke
+    4. legacy_cyrsoxs Physics Validation
+    5. cupy_tensor_coeff GPU Smoke
+    6. cupy_tensor_coeff Physics Validation
+    7. cupy_direct_polarization GPU Smoke
+    8. cupy_direct_polarization Physics Validation
   Physics Validation Tests also harvest any generated graphical-abstract PNGs
-  into the per-run report directory and write graphical-abstracts.zip.
+  into per-path subdirectories under the per-run report directory.
   Any explicit --cmd commands are appended afterward.
   Use --skip-defaults to run only the explicit commands.
   Use --repeat N to repeat each explicit command N times.
@@ -69,6 +76,8 @@ WRITE_PHYSICS_PLOTS=1
 CYRSOXS_CLI_DIR="${NRSS_TEST_CYRSOXS_CLI_DIR:-${NRSS_TEST_PATH_PREPEND:-}}"
 CYRSOXS_PYBIND_DIR="${NRSS_TEST_CYRSOXS_PYBIND_DIR:-${NRSS_TEST_PYTHONPATH_PREPEND:-}}"
 NRSS_BACKEND_NAME="${NRSS_TEST_BACKEND:-${NRSS_BACKEND:-}}"
+NRSS_PATH_NAME="${NRSS_TEST_PATH:-${NRSS_PATH:-}}"
+PEER_PATH_IDS=("legacy_cyrsoxs" "cupy_tensor_coeff" "cupy_direct_polarization")
 declare -a TEST_CMDS=()
 
 while [[ $# -gt 0 ]]; do
@@ -95,6 +104,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --nrss-backend)
       NRSS_BACKEND_NAME="${2:-}"
+      shift 2
+      ;;
+    --nrss-path)
+      NRSS_PATH_NAME="${2:-}"
       shift 2
       ;;
     --cmd)
@@ -128,6 +141,17 @@ done
 if ! [[ "$CUSTOM_REPEAT_COUNT" =~ ^[1-9][0-9]*$ ]]; then
   echo "--repeat expects a positive integer, got: ${CUSTOM_REPEAT_COUNT}" >&2
   exit 2
+fi
+
+if [[ -n "$NRSS_PATH_NAME" ]]; then
+  case "$NRSS_PATH_NAME" in
+    legacy_cyrsoxs|cupy_tensor_coeff|cupy_direct_polarization)
+      ;;
+    *)
+      echo "--nrss-path expects one of: ${PEER_PATH_IDS[*]}, got: ${NRSS_PATH_NAME}" >&2
+      exit 2
+      ;;
+  esac
 fi
 
 if ! command -v conda >/dev/null 2>&1; then
@@ -185,6 +209,9 @@ build_inner_cmd() {
   if [[ -n "$NRSS_BACKEND_NAME" ]]; then
     inner_cmd="export NRSS_BACKEND=\"${NRSS_BACKEND_NAME}\""$'\n'"$inner_cmd"
   fi
+  if [[ -n "$NRSS_PATH_NAME" ]]; then
+    inner_cmd="export NRSS_PATH=\"${NRSS_PATH_NAME}\""$'\n'"$inner_cmd"
+  fi
 
   printf '%s' "$inner_cmd"
 }
@@ -214,6 +241,7 @@ write_metadata() {
     echo "cyrsoxs_cli_dir=$CYRSOXS_CLI_DIR"
     echo "cyrsoxs_pybind_dir=$CYRSOXS_PYBIND_DIR"
     echo "nrss_backend=$NRSS_BACKEND_NAME"
+    echo "nrss_path=$NRSS_PATH_NAME"
     echo "nrss_resolution_tsv=$NRSS_RESOLUTION_TSV"
     echo "cyrsoxs_resolution_tsv=$CYRSOXS_RESOLUTION_TSV"
     echo "validation_reference_manifest_tsv=$VALIDATION_REFERENCE_MANIFEST_TSV"
@@ -455,6 +483,7 @@ generate_summary() {
     echo "- CyRSoXS CLI override: ${CYRSOXS_CLI_DIR:-"(env default)"}"
     echo "- CyRSoXS pybind override: ${CYRSOXS_PYBIND_DIR:-"(env default)"}"
     echo "- NRSS backend: ${NRSS_BACKEND_NAME:-"(default resolution)"}"
+    echo "- NRSS path: ${NRSS_PATH_NAME:-"(default peer-path fanout)"}"
     echo "- Steps passed: $pass_count/$total"
     echo "- Steps failed: $fail_count/$total"
     echo ""
@@ -715,6 +744,25 @@ log "Report directory: $REPORT_DIR"
 
 STEP=1
 ANY_FAIL=0
+declare -a DEFAULT_RUN_PATHS=()
+
+if [[ -n "$NRSS_PATH_NAME" ]]; then
+  DEFAULT_RUN_PATHS=("$NRSS_PATH_NAME")
+elif [[ -n "$NRSS_BACKEND_NAME" ]]; then
+  case "$NRSS_BACKEND_NAME" in
+    cyrsoxs)
+      DEFAULT_RUN_PATHS=("legacy_cyrsoxs")
+      ;;
+    cupy-rsoxs)
+      DEFAULT_RUN_PATHS=("cupy_tensor_coeff" "cupy_direct_polarization")
+      ;;
+    *)
+      DEFAULT_RUN_PATHS=("${PEER_PATH_IDS[@]}")
+      ;;
+  esac
+else
+  DEFAULT_RUN_PATHS=("${PEER_PATH_IDS[@]}")
+fi
 
 ENV_SNAPSHOT_CMD=$'python - <<\'PY\'\nimport importlib\nimport platform\nimport sys\n\nmodules = [\n    "NRSS", "pytest", "numpy", "scipy", "pandas", "h5py", "xarray", "cupy", "CyRSoXS"\n]\n\nprint("python:", sys.version.replace("\\n", " "))\nprint("platform:", platform.platform())\nfor name in modules:\n    try:\n        mod = importlib.import_module(name)\n        ver = getattr(mod, "__version__", "unknown")\n        print(f"{name}: {ver}")\n    except Exception as exc:\n        print(f"{name}: NOT_AVAILABLE ({exc.__class__.__name__})")\nPY'
 
@@ -735,27 +783,32 @@ if [[ $SKIP_DEFAULTS -eq 0 ]]; then
   fi
   STEP=$((STEP + 1))
 
-  run_conda_step "Smoke Tests (GPU)" "python -m pytest tests/smoke -m gpu -v" "$STEP" || ANY_FAIL=1
-  if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
-    generate_summary
-    cat "$SUMMARY_MD"
-    exit 1
-  fi
-  STEP=$((STEP + 1))
+  for path_id in "${DEFAULT_RUN_PATHS[@]}"; do
+    run_conda_step \
+      "Smoke Tests (GPU) [$path_id]" \
+      "python -m pytest tests/smoke -m gpu -v --nrss-path \"$path_id\"" \
+      "$STEP" || ANY_FAIL=1
+    if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
+      generate_summary
+      cat "$SUMMARY_MD"
+      exit 1
+    fi
+    STEP=$((STEP + 1))
 
-  # Marker-based discovery keeps newly added physics_validation modules,
-  # including experimental-reference cases such as CoreShell, in the standard lane.
-  PHYSICS_CMD="python scripts/run_physics_validation_suite.py --repo-root \"$REPO_ROOT\" --catalog \"$PHYSICS_CATALOG_TSV\" --harvest-root \"$GRAPHICAL_ABSTRACTS_DIR\" --zip-path \"$GRAPHICAL_ABSTRACTS_ZIP\""
-  if [[ $WRITE_PHYSICS_PLOTS -eq 0 ]]; then
-    PHYSICS_CMD="$PHYSICS_CMD --no-plots"
-  fi
-  run_conda_step "Physics Validation Tests" "$PHYSICS_CMD" "$STEP" || ANY_FAIL=1
-  if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
-    generate_summary
-    cat "$SUMMARY_MD"
-    exit 1
-  fi
-  STEP=$((STEP + 1))
+    harvest_root_for_path="$GRAPHICAL_ABSTRACTS_DIR/$path_id"
+    zip_path_for_path="$REPORT_DIR/graphical-abstracts-${path_id}.zip"
+    PHYSICS_CMD="python scripts/run_physics_validation_suite.py --repo-root \"$REPO_ROOT\" --catalog \"$PHYSICS_CATALOG_TSV\" --harvest-root \"$harvest_root_for_path\" --zip-path \"$zip_path_for_path\" --nrss-path \"$path_id\""
+    if [[ $WRITE_PHYSICS_PLOTS -eq 0 ]]; then
+      PHYSICS_CMD="$PHYSICS_CMD --no-plots"
+    fi
+    run_conda_step "Physics Validation Tests [$path_id]" "$PHYSICS_CMD" "$STEP" || ANY_FAIL=1
+    if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
+      generate_summary
+      cat "$SUMMARY_MD"
+      exit 1
+    fi
+    STEP=$((STEP + 1))
+  done
 fi
 
 STEP_NAME_INDEX=1

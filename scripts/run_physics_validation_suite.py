@@ -50,6 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--zip-path", required=True, type=Path)
     parser.add_argument("--no-plots", action="store_true")
     parser.add_argument("--nrss-backend", default=None)
+    parser.add_argument("--nrss-path", default=None)
     return parser.parse_args()
 
 
@@ -208,9 +209,16 @@ def run_pytest_row(
     row: PhysicsRow,
     write_plots: bool,
     nrss_backend: str | None = None,
+    nrss_path: str | None = None,
 ) -> tuple[int, Counter[str]]:
     env = os.environ.copy()
     env.setdefault("CUDA_VISIBLE_DEVICES", "0")
+    if nrss_path is not None and nrss_path.strip():
+        env["NRSS_PATH"] = nrss_path.strip()
+        if nrss_backend is None or not nrss_backend.strip():
+            env.pop("NRSS_BACKEND", None)
+    else:
+        env.pop("NRSS_PATH", None)
     if nrss_backend is not None and nrss_backend.strip():
         env["NRSS_BACKEND"] = nrss_backend.strip()
     if write_plots:
@@ -340,6 +348,7 @@ def main() -> int:
             row,
             write_plots=not args.no_plots,
             nrss_backend=args.nrss_backend,
+            nrss_path=args.nrss_path,
         )
         total_counts.update(counts)
         if rc != 0:

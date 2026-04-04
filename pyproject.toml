@@ -52,6 +52,8 @@ markers = [
     "backend_agnostic_contract: tests that exercise NRSS behavior without depending on a specific backend runtime",
     "backend_specific: tests that exercise the selected NRSS backend runtime path",
     "cyrsoxs_only: tests that require the legacy CyRSoXS backend or CLI compatibility surface",
+    "path_matrix: maintained peer-path test that expands across the selected computation paths",
+    "path_subset(*path_ids): maintained path-aware test limited to the named computation paths",
     "reference_parity: tests whose assertions encode CyRSoXS-compatible reference behavior",
     "physics_validation: physics-facing validation tests for scattering behavior and analytical comparisons",
     "experimental_validation: validation tests gated against experimental reference data",

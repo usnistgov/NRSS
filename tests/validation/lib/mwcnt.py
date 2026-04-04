@@ -4,7 +4,7 @@ import gc
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import h5py
 import matplotlib
@@ -90,6 +90,22 @@ def release_runtime_memory() -> None:
             action()
         except Exception:
             pass
+
+
+def _convert_fields_namespace(
+    fields: dict[str, np.ndarray],
+    field_namespace: str,
+) -> dict[str, np.ndarray]:
+    if field_namespace == "numpy":
+        return fields
+    if field_namespace != "cupy":
+        raise AssertionError(f"Unsupported field namespace: {field_namespace}")
+
+    cp = __import__("cupy")
+    converted: dict[str, np.ndarray] = {}
+    for key, value in fields.items():
+        converted[key] = cp.ascontiguousarray(cp.asarray(value, dtype=cp.float32))
+    return converted
 
 
 @lru_cache(maxsize=1)
@@ -243,10 +259,20 @@ def build_mwcnt_morphology(
     eangle_rotation: list[float] | tuple[float, float, float] | None = None,
     windowing_type: int = WINDOWING_TYPE_DEFAULT,
     field_boundary_mode: Literal["periodic", "legacy"] = FIELD_BOUNDARY_MODE_DEFAULT,
+    *,
+    backend: str | None = None,
+    backend_options: dict[str, Any] | None = None,
+    resident_mode: str | None = None,
+    input_policy: str = "coerce",
+    ownership_policy: str | None = None,
+    field_namespace: str = "numpy",
 ) -> Morphology:
     optical_constants = _load_optical_constants()
     energies = list(map(float, optical_constants.energies))
-    fields = build_mwcnt_fields(geometry_path=geometry_path, field_boundary_mode=field_boundary_mode)
+    fields = _convert_fields_namespace(
+        build_mwcnt_fields(geometry_path=geometry_path, field_boundary_mode=field_boundary_mode),
+        field_namespace=field_namespace,
+    )
 
     materials = {
         1: Material(
@@ -289,6 +315,11 @@ def build_mwcnt_morphology(
         PhysSize=PHYS_SIZE_NM,
         config=config,
         create_cy_object=create_cy_object,
+        backend=backend,
+        backend_options=backend_options,
+        resident_mode=resident_mode,
+        input_policy=input_policy,
+        ownership_policy=ownership_policy,
     )
     morph.check_materials(quiet=True)
     if create_cy_object:
@@ -301,6 +332,13 @@ def run_mwcnt_pybind(
     eangle_rotation: list[float] | tuple[float, float, float] | None = None,
     windowing_type: int = WINDOWING_TYPE_DEFAULT,
     field_boundary_mode: Literal["periodic", "legacy"] = FIELD_BOUNDARY_MODE_DEFAULT,
+    *,
+    backend: str = "cyrsoxs",
+    backend_options: dict[str, Any] | None = None,
+    resident_mode: str | None = None,
+    input_policy: str = "coerce",
+    ownership_policy: str | None = None,
+    field_namespace: str = "numpy",
 ) -> xr.DataArray:
     morph = build_mwcnt_morphology(
         create_cy_object=True,
@@ -308,6 +346,12 @@ def run_mwcnt_pybind(
         eangle_rotation=eangle_rotation,
         windowing_type=windowing_type,
         field_boundary_mode=field_boundary_mode,
+        backend=backend,
+        backend_options=backend_options,
+        resident_mode=resident_mode,
+        input_policy=input_policy,
+        ownership_policy=ownership_policy,
+        field_namespace=field_namespace,
     )
     try:
         scattering = morph.run(stdout=False, stderr=False, return_xarray=True)

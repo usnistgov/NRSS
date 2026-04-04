@@ -1,12 +1,9 @@
 import gc
-import json
 import os
 import subprocess
-import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from time import sleep
 
 import matplotlib
 matplotlib.use("Agg")
@@ -15,17 +12,17 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from tests.validation.lib.lazy_cyrsoxs import cy
+from NRSS import SFieldMode
+from NRSS.morphology import Material, Morphology
+from tests.path_matrix import ComputationPath
 
 
-pytestmark = [pytest.mark.cyrsoxs_only, pytest.mark.reference_parity]
+pytestmark = [pytest.mark.path_matrix, pytest.mark.reference_parity]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLOT_DIR = REPO_ROOT / "test-reports" / "disk-2d-contrast-scaling-dev"
 WRITE_VALIDATION_PLOTS = os.environ.get("NRSS_WRITE_VALIDATION_PLOTS", "").strip() == "1"
-JSON_PREFIX = "NRSS_JSON:"
-MAX_BATCH_ATTEMPTS = 3
 
 SHAPE = (1, 2048, 2048)
 PHYS_SIZE_NM = 1.0
@@ -91,6 +88,27 @@ def _cyrsoxs_detector_axis(n: int, phys_size_nm: float) -> np.ndarray:
     return start + np.arange(int(n), dtype=np.float64) * step
 
 
+def _to_backend_namespace(array: np.ndarray, field_namespace: str):
+    if field_namespace == "numpy":
+        return np.ascontiguousarray(array.astype(np.float32, copy=False))
+    if field_namespace != "cupy":
+        raise AssertionError(f"Unsupported field namespace {field_namespace!r}.")
+    import cupy as cp
+
+    return cp.ascontiguousarray(cp.asarray(array, dtype=cp.float32))
+
+
+def _path_runtime_kwargs(nrss_path: ComputationPath) -> dict[str, object]:
+    return {
+        "backend": nrss_path.backend,
+        "backend_options": nrss_path.backend_options,
+        "resident_mode": nrss_path.resident_mode,
+        "input_policy": "strict" if nrss_path.category == "cupy" else "coerce",
+        "ownership_policy": nrss_path.ownership_policy,
+        "field_namespace": nrss_path.field_namespace,
+    }
+
+
 def _release_runtime_memory() -> None:
     gc.collect()
     try:
@@ -134,66 +152,69 @@ def _disk_and_matrix_vfrac() -> tuple[np.ndarray, np.ndarray]:
     return disk, matrix
 
 
-def _scattering_to_xarray(scattering_pattern, energies_eV: list[float]) -> xr.DataArray:
-    scattering_data = scattering_pattern.writeAllToNumpy(kID=0)
-    qy = _cyrsoxs_detector_axis(SHAPE[1], PHYS_SIZE_NM)
-    qx = _cyrsoxs_detector_axis(SHAPE[2], PHYS_SIZE_NM)
-    return xr.DataArray(
-        scattering_data,
-        dims=["energy", "qy", "qx"],
-        coords={"energy": list(map(float, energies_eV)), "qy": qy, "qx": qx},
-    )
-
-
-def _run_disk_pybind(scenarios: list[ContrastScenario]) -> xr.DataArray:
+def _run_disk_backend(
+    scenarios: list[ContrastScenario],
+    runtime_kwargs: dict[str, object],
+) -> xr.DataArray:
     disk_vfrac, matrix_vfrac = _disk_and_matrix_vfrac()
     energies_eV = [scenario.energy_ev for scenario in scenarios]
+    field_namespace = str(runtime_kwargs["field_namespace"])
+    disk_vfrac = _to_backend_namespace(disk_vfrac, field_namespace)
+    matrix_vfrac = _to_backend_namespace(matrix_vfrac, field_namespace)
 
-    input_data = cy.InputData(NumMaterial=2)
-    input_data.setEnergies(list(map(float, energies_eV)))
-    input_data.setERotationAngle(StartAngle=0.0, EndAngle=0.0, IncrementAngle=0.0)
-    input_data.setPhysSize(PHYS_SIZE_NM)
-    input_data.setDimensions(SHAPE, cy.MorphologyOrder.ZYX)
-    input_data.setCaseType(cy.CaseType.Default)
-    input_data.setMorphologyType(cy.MorphologyType.EulerAngles)
-    input_data.setAlgorithm(AlgorithmID=0, MaxStreams=1)
-    input_data.interpolationType = cy.InterpolationType.Linear
-    input_data.windowingType = cy.FFTWindowing.NoPadding
-    input_data.rotMask = True
-    input_data.referenceFrame = 1
-    if not input_data.validate():
-        raise AssertionError("CyRSoXS InputData validation failed.")
-
-    optical_constants = cy.RefractiveIndex(input_data)
-    for scenario in scenarios:
-        optical_constants.addData(
-            OpticalConstants=[list(scenario.disk_oc), list(scenario.matrix_oc)],
-            Energy=float(scenario.energy_ev),
-        )
-    if not optical_constants.validate():
-        raise AssertionError("CyRSoXS optical-constants validation failed.")
-
-    voxel_data = cy.VoxelData(InputData=input_data)
-    voxel_data.addVoxelData(Vfrac=disk_vfrac, MaterialID=1)
-    voxel_data.addVoxelData(Vfrac=matrix_vfrac, MaterialID=2)
-    if not voxel_data.validate():
-        raise AssertionError("CyRSoXS VoxelData validation failed.")
-
-    scattering_pattern = cy.ScatteringPattern(InputData=input_data)
-    with cy.ostream_redirect(stdout=False, stderr=False):
-        cy.launch(
-            VoxelData=voxel_data,
-            RefractiveIndexData=optical_constants,
-            InputData=input_data,
-            ScatteringPattern=scattering_pattern,
-        )
-
-    data = _scattering_to_xarray(scattering_pattern, energies_eV=energies_eV).copy(deep=True)
-
-    del scattering_pattern, voxel_data, optical_constants, input_data
-    del disk_vfrac, matrix_vfrac
-    _release_runtime_memory()
-    return data
+    mat1 = Material(
+        materialID=1,
+        Vfrac=disk_vfrac,
+        S=SFieldMode.ISOTROPIC,
+        theta=None,
+        psi=None,
+        energies=energies_eV,
+        opt_constants={float(s.energy_ev): list(s.disk_oc) for s in scenarios},
+        name="disk",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=matrix_vfrac,
+        S=SFieldMode.ISOTROPIC,
+        theta=None,
+        psi=None,
+        energies=energies_eV,
+        opt_constants={float(s.energy_ev): list(s.matrix_oc) for s in scenarios},
+        name="matrix",
+    )
+    config = {
+        "CaseType": 0,
+        "MorphologyType": 0,
+        "Energies": energies_eV,
+        "EAngleRotation": [0.0, 0.0, 0.0],
+        "RotMask": 1,
+        "WindowingType": 0,
+        "AlgorithmType": 0,
+        "ReferenceFrame": 1,
+        "EwaldsInterpolation": 1,
+    }
+    morph = Morphology(
+        2,
+        materials={1: mat1, 2: mat2},
+        PhysSize=PHYS_SIZE_NM,
+        config=config,
+        backend=str(runtime_kwargs["backend"]),
+        backend_options=dict(runtime_kwargs["backend_options"]),
+        resident_mode=runtime_kwargs["resident_mode"],
+        input_policy=str(runtime_kwargs["input_policy"]),
+        ownership_policy=runtime_kwargs["ownership_policy"],
+        create_cy_object=True,
+    )
+    try:
+        data = morph.run(stdout=False, stderr=False, return_xarray=True)
+        if data is None:
+            raise AssertionError("2D disk contrast-scaling backend run returned no scattering data.")
+        return data.copy(deep=True)
+    finally:
+        morph.release_runtime()
+        del morph
+        del disk_vfrac, matrix_vfrac
+        _release_runtime_memory()
 
 
 def _pyhyper_iq_by_energy(scattering) -> dict[float, tuple[np.ndarray, np.ndarray]]:
@@ -369,6 +390,7 @@ def _scenario_from_payload(payload: dict[str, object]) -> ContrastScenario:
 def _write_family_plot(
     family: str,
     rows: list[dict[str, float]],
+    path_id: str,
 ) -> Path:
     PLOT_DIR.mkdir(parents=True, exist_ok=True)
     expected = np.asarray([row["expected_ratio"] for row in rows], dtype=np.float64)
@@ -451,13 +473,16 @@ def _write_family_plot(
     table.scale(1.0, 1.2)
 
     fig.tight_layout()
-    out = PLOT_DIR / f"{family}_contrast_scaling.png"
+    out = PLOT_DIR / f"{path_id}__{family}_contrast_scaling.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
     return out
 
 
-def _write_summary_table_plot(family_rows: dict[str, list[dict[str, float]]]) -> Path:
+def _write_summary_table_plot(
+    family_rows: dict[str, list[dict[str, float]]],
+    path_id: str,
+) -> Path:
     PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(12.5, 9.0))
@@ -530,14 +555,17 @@ def _write_summary_table_plot(family_rows: dict[str, list[dict[str, float]]]) ->
         ha="left",
     )
     fig.tight_layout(rect=[0, 0.05, 1, 0.97])
-    out = PLOT_DIR / "contrast_scaling_agreement_summary.png"
+    out = PLOT_DIR / f"{path_id}__contrast_scaling_agreement_summary.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
     return out
 
 
-def _evaluate_contrast_batch_rows(batch: list[ContrastScenario]) -> list[dict[str, float]]:
-    data = _run_disk_pybind(batch)
+def _evaluate_contrast_batch_rows(
+    batch: list[ContrastScenario],
+    nrss_path: ComputationPath,
+) -> list[dict[str, float]]:
+    data = _run_disk_backend(batch, runtime_kwargs=_path_runtime_kwargs(nrss_path))
     iq_by_energy = _pyhyper_iq_by_energy(data)
     del data
     _release_runtime_memory()
@@ -581,58 +609,11 @@ def _evaluate_contrast_batch_rows(batch: list[ContrastScenario]) -> list[dict[st
     return batch_rows
 
 
-def _evaluate_contrast_batch_rows_from_payload(batch_payload: list[dict[str, object]]) -> list[dict[str, float]]:
-    return _evaluate_contrast_batch_rows([_scenario_from_payload(payload) for payload in batch_payload])
-
-
-def _run_contrast_batch_subprocess(batch: list[ContrastScenario]) -> list[dict[str, float]]:
-    batch_payload = [_scenario_to_payload(scenario) for scenario in batch]
-    env = os.environ.copy()
-    env.setdefault("CUDA_VISIBLE_DEVICES", "0")
-    code = (
-        "import json; "
-        "from tests.validation.test_2d_disk_contrast_scaling import "
-        "_evaluate_contrast_batch_rows_from_payload, JSON_PREFIX; "
-        f"payload = json.loads({json.dumps(json.dumps(batch_payload))}); "
-        "rows = _evaluate_contrast_batch_rows_from_payload(payload); "
-        "print(JSON_PREFIX + json.dumps(rows, sort_keys=True))"
-    )
-    last_error = None
-    for attempt in range(1, MAX_BATCH_ATTEMPTS + 1):
-        result = subprocess.run(
-            [sys.executable, "-c", code],
-            cwd=str(REPO_ROOT),
-            env=env,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        payload = None
-        for line in (result.stdout or "").splitlines():
-            if line.startswith(JSON_PREFIX):
-                payload = json.loads(line[len(JSON_PREFIX) :])
-        if result.stdout:
-            print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
-        if result.returncode == 0 and payload is not None:
-            if attempt > 1:
-                print(f"contrast batch retry succeeded on attempt {attempt}/{MAX_BATCH_ATTEMPTS}")
-            return payload
-
-        last_error = (
-            f"attempt {attempt}/{MAX_BATCH_ATTEMPTS} failed "
-            f"(rc={result.returncode}, payload={'yes' if payload is not None else 'no'})."
-        )
-        sleep(0.5)
-
-    raise AssertionError(f"Isolated 2D contrast batch failed after retries: {last_error}")
-
-
-def _evaluate_contrast_family_rows() -> dict[str, list[dict[str, float]]]:
+def _evaluate_contrast_family_rows(nrss_path: ComputationPath) -> dict[str, list[dict[str, float]]]:
     scenarios = _build_scenarios()
     scenario_rows = []
     for batch_index, batch in enumerate(_scenario_batches(scenarios)):
-        batch_rows = _run_contrast_batch_subprocess(batch)
+        batch_rows = _evaluate_contrast_batch_rows(batch, nrss_path)
         for row in batch_rows:
             if row["label"] == "beta_vac_a1" and batch_index > 0:
                 continue
@@ -651,18 +632,18 @@ def _evaluate_contrast_family_rows() -> dict[str, list[dict[str, float]]]:
 @pytest.mark.slow
 @pytest.mark.physics_validation
 @pytest.mark.toolchain_validation
-def test_2d_disk_contrast_scaling_pybind():
+def test_2d_disk_contrast_scaling_pybind(nrss_path: ComputationPath):
     """Validate quadratic contrast scaling for a 70 nm 2D disk across beta, delta, mixed, and split-material cases."""
     if not _has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for 2D disk contrast-scaling validation.")
 
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
     assert len(_build_scenarios()) == 24
-    family_rows = _evaluate_contrast_family_rows()
+    family_rows = _evaluate_contrast_family_rows(nrss_path)
 
     for family, rows in family_rows.items():
         if WRITE_VALIDATION_PLOTS:
-            _write_family_plot(family, rows)
+            _write_family_plot(family, rows, path_id=nrss_path.id)
         magnitudes = [row["magnitude"] for row in rows]
         assert magnitudes == sorted(magnitudes)
         weighted_ratios = [row["weighted_ratio"] for row in rows]
@@ -696,7 +677,7 @@ def test_2d_disk_contrast_scaling_pybind():
             ), f"{row['label']} weighted/unweighted mismatch too large"
 
     if WRITE_VALIDATION_PLOTS:
-        _write_summary_table_plot(family_rows)
+        _write_summary_table_plot(family_rows, path_id=nrss_path.id)
 
     for family in sorted(family_rows):
         print(f"family={family}")

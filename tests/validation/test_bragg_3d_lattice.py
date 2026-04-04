@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from scipy.ndimage import maximum_filter
 
+from tests.path_matrix import ComputationPath, get_computation_path
 from tests.validation.lib.bragg import (
     Bragg3DCase,
     build_bragg_3d_case_morphology,
@@ -22,7 +23,7 @@ from tests.validation.lib.bragg import (
 )
 
 
-pytestmark = [pytest.mark.backend_specific, pytest.mark.reference_parity]
+pytestmark = [pytest.mark.path_matrix, pytest.mark.reference_parity]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -104,6 +105,22 @@ def _sanitize_scattering(arr: np.ndarray) -> np.ndarray:
     arr = np.asarray(arr, dtype=np.float64)
     arr = np.where(np.isfinite(arr), arr, 0.0)
     return np.clip(arr, 0.0, None)
+
+
+def _to_numpy(arr) -> np.ndarray:
+    if hasattr(arr, "get"):
+        arr = arr.get()
+    return np.asarray(arr)
+
+
+def _path_runtime_kwargs(nrss_path: ComputationPath) -> dict[str, object]:
+    return {
+        "backend": nrss_path.backend,
+        "backend_options": nrss_path.backend_options,
+        "resident_mode": nrss_path.resident_mode,
+        "ownership_policy": nrss_path.ownership_policy,
+        "field_namespace": nrss_path.field_namespace,
+    }
 
 
 def _pyhyper_iq(scattering) -> tuple[np.ndarray, np.ndarray]:
@@ -324,6 +341,7 @@ def _classify_radial_shell_evidence(
 
 
 def _write_dev_plot(
+    path_id: str,
     case: Bragg3DCase,
     metadata: dict[str, object],
     image: np.ndarray,
@@ -477,17 +495,17 @@ def _write_dev_plot(
         bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.82, "edgecolor": "#bbbbbb"},
     )
 
-    out = PLOT_DIR / f"{case.case_id}_bragg_3d_e{case.energy_eV:.1f}.png"
+    out = PLOT_DIR / f"{path_id}__{case.case_id}_bragg_3d_e{case.energy_eV:.1f}.png"
     fig.savefig(out, dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
-def _evaluate_case(case: Bragg3DCase) -> dict[str, object]:
+def _evaluate_case(case: Bragg3DCase, nrss_path: ComputationPath) -> dict[str, object]:
     t0 = perf_counter()
-    morph, metadata = build_bragg_3d_case_morphology(case)
+    morph, metadata = build_bragg_3d_case_morphology(case, **_path_runtime_kwargs(nrss_path))
     nz, ny, _ = case.shape
-    metadata["xy_slice"] = morph.materials[1].Vfrac[nz // 2].copy()
-    metadata["xz_slice"] = morph.materials[1].Vfrac[:, ny // 2, :].copy()
+    metadata["xy_slice"] = _to_numpy(morph.materials[1].Vfrac[nz // 2].copy())
+    metadata["xz_slice"] = _to_numpy(morph.materials[1].Vfrac[:, ny // 2, :].copy())
     morph.check_materials(quiet=True)
     morph.validate_all(quiet=True)
     t1 = perf_counter()
@@ -602,9 +620,10 @@ def _assert_case_result(case: Bragg3DCase, result: dict[str, object]) -> None:
     assert len(unexpected_peaks) <= thresholds["unexpected_peak_count_max"]
 
 
-def _run_validated_case(case_id: str) -> None:
+def _run_validated_case(case_id: str, path_id: str) -> None:
+    nrss_path = get_computation_path(path_id)
     case = CASES_BY_ID[case_id]
-    result = _evaluate_case(case)
+    result = _evaluate_case(case, nrss_path)
 
     print(
         "peak_metrics",
@@ -629,6 +648,7 @@ def _run_validated_case(case_id: str) -> None:
 
     if WRITE_VALIDATION_PLOTS:
         _write_dev_plot(
+            path_id=nrss_path.id,
             case=case,
             metadata=result["metadata"],
             image=result["image"],
@@ -653,12 +673,14 @@ def _run_validated_case(case_id: str) -> None:
     release_runtime_memory()
 
 
-def _run_case_subprocess(case_id: str) -> None:
+def _run_case_subprocess(case_id: str, nrss_path: ComputationPath) -> None:
     env = os.environ.copy()
     env.setdefault("CUDA_VISIBLE_DEVICES", "0")
+    env["NRSS_PATH"] = nrss_path.id
+    env["NRSS_BACKEND"] = nrss_path.backend
     code = (
         "from tests.validation.test_bragg_3d_lattice import "
-        f"_run_validated_case; _run_validated_case({case_id!r})"
+        f"_run_validated_case; _run_validated_case({case_id!r}, {nrss_path.id!r})"
     )
     result = subprocess.run(
         [sys.executable, "-c", code],
@@ -681,10 +703,10 @@ def _run_case_subprocess(case_id: str) -> None:
 @pytest.mark.physics_validation
 @pytest.mark.toolchain_validation
 @pytest.mark.parametrize("case_id", [case.case_id for case in CASES])
-def test_bragg_3d_lattice_pybind(case_id: str):
+def test_bragg_3d_lattice_pybind(case_id: str, nrss_path: ComputationPath):
     """Validate 3D Bragg peak positions for deterministic simple-cubic and HCP sphere lattices."""
     if not has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for 3D Bragg lattice validation.")
 
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
-    _run_case_subprocess(case_id)
+    _run_case_subprocess(case_id, nrss_path)

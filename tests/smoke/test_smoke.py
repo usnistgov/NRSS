@@ -11,6 +11,8 @@ import numpy as np
 import pytest
 import NRSS.backends.registry as backend_registry
 
+from tests.path_matrix import ComputationPath
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_PATH = REPO_ROOT / "src"
@@ -77,6 +79,25 @@ def _release_cupy_memory():
     cp.cuda.Device().synchronize()
     cp.get_default_memory_pool().free_all_blocks()
     cp.get_default_pinned_memory_pool().free_all_blocks()
+
+
+def _to_backend_namespace(array: np.ndarray, field_namespace: str):
+    if field_namespace == "numpy":
+        return np.ascontiguousarray(array.astype(np.float32, copy=False))
+    if field_namespace == "cupy":
+        cp = _import_cupy_required()
+        return cp.ascontiguousarray(cp.asarray(array, dtype=cp.float32))
+    raise AssertionError(f"Unsupported field namespace {field_namespace!r}.")
+
+
+def _path_runtime_kwargs(nrss_path: ComputationPath) -> dict[str, object]:
+    return {
+        "backend": nrss_path.backend,
+        "backend_options": nrss_path.backend_options,
+        "resident_mode": nrss_path.resident_mode,
+        "ownership_policy": nrss_path.ownership_policy,
+        "field_namespace": nrss_path.field_namespace,
+    }
 
 
 def _tiny_smoothing_kernel(arr: np.ndarray) -> np.ndarray:
@@ -332,6 +353,7 @@ def test_cyrsoxs_timing_harness_default_case_uses_host_borrow_contract():
         no_rotation_energy_counts=(),
         rotation_specs=(),
         energy_lists=(),
+        worker_warmup_runs=0,
     )
 
     assert len(cases) == 1
@@ -2408,6 +2430,7 @@ def _build_two_material_sphere_morphology(
     resident_mode: str | None = None,
     input_policy: str = "coerce",
     ownership_policy: str | None = None,
+    field_namespace: str = "numpy",
 ) -> Morphology:
     zz, yy, xx = np.indices(shape)
     cz = (shape[0] - 1) / 2.0
@@ -2428,6 +2451,13 @@ def _build_two_material_sphere_morphology(
     psi = (psi.astype(np.float32) * vfrac_1).astype(np.float32)
     S_1 = (0.7 * vfrac_1).astype(np.float32)
     zeros = np.zeros(shape, dtype=np.float32)
+
+    vfrac_1 = _to_backend_namespace(vfrac_1, field_namespace)
+    vfrac_2 = _to_backend_namespace(vfrac_2.astype(np.float32), field_namespace)
+    theta = _to_backend_namespace(theta, field_namespace)
+    psi = _to_backend_namespace(psi, field_namespace)
+    S_1 = _to_backend_namespace(S_1, field_namespace)
+    zeros = _to_backend_namespace(zeros, field_namespace)
 
     mat1 = Material(
         materialID=1,
@@ -2489,6 +2519,7 @@ def _run_tiny_pybind_simulation(
     return_xarray: bool = False,
     shape: tuple[int, int, int] = (32, 32, 32),
     sphere_diameter_vox: int = 16,
+    runtime_kwargs: dict | None = None,
 ):
     # Pin smoke runtime to one GPU for better stability on multi-GPU hosts.
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
@@ -2499,6 +2530,7 @@ def _run_tiny_pybind_simulation(
         energies=energies,
         shape=shape,
         sphere_diameter_vox=sphere_diameter_vox,
+        **(runtime_kwargs or {}),
     )
     scattering = morph.run(stdout=False, stderr=False, return_xarray=True)
     if return_xarray:
@@ -2626,9 +2658,36 @@ def _assert_scattering_parity(
     assert float(log_abs.max()) <= max_log_max
 
 
+def _assert_scattering_similarity(
+    lhs: np.ndarray,
+    rhs: np.ndarray,
+    *,
+    sum_rtol: float = 1e-4,
+    max_rtol: float = 1e-4,
+    p95_abs_max: float = 1e-6,
+    max_abs_max: float = 1e-4,
+) -> None:
+    lhs_safe = _sanitize_scattering(lhs)
+    rhs_safe = _sanitize_scattering(rhs)
+    assert lhs_safe.shape == rhs_safe.shape
+    assert np.isfinite(lhs_safe).all()
+    assert np.isfinite(rhs_safe).all()
+    assert np.isclose(float(lhs_safe.sum()), float(rhs_safe.sum()), rtol=sum_rtol, atol=1e-12)
+    assert np.isclose(float(lhs_safe.max()), float(rhs_safe.max()), rtol=max_rtol, atol=1e-12)
+    abs_diff = np.abs(lhs_safe - rhs_safe)
+    assert float(np.percentile(abs_diff, 95)) <= p95_abs_max
+    assert float(abs_diff.max()) <= max_abs_max
+
+
 def _build_two_material_asymmetric_lobed_morphology(
     energies: list[float],
     eangle_rotation: list[float],
+    *,
+    backend: str = "cyrsoxs",
+    backend_options: dict | None = None,
+    resident_mode: str | None = None,
+    ownership_policy: str | None = None,
+    field_namespace: str = "numpy",
 ) -> Morphology:
     shape = (32, 32, 32)
     zz, yy, xx = np.indices(shape)
@@ -2652,6 +2711,13 @@ def _build_two_material_asymmetric_lobed_morphology(
     psi = (np.arctan2(dy + 0.3, dx - 0.2).astype(np.float32) * vfrac_1).astype(np.float32)
     s_1 = ((0.55 + 0.25 * ((yy % 3) == 0).astype(np.float32)) * vfrac_1).astype(np.float32)
     zeros = np.zeros(shape, dtype=np.float32)
+
+    vfrac_1 = _to_backend_namespace(vfrac_1, field_namespace)
+    vfrac_2 = _to_backend_namespace(vfrac_2.astype(np.float32), field_namespace)
+    theta = _to_backend_namespace(theta, field_namespace)
+    psi = _to_backend_namespace(psi, field_namespace)
+    s_1 = _to_backend_namespace(s_1, field_namespace)
+    zeros = _to_backend_namespace(zeros, field_namespace)
 
     mat1 = Material(
         materialID=1,
@@ -2691,6 +2757,10 @@ def _build_two_material_asymmetric_lobed_morphology(
         PhysSize=5.0,
         config=config,
         create_cy_object=True,
+        backend=backend,
+        backend_options=backend_options,
+        resident_mode=resident_mode,
+        ownership_policy=ownership_policy,
     )
     morph.check_materials(quiet=True)
     morph.validate_all(quiet=True)
@@ -2727,14 +2797,15 @@ def _radial_asymmetry_score(arr: np.ndarray) -> float:
 
 
 @pytest.mark.gpu
-@pytest.mark.backend_specific
-def test_pybind_runtime_tiny_deterministic_pattern():
+@pytest.mark.path_matrix
+def test_pybind_runtime_tiny_deterministic_pattern(nrss_path: ComputationPath):
     """Run a tiny GPU sphere simulation and assert deterministic scalar/log similarity."""
     if not _has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for pybind runtime smoke test.")
 
-    arr_1 = _run_tiny_pybind_simulation()
-    arr_2 = _run_tiny_pybind_simulation()
+    runtime_kwargs = _path_runtime_kwargs(nrss_path)
+    arr_1 = _run_tiny_pybind_simulation(runtime_kwargs=runtime_kwargs)
+    arr_2 = _run_tiny_pybind_simulation(runtime_kwargs=runtime_kwargs)
     finite_ratio_1 = float(np.isfinite(arr_1).mean())
     finite_ratio_2 = float(np.isfinite(arr_2).mean())
     arr_1_safe = _sanitize_scattering(arr_1)
@@ -2759,8 +2830,8 @@ def test_pybind_runtime_tiny_deterministic_pattern():
 
 
 @pytest.mark.gpu
-@pytest.mark.backend_specific
-def test_pyhyperscattering_integrator_to_xarray_smoke():
+@pytest.mark.path_matrix
+def test_pyhyperscattering_integrator_to_xarray_smoke(nrss_path: ComputationPath):
     """Run NRSS-to-PyHyperScattering integration and verify xarray/remesh invariants."""
     if not _has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for PyHyperScattering smoke test.")
@@ -2768,7 +2839,11 @@ def test_pyhyperscattering_integrator_to_xarray_smoke():
     from PyHyperScattering.integrate import WPIntegrator
 
     energies = [285.0, 286.0]
-    data = _run_tiny_pybind_simulation(energies=energies, return_xarray=True)
+    data = _run_tiny_pybind_simulation(
+        energies=energies,
+        return_xarray=True,
+        runtime_kwargs=_path_runtime_kwargs(nrss_path),
+    )
 
     assert hasattr(data, "dims")
     assert "energy" in data.dims
@@ -2789,8 +2864,8 @@ def test_pyhyperscattering_integrator_to_xarray_smoke():
 
 
 @pytest.mark.gpu
-@pytest.mark.backend_specific
-def test_pybind_runtime_2d_disk_smoke():
+@pytest.mark.path_matrix
+def test_pybind_runtime_2d_disk_smoke(nrss_path: ComputationPath):
     """Run a 2D (1x32x32) pybind morphology to cover the 2D computation pathway."""
     if not _has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for 2D runtime smoke test.")
@@ -2800,6 +2875,7 @@ def test_pybind_runtime_2d_disk_smoke():
         return_xarray=True,
         shape=(1, 32, 32),
         sphere_diameter_vox=16,
+        runtime_kwargs=_path_runtime_kwargs(nrss_path),
     )
     arr = data.values
     arr_safe = _sanitize_scattering(arr)
@@ -2808,6 +2884,46 @@ def test_pybind_runtime_2d_disk_smoke():
     assert float(np.isfinite(arr).mean()) >= 0.99
     assert float(arr_safe.max()) > 1e-5
     assert float(arr_safe.sum()) > 1e-4
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff")
+def test_cupy_tensor_coeff_host_and_device_residency_parity(nrss_path: ComputationPath):
+    """Check a simple maintained tensor_coeff case matches between host and device residency."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for CuPy tensor_coeff parity smoke test.")
+
+    host = _run_tiny_pybind_simulation(
+        runtime_kwargs={
+            "backend": nrss_path.backend,
+            "backend_options": nrss_path.backend_options,
+            "resident_mode": "host",
+            "ownership_policy": "borrow",
+            "field_namespace": "numpy",
+        }
+    )
+    device = _run_tiny_pybind_simulation(runtime_kwargs=_path_runtime_kwargs(nrss_path))
+    _assert_scattering_similarity(host, device)
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_direct_polarization")
+def test_cupy_direct_polarization_host_and_device_residency_parity(nrss_path: ComputationPath):
+    """Check a simple maintained direct_polarization case matches between host and device residency."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for CuPy direct-path parity smoke test.")
+
+    host = _run_tiny_pybind_simulation(
+        runtime_kwargs={
+            "backend": nrss_path.backend,
+            "backend_options": nrss_path.backend_options,
+            "resident_mode": "host",
+            "ownership_policy": "borrow",
+            "field_namespace": "numpy",
+        }
+    )
+    device = _run_tiny_pybind_simulation(runtime_kwargs=_path_runtime_kwargs(nrss_path))
+    _assert_scattering_similarity(host, device)
 
 
 @pytest.mark.gpu
@@ -2929,26 +3045,27 @@ def test_gpu_config_switch_matrix_smoke(config_overrides: dict):
 
 
 @pytest.mark.gpu
-@pytest.mark.backend_specific
+@pytest.mark.path_matrix
 @pytest.mark.reference_parity
-def test_eangle_rotation_endpoint_behavior_smoke():
+def test_eangle_rotation_endpoint_behavior_smoke(nrss_path: ComputationPath):
     """Validate endpoint semantics and expected radial-symmetry trend for E-angle averaging."""
     if not _has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for EAngleRotation endpoint smoke test.")
     # Pin to a single visible GPU for more stable endpoint comparisons.
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
+    runtime_kwargs = _path_runtime_kwargs(nrss_path)
     eangle_0 = _build_two_material_asymmetric_lobed_morphology(
-        energies=[285.0], eangle_rotation=[0.0, 0.0, 0.0]
+        energies=[285.0], eangle_rotation=[0.0, 0.0, 0.0], **runtime_kwargs
     ).run(stdout=False, stderr=False, return_xarray=True).values.copy()
     eangle_165 = _build_two_material_asymmetric_lobed_morphology(
-        energies=[285.0], eangle_rotation=[0.0, 15.0, 165.0]
+        energies=[285.0], eangle_rotation=[0.0, 15.0, 165.0], **runtime_kwargs
     ).run(stdout=False, stderr=False, return_xarray=True).values.copy()
     eangle_1799 = _build_two_material_asymmetric_lobed_morphology(
-        energies=[285.0], eangle_rotation=[0.0, 15.0, 179.9]
+        energies=[285.0], eangle_rotation=[0.0, 15.0, 179.9], **runtime_kwargs
     ).run(stdout=False, stderr=False, return_xarray=True).values.copy()
     eangle_180 = _build_two_material_asymmetric_lobed_morphology(
-        energies=[285.0], eangle_rotation=[0.0, 15.0, 180.0]
+        energies=[285.0], eangle_rotation=[0.0, 15.0, 180.0], **runtime_kwargs
     ).run(stdout=False, stderr=False, return_xarray=True).values.copy()
     asym_0 = _radial_asymmetry_score(eangle_0)
     asym_165 = _radial_asymmetry_score(eangle_165)

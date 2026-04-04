@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from scipy.special import j1
@@ -91,6 +92,22 @@ def release_runtime_memory() -> None:
             action()
         except Exception:
             pass
+
+
+def _convert_fields_namespace(
+    fields: dict[str, np.ndarray],
+    field_namespace: str,
+) -> dict[str, np.ndarray]:
+    if field_namespace == "numpy":
+        return fields
+    if field_namespace != "cupy":
+        raise AssertionError(f"Unsupported field namespace: {field_namespace}")
+
+    cp = __import__("cupy")
+    converted: dict[str, np.ndarray] = {}
+    for key, value in fields.items():
+        converted[key] = cp.ascontiguousarray(cp.asarray(value, dtype=cp.float32))
+    return converted
 
 
 def lattice_vectors_2d_nm(lattice_kind: str, lattice_constant_nm: float, azimuth_deg: float) -> np.ndarray:
@@ -266,7 +283,16 @@ def flat_detector_qmag_nm_inv(qx: np.ndarray, qy: np.ndarray, energy_eV: float) 
     return qmag
 
 
-def build_bragg_2d_case_morphology(case: Bragg2DCase) -> tuple[Morphology, dict[str, object]]:
+def build_bragg_2d_case_morphology(
+    case: Bragg2DCase,
+    *,
+    backend: str | None = None,
+    backend_options: dict[str, Any] | None = None,
+    resident_mode: str | None = None,
+    input_policy: str = "coerce",
+    ownership_policy: str | None = None,
+    field_namespace: str = "numpy",
+) -> tuple[Morphology, dict[str, object]]:
     if int(case.shape[0]) != 1:
         raise AssertionError(f"2D Bragg case expects z=1, got shape={case.shape!r}.")
     if int(case.superresolution) < 1:
@@ -284,26 +310,32 @@ def build_bragg_2d_case_morphology(case: Bragg2DCase) -> tuple[Morphology, dict[
         diameter_nm=case.particle_diameter_nm,
         superresolution=case.superresolution,
     )
-    vacuum = (1.0 - vfrac).astype(np.float32)
-    zeros = np.zeros(case.shape, dtype=np.float32)
+    fields = _convert_fields_namespace(
+        {
+            "vfrac": vfrac,
+            "vacuum": (1.0 - vfrac).astype(np.float32),
+            "zeros": np.zeros(case.shape, dtype=np.float32),
+        },
+        field_namespace=field_namespace,
+    )
     energies = [float(case.energy_eV)]
 
     lattice_material = Material(
         materialID=1,
-        Vfrac=vfrac,
-        S=zeros.copy(),
-        theta=zeros.copy(),
-        psi=zeros.copy(),
+        Vfrac=fields["vfrac"],
+        S=fields["zeros"].copy(),
+        theta=fields["zeros"].copy(),
+        psi=fields["zeros"].copy(),
         energies=energies,
         opt_constants={float(case.energy_eV): [0.0, 2e-4, 0.0, 2e-4]},
         name=f"{case.lattice_kind}_disk_lattice",
     )
     vacuum_material = Material(
         materialID=2,
-        Vfrac=vacuum,
-        S=zeros.copy(),
-        theta=zeros.copy(),
-        psi=zeros.copy(),
+        Vfrac=fields["vacuum"],
+        S=fields["zeros"].copy(),
+        theta=fields["zeros"].copy(),
+        psi=fields["zeros"].copy(),
         energies=energies,
         name="vacuum",
     )
@@ -316,6 +348,11 @@ def build_bragg_2d_case_morphology(case: Bragg2DCase) -> tuple[Morphology, dict[
         PhysSize=float(case.phys_size_nm),
         config=config,
         create_cy_object=True,
+        backend=backend,
+        backend_options=backend_options,
+        resident_mode=resident_mode,
+        input_policy=input_policy,
+        ownership_policy=ownership_policy,
     )
 
     return morph, {
@@ -325,7 +362,16 @@ def build_bragg_2d_case_morphology(case: Bragg2DCase) -> tuple[Morphology, dict[
     }
 
 
-def build_bragg_3d_case_morphology(case: Bragg3DCase) -> tuple[Morphology, dict[str, object]]:
+def build_bragg_3d_case_morphology(
+    case: Bragg3DCase,
+    *,
+    backend: str | None = None,
+    backend_options: dict[str, Any] | None = None,
+    resident_mode: str | None = None,
+    input_policy: str = "coerce",
+    ownership_policy: str | None = None,
+    field_namespace: str = "numpy",
+) -> tuple[Morphology, dict[str, object]]:
     if min(int(n) for n in case.shape) < 2:
         raise AssertionError(f"3D Bragg case expects all dimensions >= 2, got shape={case.shape!r}.")
     if int(case.superresolution) < 1:
@@ -346,26 +392,32 @@ def build_bragg_3d_case_morphology(case: Bragg3DCase) -> tuple[Morphology, dict[
         diameter_nm=case.particle_diameter_nm,
         superresolution=case.superresolution,
     )
-    vacuum = (1.0 - vfrac).astype(np.float32)
-    zeros = np.zeros(case.shape, dtype=np.float32)
+    fields = _convert_fields_namespace(
+        {
+            "vfrac": vfrac,
+            "vacuum": (1.0 - vfrac).astype(np.float32),
+            "zeros": np.zeros(case.shape, dtype=np.float32),
+        },
+        field_namespace=field_namespace,
+    )
     energies = [float(case.energy_eV)]
 
     lattice_material = Material(
         materialID=1,
-        Vfrac=vfrac,
-        S=zeros.copy(),
-        theta=zeros.copy(),
-        psi=zeros.copy(),
+        Vfrac=fields["vfrac"],
+        S=fields["zeros"].copy(),
+        theta=fields["zeros"].copy(),
+        psi=fields["zeros"].copy(),
         energies=energies,
         opt_constants={float(case.energy_eV): [0.0, 2e-4, 0.0, 2e-4]},
         name=f"{case.lattice_kind}_sphere_lattice",
     )
     vacuum_material = Material(
         materialID=2,
-        Vfrac=vacuum,
-        S=zeros.copy(),
-        theta=zeros.copy(),
-        psi=zeros.copy(),
+        Vfrac=fields["vacuum"],
+        S=fields["zeros"].copy(),
+        theta=fields["zeros"].copy(),
+        psi=fields["zeros"].copy(),
         energies=energies,
         name="vacuum",
     )
@@ -378,6 +430,11 @@ def build_bragg_3d_case_morphology(case: Bragg3DCase) -> tuple[Morphology, dict[
         PhysSize=float(case.phys_size_nm),
         config=config,
         create_cy_object=True,
+        backend=backend,
+        backend_options=backend_options,
+        resident_mode=resident_mode,
+        input_policy=input_policy,
+        ownership_policy=ownership_policy,
     )
 
     return morph, {
