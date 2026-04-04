@@ -381,8 +381,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return morphology.z_collapse_mode
 
     def _segment_c_shape_override(self, morphology):
-        if self._execution_path(morphology) != "tensor_coeff":
-            return None
         if self._z_collapse_mode(morphology) != "mean":
             return None
         _, y, x = self._shape_tuple(morphology)
@@ -528,6 +526,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         recorder,
     ):
         angle_family_plan = self._angle_family_plan(morphology)
+        shape_override = self._segment_c_shape_override(morphology)
         return self._project_from_direct_polarization(
             morphology=morphology,
             runtime_materials=runtime_materials,
@@ -536,6 +535,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             ndimage=ndimage,
             window=window,
             angle_family_plan=angle_family_plan,
+            shape_override=shape_override,
             recorder=recorder,
         )
 
@@ -1316,6 +1316,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         ndimage,
         window,
         angle_family_plan,
+        shape_override=None,
         recorder=None,
     ):
         recorder = _NullSegmentRecorder() if recorder is None else recorder
@@ -1330,6 +1331,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             p_x, p_y, p_z = recorder.measure(
                 "B",
                 lambda angle_plan=angle_plan: self._compute_direct_polarization(
+                    morphology=morphology,
                     runtime_materials=runtime_materials,
                     energy=energy,
                     angle_plan=angle_plan,
@@ -1356,6 +1358,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     fft_x=fft_x,
                     fft_y=fft_y,
                     fft_z=fft_z,
+                    shape_override=shape_override,
                 ),
             )
             projection_average, valid_counts = recorder.measure(
@@ -1375,7 +1378,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             del fft_x, fft_y, fft_z, projection
         return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
 
-    def _compute_direct_polarization(self, runtime_materials, energy, angle_plan, cp):
+    def _compute_direct_polarization(self, morphology, runtime_materials, energy, angle_plan, cp):
+        if self._z_collapse_mode(morphology) == "mean":
+            return self._compute_direct_polarization_collapsed_mean(
+                runtime_materials,
+                energy,
+                angle_plan,
+                cp,
+            )
         if cp.dtype(runtime_materials[0].Vfrac.dtype).name == "float16":
             return self._compute_direct_polarization_half_input(
                 runtime_materials,
@@ -1424,6 +1434,53 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 ),
             )
             del isotropic_term
+
+        p_x *= self._one_by_four_pi
+        p_y *= self._one_by_four_pi
+        p_z *= self._one_by_four_pi
+        return p_x, p_y, p_z
+
+    def _compute_direct_polarization_collapsed_mean(self, runtime_materials, energy, angle_plan, cp):
+        if cp.dtype(runtime_materials[0].Vfrac.dtype).name == "float16":
+            raise NotImplementedError(
+                "cupy-rsoxs z_collapse_mode='mean' does not yet support the half-input "
+                "mixed-precision path."
+            )
+
+        _, y, x = (int(v) for v in runtime_materials[0].Vfrac.shape)
+        z_count = np.float32(runtime_materials[0].Vfrac.shape[0])
+        p_x = cp.zeros((1, y, x), dtype=cp.complex64)
+        p_y = cp.zeros((1, y, x), dtype=cp.complex64)
+        p_z = cp.zeros((1, y, x), dtype=cp.complex64)
+        mx = angle_plan.mx
+        my = angle_plan.my
+
+        for material in runtime_materials:
+            isotropic_diag, aligned_base, anisotropic_delta = self._material_optical_scalars(
+                material,
+                energy,
+            )
+            vfrac_sum = cp.sum(material.Vfrac, axis=0, dtype=cp.float32, keepdims=True)
+            isotropic_collapsed = (vfrac_sum / z_count).astype(cp.complex64, copy=False)
+            p_x += isotropic_collapsed * isotropic_diag * mx
+            p_y += isotropic_collapsed * isotropic_diag * my
+            del vfrac_sum, isotropic_collapsed
+            if material.is_full_isotropic:
+                continue
+
+            phi_a = material.Vfrac * material.S
+            sx, sy, sz = self._orientation_components(material, cp)
+            field_projection = sx * mx + sy * my
+
+            contrib_x = phi_a * (mx * aligned_base + anisotropic_delta * sx * field_projection)
+            contrib_y = phi_a * (my * aligned_base + anisotropic_delta * sy * field_projection)
+            contrib_z = phi_a * (anisotropic_delta * sz * field_projection)
+
+            p_x += cp.sum(contrib_x, axis=0, dtype=cp.complex64, keepdims=True) / z_count
+            p_y += cp.sum(contrib_y, axis=0, dtype=cp.complex64, keepdims=True) / z_count
+            p_z += cp.sum(contrib_z, axis=0, dtype=cp.complex64, keepdims=True) / z_count
+
+            del phi_a, sx, sy, sz, field_projection, contrib_x, contrib_y, contrib_z
 
         p_x *= self._one_by_four_pi
         p_y *= self._one_by_four_pi
@@ -1702,7 +1759,17 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         _CUPY_KERNEL_CACHE["direct_polarization_anisotropic_complex64_half_input"] = kernel
         return kernel
 
-    def _projection_from_polarization(self, morphology, energy, cp, p_x, p_y, p_z, window):
+    def _projection_from_polarization(
+        self,
+        morphology,
+        energy,
+        cp,
+        p_x,
+        p_y,
+        p_z,
+        window,
+        shape_override=None,
+    ):
         fft_x, fft_y, fft_z = self._fft_polarization_fields(
             cp=cp,
             p_x=p_x,
@@ -1717,6 +1784,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             fft_x=fft_x,
             fft_y=fft_y,
             fft_z=fft_z,
+            shape_override=shape_override,
         )
         del fft_x, fft_y, fft_z
         return projection
@@ -1774,7 +1842,16 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         del rotated
         return projection_average, valid_counts
 
-    def _projection_from_fft_polarization(self, morphology, energy, cp, fft_x, fft_y, fft_z):
+    def _projection_from_fft_polarization(
+        self,
+        morphology,
+        energy,
+        cp,
+        fft_x,
+        fft_y,
+        fft_z,
+        shape_override=None,
+    ):
         scatter3d = self._compute_scatter3d(
             morphology=morphology,
             energy=energy,
@@ -1782,8 +1859,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             p_x=fft_x,
             p_y=fft_y,
             p_z=fft_z,
+            shape_override=shape_override,
         )
-        projection = self._project_scatter3d(morphology, energy, cp, scatter3d)
+        projection = self._project_scatter3d(
+            morphology,
+            energy,
+            cp,
+            scatter3d,
+            shape_override=shape_override,
+        )
         del scatter3d
         return projection
 
@@ -1884,8 +1968,12 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         )
         return out
 
-    def _compute_scatter3d(self, morphology, energy, cp, p_x, p_y, p_z):
-        detector_geometry = self._detector_geometry(morphology, cp)
+    def _compute_scatter3d(self, morphology, energy, cp, p_x, p_y, p_z, shape_override=None):
+        detector_geometry = self._detector_geometry(
+            morphology,
+            cp,
+            shape_override=shape_override,
+        )
         z = detector_geometry.z_count
         k = np.float32(2.0 * math.pi / (1239.84197 / float(energy)))
         d = np.float32(k * k)
@@ -1920,13 +2008,18 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             del p1, p2, p3, term1, term2, term3
         return scatter
 
-    def _project_scatter3d(self, morphology, energy, cp, scatter3d):
-        detector_geometry = self._detector_geometry(morphology, cp)
+    def _project_scatter3d(self, morphology, energy, cp, scatter3d, shape_override=None):
+        detector_geometry = self._detector_geometry(
+            morphology,
+            cp,
+            shape_override=shape_override,
+        )
         projection_geometry = self._detector_projection_geometry(
             morphology=morphology,
             energy=energy,
             cp=cp,
             detector_geometry=detector_geometry,
+            shape_override=shape_override,
         )
 
         projection = cp.full(

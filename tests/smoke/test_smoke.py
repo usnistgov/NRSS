@@ -1101,6 +1101,39 @@ def test_morphology_normalizes_material_arrays_eagerly_for_selected_backend_defa
 
 
 @pytest.mark.gpu
+def test_cupy_direct_polarization_z_collapse_is_exact_identity_for_native_single_slice():
+    """Ensure z_collapse_mode='mean' is a no-op for native z=1 direct-polarization runs."""
+    base = None
+    collapsed = None
+    try:
+        base = _build_two_material_isotropic_single_slice_morphology(
+            backend_options={"execution_path": "direct_polarization"},
+        )
+        collapsed = _build_two_material_isotropic_single_slice_morphology(
+            backend_options={
+                "execution_path": "direct_polarization",
+                "z_collapse_mode": "mean",
+            },
+        )
+
+        base_result = base.run(stdout=False, stderr=False, return_xarray=True)
+        collapsed_result = collapsed.run(stdout=False, stderr=False, return_xarray=True)
+
+        np.testing.assert_array_equal(base_result.values, collapsed_result.values)
+        np.testing.assert_array_equal(base_result.qx.values, collapsed_result.qx.values)
+        np.testing.assert_array_equal(base_result.qy.values, collapsed_result.qy.values)
+    finally:
+        for morph in (base, collapsed):
+            if morph is None:
+                continue
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
+@pytest.mark.gpu
 def test_cupy_device_resident_morphology_normalizes_material_arrays_to_cupy():
     """Ensure resident_mode='device' keeps authoritative morphology fields on the GPU."""
     cp = _import_cupy_required()
@@ -1794,6 +1827,50 @@ def test_cupy_direct_polarization_matches_tensor_coeff_on_anisotropic_sphere():
                     eangle_rotation=eangle_rotation,
                     backend="cupy-rsoxs",
                     backend_options={"execution_path": execution_path},
+                    resident_mode="host",
+                    input_policy="strict",
+                    ownership_policy="borrow",
+                )
+                outputs[execution_path] = morph.run(
+                    stdout=False,
+                    stderr=False,
+                    return_xarray=True,
+                ).values.copy()
+            finally:
+                if morph is not None:
+                    try:
+                        morph.release_runtime()
+                    except Exception:
+                        pass
+                _release_cupy_memory()
+
+        np.testing.assert_allclose(
+            outputs["direct_polarization"],
+            outputs["tensor_coeff"],
+            rtol=1e-4,
+            atol=5e-2,
+        )
+
+
+@pytest.mark.gpu
+def test_cupy_z_collapse_direct_polarization_matches_tensor_coeff_on_anisotropic_sphere():
+    """Ensure z-collapsed direct_polarization stays aligned with z-collapsed tensor_coeff on a small anisotropic sphere."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for anisotropic execution-path comparison.")
+
+    for eangle_rotation in ([0.0, 0.0, 0.0], [0.0, 5.0, 165.0]):
+        outputs = {}
+        for execution_path in ("tensor_coeff", "direct_polarization"):
+            morph = None
+            try:
+                morph = _build_two_material_sphere_morphology(
+                    energies=[285.0],
+                    eangle_rotation=eangle_rotation,
+                    backend="cupy-rsoxs",
+                    backend_options={
+                        "execution_path": execution_path,
+                        "z_collapse_mode": "mean",
+                    },
                     resident_mode="host",
                     input_policy="strict",
                     ownership_policy="borrow",

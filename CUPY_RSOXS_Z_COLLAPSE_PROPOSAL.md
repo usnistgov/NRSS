@@ -20,10 +20,14 @@ Current implementation status after the April 4, 2026 prototype pass:
    - `_detector_geometry(...)`
    - `_detector_projection_geometry(...)`
 4. `execution_path="tensor_coeff"` support is implemented.
-5. `execution_path="direct_polarization"` support is not implemented yet.
+5. `execution_path="direct_polarization"` support is implemented.
 6. the current `tensor_coeff` implementation now collapses during `Nt`
    construction rather than building full `3D` `Nt` and reducing afterward.
-7. `z_collapse_mode` is currently mutually exclusive with
+7. the current `direct_polarization` implementation now collapses
+   angle-specific `p_x`, `p_y`, `p_z` fields during direct-field construction
+   rather than materializing full `3D` polarization volumes in the active
+   collapse path.
+8. `z_collapse_mode` is currently mutually exclusive with
    `mixed_precision_mode`:
    - this was an intentional scope cut so the half-input path remains
      untouched for now.
@@ -35,13 +39,18 @@ Implemented validation/results from this pass:
    - unknown-option rejection,
    - explicit rejection of `z_collapse_mode` combined with
      `mixed_precision_mode`,
-   - native `z=1` exact identity with collapse on versus off.
+   - native `z=1` exact identity with collapse on versus off for both
+     supported execution paths,
+   - collapsed `direct_polarization` versus collapsed `tensor_coeff` parity on
+     the maintained anisotropic sphere smoke surface.
 2. maintained analytical sphere form-factor tests still pass unchanged.
 3. a dev comparison harness now exists at:
    - `tests/validation/dev/cupy_rsoxs_z_collapse/run_sphere_z_collapse_comparison.py`
 4. the current recommended graphical comparison outputs are:
-   - `test-reports/cupy-rsoxs-z-collapse-sphere/sphere_d70_sr1_comparison.png`
-   - `test-reports/cupy-rsoxs-z-collapse-sphere/sphere_d128_sr1_comparison.png`
+   - `test-reports/cupy-rsoxs-z-collapse-sphere/sphere_d70_sr1_tensor_coeff_comparison.png`
+   - `test-reports/cupy-rsoxs-z-collapse-sphere/sphere_d128_sr1_tensor_coeff_comparison.png`
+   - `test-reports/cupy-rsoxs-z-collapse-sphere/sphere_d70_sr1_direct_polarization_comparison.png`
+   - `test-reports/cupy-rsoxs-z-collapse-sphere/sphere_d128_sr1_direct_polarization_comparison.png`
 
 Current exploratory summary from the dev runner:
 

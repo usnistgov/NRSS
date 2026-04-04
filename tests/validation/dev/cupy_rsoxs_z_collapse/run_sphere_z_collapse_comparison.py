@@ -44,18 +44,31 @@ from tests.validation.test_analytical_sphere_form_factor import (
 
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "test-reports" / "cupy-rsoxs-z-collapse-sphere"
+EXECUTION_PATH_TO_PATH_ID = {
+    "tensor_coeff": "cupy_tensor_coeff",
+    "direct_polarization": "cupy_direct_polarization",
+}
+DEFAULT_EXECUTION_PATHS = tuple(EXECUTION_PATH_TO_PATH_ID)
 
 
-def _collapsed_runtime_kwargs() -> dict[str, object]:
-    runtime_kwargs = _path_runtime_kwargs(get_computation_path("cupy_tensor_coeff"))
+def _runtime_kwargs(execution_path: str, *, collapsed: bool) -> dict[str, object]:
+    runtime_kwargs = _path_runtime_kwargs(
+        get_computation_path(EXECUTION_PATH_TO_PATH_ID[execution_path])
+    )
+    if not collapsed:
+        return runtime_kwargs
     backend_options = dict(runtime_kwargs["backend_options"])
     backend_options["z_collapse_mode"] = "mean"
     runtime_kwargs["backend_options"] = backend_options
     return runtime_kwargs
 
 
-def _baseline_runtime_kwargs() -> dict[str, object]:
-    return _path_runtime_kwargs(get_computation_path("cupy_tensor_coeff"))
+def _collapsed_runtime_kwargs(execution_path: str) -> dict[str, object]:
+    return _runtime_kwargs(execution_path, collapsed=True)
+
+
+def _baseline_runtime_kwargs(execution_path: str) -> dict[str, object]:
+    return _runtime_kwargs(execution_path, collapsed=False)
 
 
 def _run_iq(diameter_nm: float, superresolution: int, runtime_kwargs: dict[str, object]):
@@ -77,6 +90,7 @@ def _run_iq(diameter_nm: float, superresolution: int, runtime_kwargs: dict[str, 
 
 def _plot_case(
     *,
+    execution_path: str,
     diameter_nm: float,
     q: np.ndarray,
     full_norm: np.ndarray,
@@ -88,6 +102,7 @@ def _plot_case(
     summary: dict[str, object],
     out_path: Path,
 ) -> None:
+    path_label = execution_path.replace("_", " ")
     fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(8.0, 8.4), sharex=True)
 
     plot_mask = np.logical_and.reduce(
@@ -104,14 +119,20 @@ def _plot_case(
             direct_norm > 0.0,
         ]
     )
-    ax0.plot(q[plot_mask], full_norm[plot_mask], color="#1f77b4", linewidth=2.0, label="Full 3D sphere")
+    ax0.plot(
+        q[plot_mask],
+        full_norm[plot_mask],
+        color="#1f77b4",
+        linewidth=2.0,
+        label=f"Full 3D sphere ({path_label})",
+    )
     ax0.plot(
         q[plot_mask],
         collapsed_norm[plot_mask],
         color="#d62728",
         linewidth=1.7,
         linestyle="--",
-        label='Collapsed 3D sphere (`z_collapse_mode="mean"`)',
+        label=f'Collapsed 3D sphere ({path_label}, `z_collapse_mode="mean"`)',
     )
     ax0.plot(
         q[plot_mask],
@@ -203,7 +224,7 @@ def _plot_case(
             f"minima_mae={summary['collapsed_vs_direct']['minima']['mae_abs_dq']:.5f}"
         ),
     ]
-    fig.suptitle("Sphere Form Factor: Full 3D vs z-Collapsed Fast Path")
+    fig.suptitle(f"Sphere Form Factor: Full 3D vs z-Collapsed Fast Path ({path_label})")
     fig.text(
         0.01,
         0.01,
@@ -230,16 +251,21 @@ def _serializable_metrics(metrics: dict[str, object]) -> dict[str, object]:
     return result
 
 
-def _summarize_case(diameter_nm: float, superresolution: int, output_dir: Path) -> dict[str, object]:
+def _summarize_case(
+    execution_path: str,
+    diameter_nm: float,
+    superresolution: int,
+    output_dir: Path,
+) -> dict[str, object]:
     full_q, full_iq, full_runtime = _run_iq(
         diameter_nm=diameter_nm,
         superresolution=superresolution,
-        runtime_kwargs=_baseline_runtime_kwargs(),
+        runtime_kwargs=_baseline_runtime_kwargs(execution_path),
     )
     collapsed_q, collapsed_iq, collapsed_runtime = _run_iq(
         diameter_nm=diameter_nm,
         superresolution=superresolution,
-        runtime_kwargs=_collapsed_runtime_kwargs(),
+        runtime_kwargs=_collapsed_runtime_kwargs(execution_path),
     )
     if not np.allclose(full_q, collapsed_q, atol=1e-12, rtol=0.0):
         raise AssertionError("Full and collapsed sphere runs produced mismatched q grids.")
@@ -261,6 +287,7 @@ def _summarize_case(diameter_nm: float, superresolution: int, output_dir: Path) 
     full_norm_vs_flat, flat_norm_from_full, _ = _normalize_to_first_q_gt_zero(full_q, full_iq, flat_iq)
 
     summary = {
+        "execution_path": execution_path,
         "diameter_nm": float(diameter_nm),
         "energy_eV": float(ENERGY_EV),
         "superresolution": int(superresolution),
@@ -295,10 +322,11 @@ def _summarize_case(diameter_nm: float, superresolution: int, output_dir: Path) 
         },
     }
 
-    case_stem = f"sphere_d{int(round(diameter_nm))}_sr{int(superresolution)}"
+    case_stem = f"sphere_d{int(round(diameter_nm))}_sr{int(superresolution)}_{execution_path}"
     png_path = output_dir / f"{case_stem}_comparison.png"
     json_path = output_dir / f"{case_stem}_summary.json"
     _plot_case(
+        execution_path=execution_path,
         diameter_nm=diameter_nm,
         q=full_q,
         full_norm=full_norm,
@@ -313,6 +341,7 @@ def _summarize_case(diameter_nm: float, superresolution: int, output_dir: Path) 
     runtime_ratio = summary["runtime_ratio_full_to_collapsed"]
     json_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(
+        f"path={execution_path} "
         f"diameter={diameter_nm:.1f} nm "
         f"rms_log(collapsed/full)={summary['collapsed_vs_full']['pointwise']['rms_log']:.4f} "
         f"runtime_ratio={(runtime_ratio if runtime_ratio is not None else float('nan')):.2f}x "
@@ -348,6 +377,13 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_OUTPUT_DIR,
         help="Directory for PNG/JSON artifacts.",
     )
+    parser.add_argument(
+        "--execution-paths",
+        nargs="+",
+        choices=tuple(EXECUTION_PATH_TO_PATH_ID),
+        default=list(DEFAULT_EXECUTION_PATHS),
+        help="Execution paths to compare in both full and z-collapsed modes.",
+    )
     return parser.parse_args()
 
 
@@ -360,12 +396,16 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     results = {}
-    for diameter_nm in args.diameters_nm:
-        results[str(float(diameter_nm))] = _summarize_case(
-            diameter_nm=float(diameter_nm),
-            superresolution=int(args.superresolution),
-            output_dir=output_dir,
-        )
+    for execution_path in args.execution_paths:
+        path_results = {}
+        for diameter_nm in args.diameters_nm:
+            path_results[str(float(diameter_nm))] = _summarize_case(
+                execution_path=execution_path,
+                diameter_nm=float(diameter_nm),
+                superresolution=int(args.superresolution),
+                output_dir=output_dir,
+            )
+        results[execution_path] = path_results
 
     manifest_path = output_dir / "manifest.json"
     manifest_path.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n", encoding="utf-8")
