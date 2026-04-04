@@ -36,11 +36,15 @@ Principal cross-backend comparison:
 - `run_comprehensive_backend_comparison.py`
   - dev-only small-CoreShell comprehensive comparison tier,
   - keeps the maintained default benchmark unchanged,
+  - supports an opt-in z-collapse extension via `--include-z-collapse`,
   - runs separate speed and memory passes over:
     - host `warm`: `cyrsoxs`, `cupy-rsoxs tensor_coeff`, `cupy-rsoxs direct_polarization`,
     - host `hot`: the same three host paths with one untimed identical warm-up run inside each worker,
     - device `steady`: `cupy-rsoxs tensor_coeff`, `cupy-rsoxs direct_polarization`,
     - device `hot`: the same two device paths with one untimed identical warm-up run inside each worker,
+  - with `--include-z-collapse`, adds:
+    - host `warm` / `hot`: `cupy-rsoxs tensor_coeff` with `z_collapse_mode="mean"`,
+    - device `steady` / `hot`: the same collapsed `tensor_coeff` path,
   - uses single energy only,
   - uses the two requested rotation schemes only:
     - `no rotation`: `[0, 0, 0]`,
@@ -50,6 +54,8 @@ Principal cross-backend comparison:
   - writes a combined summary plus separate speed and memory TSVs,
   - includes a speedup column on each `cupy-rsoxs` row against the comparable
     legacy `cyrsoxs` run,
+  - tags collapsed rows separately in the TSV and Markdown report with
+    `z collapse = mean` so they do not alias plain `tensor_coeff`,
   - treats device `steady` as comparable to legacy `warm`, and device `hot` as
     comparable to legacy `hot`,
   - writes a simple human-readable Markdown report table in the same
@@ -72,6 +78,16 @@ Recommended workflow:
   tests/validation/dev/core_shell_backend_performance/run_primary_backend_speed_comparison.py \
   --label principal_cross_backend \
   --plot-only
+```
+
+3. If you want the small-CoreShell comprehensive table with the opt-in
+   `tensor_coeff` z-collapse lane included:
+
+```bash
+mamba run -n nrss-dev python \
+  tests/validation/dev/core_shell_backend_performance/run_comprehensive_backend_comparison.py \
+  --label comprehensive_z_collapse \
+  --include-z-collapse
 ```
 
 Artifacts are written under:

@@ -72,6 +72,8 @@ class ComparisonCase:
     residency: str
     startup_mode: str
     execution_path: str
+    path_variant: str
+    z_collapse_mode: str | None
     rotation_key: str
     rotation_label: str
     eangle_rotation: tuple[float, float, float]
@@ -191,6 +193,8 @@ def _host_cyrsoxs_case(*, startup_mode: str, rotation_key: str, rotation_label: 
         residency="host",
         startup_mode=startup_mode,
         execution_path="cyrsoxs",
+        path_variant="cyrsoxs",
+        z_collapse_mode=None,
         rotation_key=rotation_key,
         rotation_label=rotation_label,
         eangle_rotation=eangle_rotation,
@@ -217,20 +221,29 @@ def _cupy_case(
     residency: str,
     startup_mode: str,
     execution_path: str,
+    z_collapse_mode: str | None,
     rotation_key: str,
     rotation_label: str,
     eangle_rotation,
 ):
-    label = f"comprehensive__{residency}__{startup_mode}__{execution_path}__{rotation_key}"
+    path_variant = execution_path
+    if z_collapse_mode is not None:
+        path_variant = f"{execution_path}_zcollapse_{z_collapse_mode}"
+    label = f"comprehensive__{residency}__{startup_mode}__{path_variant}__{rotation_key}"
     field_namespace = "numpy" if residency == "host" else "cupy"
     cuda_prewarm_mode = "before_prepare_inputs" if residency == "host" else "off"
     worker_warmup_runs = 1 if startup_mode == "hot" else 0
+    backend_options = {"execution_path": execution_path}
+    if z_collapse_mode is not None:
+        backend_options["z_collapse_mode"] = z_collapse_mode
     return ComparisonCase(
         key=label,
         backend="cupy-rsoxs",
         residency=residency,
         startup_mode=startup_mode,
         execution_path=execution_path,
+        path_variant=path_variant,
+        z_collapse_mode=z_collapse_mode,
         rotation_key=rotation_key,
         rotation_label=rotation_label,
         eangle_rotation=eangle_rotation,
@@ -248,19 +261,19 @@ def _cupy_case(
             resident_mode=residency,
             input_policy="strict",
             ownership_policy="borrow",
-            backend_options={"execution_path": execution_path},
+            backend_options=backend_options,
             timing_segments=TIMING_SEGMENTS,
             worker_warmup_runs=worker_warmup_runs,
             notes=(
                 "Comprehensive cross-backend comparison lane for the small single-energy "
                 f"CoreShell benchmark under residency={residency}, startup_mode={startup_mode}, "
-                f"execution_path={execution_path}."
+                f"execution_path={execution_path}, z_collapse_mode={z_collapse_mode!r}."
             ),
         ),
     )
 
 
-def _build_cases() -> list[ComparisonCase]:
+def _build_cases(*, include_z_collapse: bool) -> list[ComparisonCase]:
     cases: list[ComparisonCase] = []
     for rotation_key, eangle_rotation, rotation_label in ROTATION_SPECS:
         for startup_mode in HOST_STARTUP_MODES:
@@ -278,6 +291,19 @@ def _build_cases() -> list[ComparisonCase]:
                         residency="host",
                         startup_mode=startup_mode,
                         execution_path=execution_path,
+                        z_collapse_mode=None,
+                        rotation_key=rotation_key,
+                        rotation_label=rotation_label,
+                        eangle_rotation=eangle_rotation,
+                    )
+                )
+            if include_z_collapse:
+                cases.append(
+                    _cupy_case(
+                        residency="host",
+                        startup_mode=startup_mode,
+                        execution_path="tensor_coeff",
+                        z_collapse_mode="mean",
                         rotation_key=rotation_key,
                         rotation_label=rotation_label,
                         eangle_rotation=eangle_rotation,
@@ -291,6 +317,19 @@ def _build_cases() -> list[ComparisonCase]:
                         residency="device",
                         startup_mode=startup_mode,
                         execution_path=execution_path,
+                        z_collapse_mode=None,
+                        rotation_key=rotation_key,
+                        rotation_label=rotation_label,
+                        eangle_rotation=eangle_rotation,
+                    )
+                )
+            if include_z_collapse:
+                cases.append(
+                    _cupy_case(
+                        residency="device",
+                        startup_mode=startup_mode,
+                        execution_path="tensor_coeff",
+                        z_collapse_mode="mean",
                         rotation_key=rotation_key,
                         rotation_label=rotation_label,
                         eangle_rotation=eangle_rotation,
@@ -372,6 +411,8 @@ def _run_case_subprocess(
                 "comparison_residency": case.residency,
                 "comparison_startup_mode": case.startup_mode,
                 "comparison_execution_path": case.execution_path,
+                "comparison_path_variant": case.path_variant,
+                "comparison_z_collapse_mode": case.z_collapse_mode,
                 "comparison_rotation_key": case.rotation_key,
                 "comparison_rotation_label": case.rotation_label,
                 "comparison_eangle_rotation": list(case.eangle_rotation),
@@ -393,16 +434,19 @@ def _run_case_subprocess(
 def _case_sort_key(result: dict[str, Any]) -> tuple[int, int, int, int]:
     residency_order = {"host": 0, "device": 1}
     startup_order = {"warm": 0, "hot": 1, "steady": 2}
-    backend_order = {
+    backend_order = {"cyrsoxs": 0, "tensor_coeff": 1, "direct_polarization": 2}
+    path_variant_order = {
         "cyrsoxs": 0,
         "tensor_coeff": 1,
-        "direct_polarization": 2,
+        "tensor_coeff_zcollapse_mean": 2,
+        "direct_polarization": 3,
     }
     rotation_order = {"no_rotation": 0, "rot_0_5_165": 1}
     return (
         residency_order.get(result.get("comparison_residency", ""), 99),
         startup_order.get(result.get("comparison_startup_mode", ""), 99),
         backend_order.get(result.get("comparison_execution_path", ""), 99),
+        path_variant_order.get(result.get("comparison_path_variant", ""), 99),
         rotation_order.get(result.get("comparison_rotation_key", ""), 99),
     )
 
@@ -475,6 +519,7 @@ def _build_human_report_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "Residency": row.get("comparison_residency", ""),
                 "Startup": row.get("comparison_startup_mode", ""),
                 "Execution path": row.get("comparison_execution_path", ""),
+                "z collapse": row.get("comparison_z_collapse_mode") or "off",
                 "Rotation": row.get("comparison_rotation_label", ""),
                 "Legacy baseline": row.get("comparison_cyrsoxs_baseline_startup_mode", ""),
                 "Legacy cyrsoxs": row.get("comparison_cyrsoxs_primary_seconds"),
@@ -491,6 +536,7 @@ def _build_human_report_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
             {"tensor_coeff": 0, "direct_polarization": 1}.get(
                 str(row.get("Execution path", "")), 99
             ),
+            {"off": 0, "mean": 1}.get(str(row.get("z collapse", "")), 99),
             {"no rotation": 0, "0:5:165": 1}.get(str(row.get("Rotation", "")), 99),
         ),
     )
@@ -529,6 +575,7 @@ def _build_memory_report_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]
                 "Residency": row.get("comparison_residency", ""),
                 "Startup": row.get("comparison_startup_mode", ""),
                 "Execution path": row.get("comparison_execution_path", ""),
+                "z collapse": row.get("comparison_z_collapse_mode") or "off",
                 "Rotation": row.get("comparison_rotation_label", ""),
                 "Legacy baseline": baseline_startup_mode,
                 "Legacy cyrsoxs peak GPU": baseline_peak_gpu,
@@ -555,6 +602,7 @@ def _build_memory_report_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]
             {"tensor_coeff": 0, "direct_polarization": 1}.get(
                 str(row.get("Execution path", "")), 99
             ),
+            {"off": 0, "mean": 1}.get(str(row.get("z collapse", "")), 99),
             {"no rotation": 0, "0:5:165": 1}.get(str(row.get("Rotation", "")), 99),
         ),
     )
@@ -629,6 +677,8 @@ def _write_table(path: Path, rows: list[dict[str, Any]], *, include_memory: bool
         "comparison_residency",
         "comparison_startup_mode",
         "comparison_execution_path",
+        "comparison_path_variant",
+        "comparison_z_collapse_mode",
         "comparison_rotation_label",
         "comparison_cyrsoxs_baseline_startup_mode",
         "comparison_cyrsoxs_baseline_key",
@@ -661,6 +711,8 @@ def _write_table(path: Path, rows: list[dict[str, Any]], *, include_memory: bool
                 "comparison_residency": row.get("comparison_residency", ""),
                 "comparison_startup_mode": row.get("comparison_startup_mode", ""),
                 "comparison_execution_path": row.get("comparison_execution_path", ""),
+                "comparison_path_variant": row.get("comparison_path_variant", ""),
+                "comparison_z_collapse_mode": row.get("comparison_z_collapse_mode", ""),
                 "comparison_rotation_label": row.get("comparison_rotation_label", ""),
                 "comparison_cyrsoxs_baseline_startup_mode": row.get(
                     "comparison_cyrsoxs_baseline_startup_mode", ""
@@ -698,6 +750,12 @@ def _write_human_report(path: Path, summary: dict[str, Any]) -> None:
             f"# Comprehensive Backend Comparison Report ({summary['label']})",
             "",
             "Small single-energy CoreShell cross-backend comparison.",
+            "",
+            (
+                "Optional z-collapse rows are included in this report."
+                if summary.get("include_z_collapse")
+                else "z-collapse rows are disabled for this report."
+            ),
             "",
             "Speedup convention:",
             "- host `warm` compares against legacy `cyrsoxs` `warm`.",
@@ -754,7 +812,7 @@ def run_comparison(args: argparse.Namespace) -> int:
     speed_table_path = run_dir / SPEED_TABLE_NAME
     memory_table_path = run_dir / MEMORY_TABLE_NAME
     report_path = run_dir / REPORT_NAME
-    cases = _build_cases()
+    cases = _build_cases(include_z_collapse=bool(args.include_z_collapse))
 
     summary = {
         "label": run_label,
@@ -763,6 +821,7 @@ def run_comparison(args: argparse.Namespace) -> int:
         "gpu_index": int(args.gpu_index),
         "size_label": "small",
         "energies_ev": list(CORE_SHELL_SINGLE_ENERGIES),
+        "include_z_collapse": bool(args.include_z_collapse),
         "rotations": [
             {"key": key, "label": label, "eangle_rotation": list(spec)}
             for key, spec, label in ROTATION_SPECS
@@ -835,6 +894,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-skip-existing",
         action="store_true",
         help="Rerun cases even if completed case result files already exist.",
+    )
+    parser.add_argument(
+        "--include-z-collapse",
+        action="store_true",
+        help=(
+            "Add opt-in cupy-rsoxs tensor_coeff z_collapse_mode='mean' rows to the "
+            "comprehensive speed and memory passes."
+        ),
     )
     return parser
 

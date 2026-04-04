@@ -72,6 +72,10 @@ recover:
    primary-time comparison entry point at:
    - `tests/validation/dev/core_shell_backend_performance/run_primary_backend_speed_comparison.py`
    - supporting notes at `tests/validation/dev/core_shell_backend_performance/README.md`
+   - the same README also documents the small-CoreShell comprehensive
+     speed-plus-memory comparison runner and its opt-in
+     `--include-z-collapse` extension for `tensor_coeff` with
+     `z_collapse_mode="mean"`
    - output artifacts:
      - `primary_backend_speed_comparison_summary.json`
      - `primary_backend_speed_comparison_table.tsv`
@@ -1655,5 +1659,9 @@ Precision and option-surface notes for this campaign:
    - use
      `tests/validation/dev/core_shell_backend_performance/run_primary_backend_speed_comparison.py`
      when a principal cross-backend primary-time snapshot is needed,
+   - use
+     `tests/validation/dev/core_shell_backend_performance/run_comprehensive_backend_comparison.py --include-z-collapse`
+     when a small-CoreShell comprehensive speed and memory snapshot should also
+     include the collapsed `tensor_coeff` lane,
    - treat the legacy full-energy backend-comparison harness as optional
      historical context rather than a required step in the default loop.
