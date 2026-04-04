@@ -40,13 +40,20 @@ Principal cross-backend comparison:
     - host `warm`: `cyrsoxs`, `cupy-rsoxs tensor_coeff`, `cupy-rsoxs direct_polarization`,
     - host `hot`: the same three host paths with one untimed identical warm-up run inside each worker,
     - device `steady`: `cupy-rsoxs tensor_coeff`, `cupy-rsoxs direct_polarization`,
+    - device `hot`: the same two device paths with one untimed identical warm-up run inside each worker,
   - uses single energy only,
   - uses the two requested rotation schemes only:
     - `no rotation`: `[0, 0, 0]`,
     - `0:5:165`: `[0, 5, 165]`,
   - records speed from the backend-specific maintained timing boundaries,
   - records memory in a separate pass with external peak GPU polling plus process RSS polling,
-  - writes a combined summary plus separate speed and memory TSVs.
+  - writes a combined summary plus separate speed and memory TSVs,
+  - includes a speedup column on each `cupy-rsoxs` row against the comparable
+    legacy `cyrsoxs` run,
+  - treats device `steady` as comparable to legacy `warm`, and device `hot` as
+    comparable to legacy `hot`,
+  - writes a simple human-readable Markdown report table in the same
+    `test-reports` run directory.
 
 Recommended workflow:
 
