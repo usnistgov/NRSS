@@ -51,6 +51,38 @@ Implemented validation/results from this pass:
    - `test-reports/cupy-rsoxs-z-collapse-sphere/sphere_d128_sr1_tensor_coeff_comparison.png`
    - `test-reports/cupy-rsoxs-z-collapse-sphere/sphere_d70_sr1_direct_polarization_comparison.png`
    - `test-reports/cupy-rsoxs-z-collapse-sphere/sphere_d128_sr1_direct_polarization_comparison.png`
+5. maintained validation now includes a cupy-only analytical sphere collapse
+   lane:
+   - file: `tests/validation/test_analytical_sphere_form_factor.py`
+   - scope:
+     - `execution_path='cupy_tensor_coeff'`
+     - `execution_path='cupy_direct_polarization'`
+   - reference truth for the collapse assertions:
+     - direct analytical sphere `I(q)`
+   - explicit non-reference for the collapse assertions:
+     - do not use the analytical flat-detector sphere as the pass/fail truth
+       for the collapsed lane
+   - tuned maintained thresholds were added for:
+     - `70 nm`
+     - `128 nm`
+6. verification completed in `nrss-dev` on April 4, 2026:
+   - focused maintained sphere file:
+     - `cupy_tensor_coeff`: `4 passed in 26.77s`
+     - `cupy_direct_polarization`: `4 passed in 28.81s`
+   - full maintained physics panel:
+     - `cupy_tensor_coeff`: `16 passed in 168.69s`
+     - `cupy_direct_polarization`: `16 passed in 1086.25s`
+7. runtime comparison against the stored path-split local report at
+   `test-reports/20260404T134950Z`:
+   - stored `cupy_tensor_coeff` physics step:
+     - `172.32s`
+   - stored `cupy_direct_polarization` physics step:
+     - `1746.28s`
+   - interpretation:
+     - the current direct-path full physics pass remained much slower than
+       `tensor_coeff`,
+     - but it was still materially faster than the stored prior direct-path
+       baseline by about `660s` (`~37.8%` faster).
 
 Current exploratory summary from the dev runner:
 
@@ -403,8 +435,10 @@ The first implementation should be considered successful only if:
 5. and the work remains clearly separated from the effective-`2D` detector
    simplification thread.
 
-Do not promote the approximation to maintained validation or user-facing
-recommended workflow status until those checks are complete.
+Do not treat the approximation as a user-facing recommended workflow or as an
+exactness claim. A narrow maintained validation surface now exists for the
+cupy-only analytical sphere collapse lane, but broader support claims should
+still wait on future evidence.
 
 ## Explicit non-goals for the first pass
 
@@ -426,11 +460,12 @@ If a fresh context resumes this work, the shortest correct summary is:
 5. do not mutate the public morphology shape,
 6. keep `mixed_precision_mode` incompatible with `z_collapse_mode` until the
    half-input path is intentionally redesigned,
-7. the next implementation step should be the same in-construction collapse
-   strategy for `execution_path='direct_polarization'`,
-8. validate that direct-path implementation with the same style of:
-   - native `z=1` identity checks,
-   - full `3D` sphere versus collapsed `3D` sphere `I(q)` comparison,
-   - analytical sphere secondary diagnostics,
-9. and only after that decide whether to broaden support claims or keep the
-   feature dev-only.
+7. both maintained execution paths now implement the in-construction collapse
+   strategy,
+8. maintained validation now includes the cupy-only analytical sphere collapse
+   check against direct analytical `I(q)`,
+9. the remaining decision is therefore not implementation completeness but
+   support posture:
+   - whether to keep the feature expert-only,
+   - whether to broaden maintained validation beyond the current sphere lane,
+   - and whether any future user-facing recommendation is warranted.

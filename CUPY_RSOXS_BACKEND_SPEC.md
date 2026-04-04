@@ -499,14 +499,22 @@ As of April 4, 2026:
    surface.
 2. implemented mode:
    - `backend_options={"z_collapse_mode": "mean"}`
-3. currently implemented only for:
+3. currently implemented for both maintained execution paths:
    - `execution_path='tensor_coeff'`
-4. currently not implemented for:
    - `execution_path='direct_polarization'`
-5. the current `tensor_coeff` implementation collapses during `Nt`
+4. the current `tensor_coeff` implementation collapses during `Nt`
    construction and therefore avoids materializing the full `3D` `Nt` tensor.
+5. the current `direct_polarization` implementation collapses angle-specific
+   `p_x`, `p_y`, and `p_z` fields during direct-field construction and avoids
+   materializing the full active-path `3D` polarization volumes.
 6. the current implementation intentionally rejects combination with
    `mixed_precision_mode`; that half-input combination remains future work.
+7. maintained validation now includes a cupy-only analytical sphere collapse
+   check in `tests/validation/test_analytical_sphere_form_factor.py`:
+   - the collapse assertions are validated against direct analytical sphere
+     `I(q)`,
+   - not against the analytical flat-detector sphere surface,
+   - and the maintained thresholds are tuned separately for the collapsed lane.
 
 For the detailed implementation history, exploratory validation results, and
 the recommended next-step plan, see `CUPY_RSOXS_Z_COLLAPSE_PROPOSAL.md`.
@@ -571,13 +579,13 @@ For `execution_path='tensor_coeff'`:
 
 For `execution_path='direct_polarization'`:
 
-1. desired next step:
-   - apply the same construction-time collapse idea used for `tensor_coeff`
-2. build angle-specific collapsed `p_x`, `p_y`, `p_z` fields without
+1. current implementation:
+   - build angle-specific collapsed `p_x`, `p_y`, `p_z` fields without
    materializing the full `3D` polarization volumes,
-3. then continue with effective-`z=1` FFT and detector logic,
-4. validate with the same style of sphere comparison and native-`z=1`
-   identity checks used for the current `tensor_coeff` pass.
+2. then continue with effective-`z=1` FFT and detector logic,
+3. native-`z=1` identity coverage exists in the maintained smoke suite,
+4. and maintained analytical sphere collapse validation now exists for the
+   cupy-only paths.
 
 ### Current effective-`2D` behavior note
 
@@ -594,19 +602,20 @@ detector semantics," not as "collapse and expose the raw FFT."
 
 ### Validation and acceptance posture
 
-This mode is intentionally not yet part of the maintained validation contract.
+This mode remains an expert-only approximation and not an exactness promise,
+but it is no longer purely dev-only from a test posture standpoint.
 
 Current planned evaluation order:
 
-1. `tensor_coeff` prototype is now implemented,
+1. both maintained execution-path implementations now exist,
 2. maintained analytical sphere form-factor tests pass with the normal paths
    unchanged,
-3. the current exploratory comparison surface is the full-`3D` versus
+3. maintained cupy-only analytical sphere collapse validation now exists
+   against direct analytical `I(q)`,
+4. the current exploratory comparison surface is still the full-`3D` versus
    collapsed-`3D` sphere `I(q)` dev harness plus generated plots,
-4. the next implementation/validation step should be the same treatment for
-   `direct_polarization`,
-5. and only after that should support claims or maintained-test promotion be
-   revisited.
+5. and broader support claims or broader maintained-test promotion should
+   still be revisited cautiously rather than assumed complete.
 
 ### Separate optimization thread: effective-`2D` detector simplification
 

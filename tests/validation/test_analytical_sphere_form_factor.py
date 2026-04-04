@@ -57,6 +57,20 @@ GEOMETRY_THRESHOLDS_BY_DIAMETER = {
         "sr1_point_ratio_min": 1.8,
     },
 }
+Z_COLLAPSE_DIRECT_THRESHOLDS_BY_DIAMETER = {
+    70.0: {
+        "sr1_rms_log_max": 0.060,
+        "sr1_p95_log_abs_max": 0.100,
+        "sr1_min_mae_max": 0.00070,
+        "sr1_min_rmse_max": 0.00090,
+    },
+    128.0: {
+        "sr1_rms_log_max": 0.085,
+        "sr1_p95_log_abs_max": 0.220,
+        "sr1_min_mae_max": 0.00035,
+        "sr1_min_rmse_max": 0.00045,
+    },
+}
 
 SUPERRES_COLORS = {
     1: "#1f77b4",
@@ -112,6 +126,20 @@ def _path_runtime_kwargs(nrss_path: ComputationPath) -> dict[str, object]:
         "ownership_policy": nrss_path.ownership_policy,
         "field_namespace": nrss_path.field_namespace,
     }
+
+
+def _path_runtime_kwargs_with_z_collapse_mode(
+    nrss_path: ComputationPath,
+    z_collapse_mode: str | None,
+) -> dict[str, object]:
+    runtime_kwargs = _path_runtime_kwargs(nrss_path)
+    backend_options = dict(runtime_kwargs["backend_options"])
+    if z_collapse_mode is None:
+        backend_options.pop("z_collapse_mode", None)
+    else:
+        backend_options["z_collapse_mode"] = z_collapse_mode
+    runtime_kwargs["backend_options"] = backend_options
+    return runtime_kwargs
 
 
 def _release_runtime_memory() -> None:
@@ -700,6 +728,71 @@ def _evaluate_geometry_case(diameter_nm: float, nrss_path: ComputationPath) -> d
     }
 
 
+def _evaluate_z_collapse_geometry_case(diameter_nm: float, nrss_path: ComputationPath) -> dict[str, object]:
+    runtime_kwargs = _path_runtime_kwargs_with_z_collapse_mode(nrss_path, "mean")
+
+    sim_t0 = perf_counter()
+    data = _run_sphere_backend(
+        diameter_nm=diameter_nm,
+        superresolution=ASSERT_SUPERRESOLUTION,
+        energies_eV=[ENERGY_EV],
+        runtime_kwargs=runtime_kwargs,
+    )
+    sim_seconds = perf_counter() - sim_t0
+    iq_t0 = perf_counter()
+    q_ref, sim_iq = _pyhyper_iq_by_energy(data)[float(ENERGY_EV)]
+    iq_seconds = perf_counter() - iq_t0
+    del data
+    _release_runtime_memory()
+
+    direct_ref_iq = _analytic_sphere_form_factor_binned_iq(q_centers=q_ref, diameter_nm=diameter_nm)
+    sim_norm, direct_norm, _ = _normalize_to_first_q_gt_zero(q_ref, sim_iq, direct_ref_iq)
+    point_metrics = _pointwise_metrics(q_ref, sim_norm, direct_norm)
+    minima_metrics = _minima_alignment_metrics(q_ref, sim_norm, direct_norm)
+
+    flat_image = _flat_detector_analytic_image(
+        diameter_nm=diameter_nm,
+        energy_eV=ENERGY_EV,
+        oversample=FLAT_DETECTOR_OVERSAMPLE,
+    )
+    q_flat, flat_ref_iq = _pyhyper_iq_by_energy(flat_image)[float(ENERGY_EV)]
+    if not np.allclose(q_ref, q_flat, atol=1e-12, rtol=0.0):
+        raise AssertionError("Flat-detector analytical q grid does not match z-collapse simulation q grid.")
+    _, flat_norm, _ = _normalize_to_first_q_gt_zero(q_ref, sim_iq, flat_ref_iq)
+    flat_point_metrics = _pointwise_metrics(q_ref, sim_norm, flat_norm)
+    flat_minima_metrics = _minima_alignment_metrics(q_ref, sim_norm, flat_norm)
+
+    summary_lines = [
+        (
+            f"d={diameter_nm:.0f} collapse=mean sr={ASSERT_SUPERRESOLUTION}: "
+            f"direct_rms={point_metrics['rms_log']:.4f}, "
+            f"direct_p95={point_metrics['p95_log_abs']:.4f}, "
+            f"direct_min_mae={minima_metrics['mae_abs_dq']:.5f}, "
+            f"direct_min_rmse={minima_metrics['rmse_abs_dq']:.5f}"
+        ),
+        (
+            f"d={diameter_nm:.0f} collapse=mean sr={ASSERT_SUPERRESOLUTION}: "
+            f"flat_rms={flat_point_metrics['rms_log']:.4f}, "
+            f"flat_min_mae={flat_minima_metrics['mae_abs_dq']:.5f}"
+        ),
+    ]
+
+    return {
+        "q_ref": q_ref,
+        "direct_norm": direct_norm,
+        "sim_norm": sim_norm,
+        "point_metrics": point_metrics,
+        "minima_metrics": minima_metrics,
+        "flat_point_metrics": flat_point_metrics,
+        "flat_minima_metrics": flat_minima_metrics,
+        "timing": {
+            "sim_seconds": float(sim_seconds),
+            "iq_seconds": float(iq_seconds),
+        },
+        "summary_lines": summary_lines,
+    }
+
+
 @pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.physics_validation
@@ -753,3 +846,43 @@ def test_analytical_spherical_form_factor_pybind(diameter_nm: float, nrss_path: 
         direct_min = result["direct_minima_metrics_by_superres"][superresolution]
         assert flat_point["rms_log"] <= result["direct_point_metrics"]["rms_log"] + 1e-12
         assert flat_min["mae_abs_dq"] < direct_min["mae_abs_dq"]
+
+
+@pytest.mark.gpu
+@pytest.mark.slow
+@pytest.mark.physics_validation
+@pytest.mark.toolchain_validation
+@pytest.mark.path_subset("cupy_tensor_coeff", "cupy_direct_polarization")
+@pytest.mark.parametrize("diameter_nm", DIAMETERS_NM, ids=["dia70", "dia128"])
+def test_analytical_spherical_form_factor_z_collapse_direct_pybind(
+    diameter_nm: float,
+    nrss_path: ComputationPath,
+):
+    """Validate cupy-rsoxs z-collapse sphere form-factor agreement against direct analytical I(q)."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for analytical z-collapse sphere form-factor test.")
+
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+    result = _evaluate_z_collapse_geometry_case(diameter_nm, nrss_path)
+
+    print("z_collapse_direct_point_metrics", result["point_metrics"])
+    print(
+        "z_collapse_direct_minima_metrics",
+        {k: v for k, v in result["minima_metrics"].items() if not isinstance(v, np.ndarray)},
+    )
+    print("z_collapse_flat_point_metrics", result["flat_point_metrics"])
+    print(
+        "z_collapse_flat_minima_metrics",
+        {k: v for k, v in result["flat_minima_metrics"].items() if not isinstance(v, np.ndarray)},
+    )
+    for line in result["summary_lines"]:
+        print(line)
+
+    thresholds = Z_COLLAPSE_DIRECT_THRESHOLDS_BY_DIAMETER[float(diameter_nm)]
+    assert result["point_metrics"]["rms_log"] <= thresholds["sr1_rms_log_max"]
+    assert result["point_metrics"]["p95_log_abs"] <= thresholds["sr1_p95_log_abs_max"]
+    assert result["minima_metrics"]["mae_abs_dq"] <= thresholds["sr1_min_mae_max"]
+    assert result["minima_metrics"]["rmse_abs_dq"] <= thresholds["sr1_min_rmse_max"]
+
+    assert result["point_metrics"]["rms_log"] < result["flat_point_metrics"]["rms_log"]
+    assert result["minima_metrics"]["mae_abs_dq"] < result["flat_minima_metrics"]["mae_abs_dq"]
