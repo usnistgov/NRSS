@@ -51,10 +51,9 @@ Build a new NRSS backend architecture that:
 
 ### Immediate objective
 
-Convert `tests/validation/` legacy scripts into robust pytest suites using
-pybind CyRSoXS execution where applicable (no CLI serialization bottleneck),
-while establishing a first stable physics-validation lane before backend
-refactors.
+Maintain a path-first `tests/validation/` pytest surface that runs the
+maintained physics checks through explicit NRSS morphology/backend execution
+instead of legacy CLI serialization or hidden backend defaults.
 
 ### Maintained validation cases
 
@@ -67,10 +66,10 @@ refactors.
 7. Core-shell.
 8. MWCNT.
 
-### Next development priority (April 4, 2026)
+### Completed peer-path test refactor (April 4, 2026)
 
-Refactor the maintained test surface so the three prioritized computation paths
-are first-class peers:
+The maintained validation and smoke surfaces now treat the three prioritized
+computation paths as first-class peers:
 
 1. `legacy_cyrsoxs`
    - `backend="cyrsoxs"`
@@ -81,29 +80,29 @@ are first-class peers:
    - `backend="cupy-rsoxs"`
    - `backend_options={"execution_path": "direct_polarization"}`
 
-This refactor should replace the current backend-first test routing model with
-a path-first matrix model. The maintained smoke and physics suites should name
-the computation path(s) they validate directly rather than relying on the
-implicit default `cupy-rsoxs` execution path.
+Implemented changes:
 
-Required changes:
-
-1. Add shared path metadata and fixtures for the maintained pytest surface, for
-   example a canonical `ComputationPath` definition plus an `nrss_path`
-   fixture.
-2. Extend test-routing plumbing so the standard local report and the physics
-   runner can execute per-path lanes rather than only a single
+1. Added shared path metadata and fixtures for the maintained pytest surface,
+   centered on `tests/path_matrix.py` plus the `nrss_path` fixture.
+2. Extended test-routing plumbing so plain `pytest`, the local report, and the
+   physics runner can execute per-path lanes rather than only a single
    `NRSS_BACKEND`-selected lane.
-3. Convert maintained validation builders so they accept explicit
+3. Converted maintained validation builders so they accept explicit
    `backend` / `backend_options` inputs anywhere a test is intended to run on
    more than one computation path.
-4. Replace broad backend-oriented markers as the primary maintained routing
-   mechanism with path-oriented routing, while retaining explicit legacy-only
-   compatibility markers where scientifically justified.
+4. Replaced backend-first maintained routing with path-oriented routing while
+   retaining explicit legacy-only compatibility markers where scientifically
+   justified.
+5. Default path-matrix behavior now expands to all three peer paths.
+6. `--nrss-path` / `NRSS_PATH` and `--nrss-backend` / `NRSS_BACKEND`
+   disagreements now fail fast.
+7. The maintained CuPy peer lanes use device residency after lightweight host
+   vs device parity checks, with `ownership_policy="borrow"` for the standard
+   CuPy matrix.
 
-Migration guidance for tests that are currently backend specific:
+Completed maintained migration outcomes:
 
-1. Current `backend_specific` tests should be split into one of two groups:
+1. Current `backend_specific` tests are now split into one of two groups:
    - path-matrix tests that run on all three prioritized computation paths,
    - true compatibility tests that remain intentionally legacy-only.
 2. `tests/validation/test_bragg_2d_lattice.py`,
@@ -112,11 +111,12 @@ Migration guidance for tests that are currently backend specific:
    physics tests. Their morphology builders should accept explicit
    `backend` / `backend_options` arguments and should be exercised in the
    `legacy_cyrsoxs`, `cupy_tensor_coeff`, and
-   `cupy_direct_polarization` lanes.
+   `cupy_direct_polarization` lanes. This is now complete.
 3. `tests/validation/test_core_shell_reference.py` already has partial path
    plumbing and should be normalized into the same path-matrix structure so
    the maintained `cupy_tensor_coeff` and `cupy_direct_polarization` workflows
    are represented symmetrically rather than as a default-plus-extra pattern.
+   This is now complete.
 4. Tests that are currently marked `cyrsoxs_only` should be reviewed
    individually:
    - if they express general physics expectations, convert them into
@@ -124,11 +124,65 @@ Migration guidance for tests that are currently backend specific:
    - if they exercise true CyRSoXS-only compatibility behavior, move them into
      an explicit legacy-compatibility lane rather than leaving them in the
      principal peer-path physics matrix.
+   This review is complete for the maintained validation surface.
 5. Keep CLI-vs-pybind checks as explicit legacy compatibility tests. They
    remain valuable, but they should not define the maintained peer structure
    for the three primary computation paths.
 
+Newly converted maintained physics modules:
+
+1. `tests/validation/test_analytical_sphere_form_factor.py`
+   - now a path-matrix physics test,
+   - runs explicit NRSS `Morphology` backends on
+     `legacy_cyrsoxs`, `cupy_tensor_coeff`, and
+     `cupy_direct_polarization`,
+   - compares the simulated flat-detector sphere signal against the analytical
+     flat-detector reference through the maintained PyHyperScattering
+     reduction, with pointwise and minima-alignment thresholds calibrated to
+     the current maintained morphology runner.
+2. `tests/validation/test_sphere_contrast_scaling.py`
+   - now a path-matrix physics test,
+   - keeps the one-morph, multi-energy sphere contrast-scaling design,
+   - validates beta-only, delta-only, mixed, and split-material scaling on all
+     three peer paths through backend-explicit morphology execution.
+3. `tests/validation/test_sphere_orientational_contrast_scaling.py`
+   - now a path-matrix physics test,
+   - keeps the one-morph, multi-energy sphere orientational-contrast design,
+   - validates the helper-predicted orientational ratios on all three peer
+     paths through backend-explicit morphology execution.
+4. `tests/validation/test_analytical_2d_disk_form_factor.py`
+   - now a path-matrix physics test,
+   - keeps the direct analytical 2D disk comparison through the maintained
+     PyHyperScattering reduction,
+   - runs the maintained explicit disk-versus-vacuum morphology on all three
+     peer paths.
+5. `tests/validation/test_2d_disk_contrast_scaling.py`
+   - now a path-matrix physics test,
+   - keeps the one-morph, multi-energy 2D contrast-scaling design,
+   - runs the maintained backend-explicit morphology on all three peer paths.
+
+Current maintained validation surface:
+
+1. All maintained validation modules now participate in the peer-path
+   matrix. The surface is nine pytest modules covering eight maintained
+   validation cases:
+   - analytical sphere form factor,
+   - sphere contrast scaling,
+   - sphere orientational contrast scaling,
+   - analytical 2D disk form factor,
+   - 2D disk contrast scaling,
+   - 2D Bragg lattice,
+   - 3D Bragg lattice,
+   - CoreShell,
+   - MWCNT.
+2. The maintained validation surface comprises `14` physics tests per path.
+3. There are no remaining maintained CuPy skips on the principal physics
+   matrix.
+
 ### Path-matrix refactor details for resumption
+
+This refactor is now implemented. The details below remain as the authoritative
+design description for how the maintained path-first surface is structured.
 
 The goal of this refactor is not just to add more parametrization. It is to
 make the maintained test program structurally path-first so that a fresh
@@ -458,17 +512,22 @@ Latest run evidence:
 ### Implemented physics validation layer (March 20, 2026)
 
 1. Added `tests/validation/test_analytical_sphere_form_factor.py`:
-   - flat-detector analytical sphere comparison through the pybind-to-PyHyper
-     workflow,
-   - pointwise and minima-alignment metrics with fixed empirical thresholds,
-   - explicit sphere-versus-vacuum morphology,
+   - now a maintained path-matrix physics test,
+   - runs explicit NRSS morphology execution on
+     `legacy_cyrsoxs`, `cupy_tensor_coeff`, and
+     `cupy_direct_polarization`,
+   - compares against the flat-detector analytical sphere reference through the
+     maintained PyHyperScattering reduction,
+   - uses the currently calibrated pointwise and minima-alignment thresholds
+     for the maintained morphology runner,
    - optional plot writing gated by `NRSS_WRITE_VALIDATION_PLOTS=1`.
 2. Added `tests/validation/test_sphere_contrast_scaling.py`:
+   - now a maintained path-matrix physics test,
    - one-morph, multi-energy contrast-scaling validation,
    - 24 close-energy scenarios covering beta-only, delta-only, mixed, and
      split-material families,
    - integrated-intensity checks over a fixed q window with fixed empirical
-     thresholds.
+     thresholds on all three peer paths.
 3. Added `tests/validation/lib/orientational_contrast.py`:
    - reusable tensor-based helper that turns para/perp delta/beta channels plus
      Euler angles and `S` into inspectable effective indices, induced
@@ -476,6 +535,7 @@ Latest run evidence:
    - explicitly documents the How-to-RSoXS citation plus the rotation /
      far-field projection path used for expectations.
 4. Added `tests/validation/test_sphere_orientational_contrast_scaling.py`:
+   - now a maintained path-matrix physics test,
    - one-morph, multi-energy orientational-contrast validation for a sphere in
      vacuum,
    - `128 x 128 x 128`, `PhysSize = 2.0 nm`, `Diameter = 32 nm`,
@@ -483,24 +543,26 @@ Latest run evidence:
    - high-symmetry `theta` and `psi` coverage, low-symmetry coupled Euler
      cases, and an `S` series including `S=0`,
    - helper-driven expected ratios plus direct detector-annulus observed
-     ratios,
+     ratios on all three peer paths,
    - optional plot writing through `NRSS_WRITE_VALIDATION_PLOTS=1`.
 5. Added `tests/validation/test_analytical_2d_disk_form_factor.py`:
-   - direct analytical 2D disk comparison through the pybind-to-PyHyper
-     workflow,
+   - now a maintained path-matrix physics test,
+   - direct analytical 2D disk comparison through the maintained
+     PyHyperScattering reduction,
    - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`, diameters `70 nm` and `128 nm`,
    - pointwise and minima-alignment metrics with fixed empirical thresholds,
    - explicit disk-versus-vacuum morphology,
-   - fixed `sr=1` only, mirroring the sphere test's assertion anchor while
-     avoiding extra 2D-path variability,
+   - fixed `sr=1` only as the assertion anchor while retaining the maintained
+     superresolution loop for diagnostics,
    - optional plot writing gated by `NRSS_WRITE_VALIDATION_PLOTS=1`.
 6. Added `tests/validation/test_2d_disk_contrast_scaling.py`:
+   - now a maintained path-matrix physics test,
    - one-morph, multi-energy contrast-scaling validation for the 2D pathway,
    - `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
    - 24 close-energy scenarios covering beta-only, delta-only, mixed, and
      split-material families,
    - integrated-intensity checks over a fixed q window with fixed empirical
-     thresholds.
+     thresholds on all three peer paths.
 7. Added `tests/validation/lib/bragg.py`:
    - shared deterministic lattice builders and reciprocal-space prediction
      helpers for Bragg validation,
@@ -511,32 +573,41 @@ Latest run evidence:
 8. Added `tests/validation/test_bragg_2d_lattice.py`:
    - deterministic square (`a = 30 nm`) and hexagonal (`a = 45 nm`) disk
      lattices at `1 x 2048 x 2048`, `PhysSize = 1.0 nm`,
+   - now runs as a maintained path-matrix physics test on all three peer
+     paths,
    - validates detector-peak locations and quasi-powder shell locations through
-     the pybind-to-PyHyper workflow,
+     the maintained PyHyperScattering reduction,
    - includes verbose diagnostic plots with full predicted-shell overlays.
 9. Added `tests/validation/test_bragg_3d_lattice.py`:
    - deterministic simple-cubic (`a = 30 nm`) and ideal HCP (`a = 45 nm`)
      sphere lattices at `256 x 1024 x 1024`, `PhysSize = 1.0 nm`,
+   - now runs as a maintained path-matrix physics test on all three peer
+     paths,
    - validates detector-visible 3D Bragg peak locations plus azimuthally
      averaged shell locations,
    - uses explicit flat-detector geometry handling for shell prediction and
      includes verbose diagnostic plots with visibility-class overlays.
 10. Added `tests/validation/lib/core_shell.py` plus
     `tests/validation/test_core_shell_reference.py`:
-    - maintained CoreShell baseline workflow through pybind +
-      PyHyperScattering `WPIntegrator` + manual A-wedge reduction,
-    - experimental PGN RSoXS golden as the scientific gate,
-    - parallel sim-derived golden as a tight regression guard,
-    - `experimental_validation` marker applied to the experimental-reference
-      test,
+   - maintained CoreShell baseline workflow through explicit NRSS morphology
+     execution + PyHyperScattering `WPIntegrator` + manual A-wedge reduction,
+   - now runs as a maintained path-matrix physics test on all three peer
+     paths,
+   - experimental PGN RSoXS golden as the scientific gate,
+   - parallel sim-derived golden as a tight regression guard,
+   - `experimental_validation` marker applied to the experimental-reference
+     test,
     - falsification/subterfuge scenarios intentionally kept only in the
       development diagnostic, not in the principal `tests/validation` surface.
 11. Added `tests/validation/lib/mwcnt.py` plus
     `tests/validation/test_mwcnt_reference.py`:
-    - maintained deterministic MWCNT workflow through pybind +
-      PyHyperScattering `WPIntegrator` + anisotropy-observable reduction,
-    - periodic field construction is now the maintained default and the legacy
-      field path remains available as an explicit switch,
+   - maintained deterministic MWCNT workflow through explicit NRSS morphology
+     execution + PyHyperScattering `WPIntegrator` + anisotropy-observable
+     reduction,
+   - now runs as a maintained path-matrix physics test on all three peer
+     paths,
+   - periodic field construction is now the maintained default and the legacy
+     field path remains available as an explicit switch,
     - maintained simulation defaults are `WindowingType=0` and
       `EAngleRotation=[0, 20, 340]`,
     - experimental reduced `A(E)` / `A(q)` observables derived from the
@@ -615,6 +686,24 @@ Latest run evidence:
       `CUDA_VISIBLE_DEVICES=1 /home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation/test_bragg_2d_lattice.py tests/validation/test_bragg_3d_lattice.py -v`,
     - result: `4 passed in 126.03s`,
     - installed package resolved to `CyRSoXS 1.1.8.0`, patch `9d45790`.
+20. Completed the remaining path-matrix conversion of the five formerly
+    legacy-only maintained physics modules:
+    - `test_analytical_sphere_form_factor.py`,
+    - `test_sphere_contrast_scaling.py`,
+    - `test_sphere_orientational_contrast_scaling.py`,
+    - `test_analytical_2d_disk_form_factor.py`,
+    - `test_2d_disk_contrast_scaling.py`.
+21. Verified the newly enabled maintained path-matrix tests on all three peer
+    computation paths after threshold review:
+    - `legacy_cyrsoxs`: `7 passed`,
+    - `cupy_tensor_coeff`: `7 passed`,
+    - `cupy_direct_polarization`: `7 passed`,
+    - total for the newly enabled set: `21/21 passed`.
+22. Current maintained physics-matrix status:
+    - the principal validation surface is now `14` tests per path,
+    - no maintained physics tests remain skipped for the CuPy peer paths,
+    - path-matrix tests expand across all three peer paths by default when no
+      explicit selector is provided.
 
 ### Remaining test-hardening gaps
 
