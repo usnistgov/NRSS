@@ -496,6 +496,10 @@ class Morphology:
         return dict(self._backend_options)
 
     @property
+    def mixed_precision_mode(self):
+        return self._backend_options.get("mixed_precision_mode")
+
+    @property
     def backend_array_contract(self):
         return self.authoritative_array_contract
 
@@ -512,8 +516,21 @@ class Morphology:
         return self._backend_array_contract["dtype"]
 
     @property
+    def runtime_dtype(self):
+        return self._runtime_compute_contract["dtype"]
+
+    @property
+    def runtime_compute_dtype(self):
+        return self._runtime_compute_contract["runtime_compute_dtype"]
+
+    @property
     def input_policy(self):
         return self._input_policy
+
+    def _effective_input_policy(self):
+        if self.backend == "cupy-rsoxs" and self.mixed_precision_mode is not None:
+            return "strict"
+        return self.input_policy
 
     @property
     def output_policy(self):
@@ -604,6 +621,11 @@ class Morphology:
                 f" Expected {self.resident_mode}-resident {namespace_label} inputs to be "
                 f"ZYX-shaped, C-contiguous, {self.backend_dtype} arrays for each material field."
             )
+            if self.input_policy != "strict" and self._effective_input_policy() == "strict":
+                header += (
+                    f" backend_options['mixed_precision_mode']={self.mixed_precision_mode!r} "
+                    "overrides input_policy and behaves as strict."
+                )
         details = []
         for plan in plans:
             material_label = "unknown" if plan.material_id is None else str(plan.material_id)
@@ -628,7 +650,7 @@ class Morphology:
         if unsupported:
             raise TypeError(self._format_backend_input_error(unsupported, strict=False))
 
-        if self.input_policy == 'strict':
+        if self._effective_input_policy() == 'strict':
             required = [
                 plan for plan in reports
                 if plan.original_namespace != 'missing' and self._plan_requires_coercion(plan)
@@ -979,16 +1001,20 @@ class Morphology:
                 if not plan.supported:
                     raise AssertionError(plan.reason)
 
+                validation_arr = arr
                 xp = get_namespace_module(plan.original_namespace)
+                if plan.original_namespace == "cupy" and str(arr.dtype) == "float16":
+                    validation_arr = np.asarray(arr.get(), dtype=np.float16)
+                    xp = np
 
                 # Check for NaNs and float type in one operation
-                if not np.issubdtype(arr.dtype, np.floating):
+                if not np.issubdtype(validation_arr.dtype, np.floating):
                     raise AssertionError(f'Material {i} {name} is not of type float')
                 
-                if to_python_bool(xp.any(xp.isnan(arr))):
+                if to_python_bool(xp.any(xp.isnan(validation_arr))):
                     raise AssertionError(f'NaNs are present in Material {i} {name}')
 
-                field_shape = tuple(int(dim) for dim in arr.shape)
+                field_shape = tuple(int(dim) for dim in validation_arr.shape)
                 if material_shape is None:
                     material_shape = field_shape
                 elif field_shape != material_shape:
@@ -999,7 +1025,7 @@ class Morphology:
                 
                 # Check bounds for S and Vfrac
                 if name in ('S', 'Vfrac'):
-                    if not to_python_bool(xp.all((arr >= 0) & (arr <= 1))):
+                    if not to_python_bool(xp.all((validation_arr >= 0) & (validation_arr <= 1))):
                         raise AssertionError(f'Material {i} {name} value(s) does not lie between 0 and 1')
 
             if reference_shape is None:
@@ -1018,7 +1044,10 @@ class Morphology:
                 backend_options=self.backend_options,
                 resident_mode=self.resident_mode,
             )
-            coerced_vfracs.append(coerce_array_for_backend(mat.Vfrac, vfrac_plan))
+            if vfrac_plan.original_namespace == "cupy" and str(mat.Vfrac.dtype) == "float16":
+                coerced_vfracs.append(np.asarray(mat.Vfrac.get(), dtype=np.float16))
+            else:
+                coerced_vfracs.append(coerce_array_for_backend(mat.Vfrac, vfrac_plan))
 
         # Vectorized sum of volume fractions in backend-compatible space
         Vfrac_sum = coerced_vfracs[0]
@@ -1027,8 +1056,15 @@ class Morphology:
 
         sum_namespace = inspect_array(Vfrac_sum)['namespace']
         sum_xp = get_namespace_module(sum_namespace)
-        assert to_python_bool(sum_xp.allclose(Vfrac_sum, 1)), 'Total material volume fractions do not sum to 1'
-        
+        if self.mixed_precision_mode == "reduced_morphology_bit_depth":
+            closure_error = sum_xp.abs(Vfrac_sum - Vfrac_sum.dtype.type(1.0))
+            assert to_python_bool(sum_xp.all(closure_error <= Vfrac_sum.dtype.type(1e-3))), (
+                'Total material volume fractions do not satisfy the mixed-precision '
+                'voxelwise closure budget of abs(sum_i Vfrac_i - 1) <= 1e-3'
+            )
+        else:
+            assert to_python_bool(sum_xp.allclose(Vfrac_sum, 1)), 'Total material volume fractions do not sum to 1'
+
         if not quiet:
             print('All material checks have passed')
 

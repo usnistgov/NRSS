@@ -81,13 +81,23 @@ def _release_cupy_memory():
     cp.get_default_pinned_memory_pool().free_all_blocks()
 
 
-def _to_backend_namespace(array: np.ndarray, field_namespace: str):
+def _to_backend_namespace(array: np.ndarray, field_namespace: str, dtype=np.float32):
     if field_namespace == "numpy":
-        return np.ascontiguousarray(array.astype(np.float32, copy=False))
+        return np.ascontiguousarray(array.astype(dtype, copy=False))
     if field_namespace == "cupy":
         cp = _import_cupy_required()
-        return cp.ascontiguousarray(cp.asarray(array, dtype=cp.float32))
+        return cp.ascontiguousarray(cp.asarray(array, dtype=cp.dtype(dtype)))
     raise AssertionError(f"Unsupported field namespace {field_namespace!r}.")
+
+
+def _clone_backend_array(array):
+    info = inspect_array(array)
+    if info["namespace"] == "numpy":
+        return np.ascontiguousarray(np.array(array, dtype=array.dtype, copy=True))
+    if info["namespace"] == "cupy":
+        cp = _import_cupy_required()
+        return cp.asarray(cp.asnumpy(array), dtype=array.dtype)
+    raise AssertionError(f"Unsupported backend array namespace {info['namespace']!r}.")
 
 
 def _path_runtime_kwargs(nrss_path: ComputationPath) -> dict[str, object]:
@@ -122,6 +132,7 @@ def _build_two_material_isotropic_block_morphology(
     field_namespace: str = "numpy",
     isotropic_representation: str = "legacy_zero_array",
     ignored_orientation_arrays: bool = False,
+    array_dtype=np.float32,
 ):
     shape = (4, 16, 16)
     energies = [285.0]
@@ -132,26 +143,31 @@ def _build_two_material_isotropic_block_morphology(
 
     if field_namespace == "cupy":
         cp = _import_cupy_required()
-        vfrac_1 = cp.asarray(vfrac_1, dtype=cp.float32)
-        vfrac_2 = cp.asarray(vfrac_2, dtype=cp.float32)
-        zeros = cp.asarray(zeros, dtype=cp.float32)
+        cp_dtype = cp.dtype(array_dtype)
+        vfrac_1 = cp.asarray(vfrac_1, dtype=cp_dtype)
+        vfrac_2 = cp.asarray(vfrac_2, dtype=cp_dtype)
+        zeros = cp.asarray(zeros, dtype=cp_dtype)
     elif field_namespace != "numpy":
         raise AssertionError(f"Unsupported field namespace {field_namespace!r}.")
+    else:
+        vfrac_1 = np.ascontiguousarray(vfrac_1.astype(array_dtype, copy=False))
+        vfrac_2 = np.ascontiguousarray(vfrac_2.astype(array_dtype, copy=False))
+        zeros = np.ascontiguousarray(zeros.astype(array_dtype, copy=False))
 
     if isotropic_representation == "legacy_zero_array":
-        mat1_s = zeros.copy()
-        mat1_theta = zeros.copy()
-        mat1_psi = zeros.copy()
-        mat2_s = zeros.copy()
-        mat2_theta = zeros.copy()
-        mat2_psi = zeros.copy()
+        mat1_s = _clone_backend_array(zeros)
+        mat1_theta = _clone_backend_array(zeros)
+        mat1_psi = _clone_backend_array(zeros)
+        mat2_s = _clone_backend_array(zeros)
+        mat2_theta = _clone_backend_array(zeros)
+        mat2_psi = _clone_backend_array(zeros)
     elif isotropic_representation == "enum_contract":
         mat1_s = SFieldMode.ISOTROPIC
-        mat1_theta = zeros.copy() if ignored_orientation_arrays else None
-        mat1_psi = zeros.copy() if ignored_orientation_arrays else None
+        mat1_theta = _clone_backend_array(zeros) if ignored_orientation_arrays else None
+        mat1_psi = _clone_backend_array(zeros) if ignored_orientation_arrays else None
         mat2_s = SFieldMode.ISOTROPIC
-        mat2_theta = zeros.copy() if ignored_orientation_arrays else None
-        mat2_psi = zeros.copy() if ignored_orientation_arrays else None
+        mat2_theta = _clone_backend_array(zeros) if ignored_orientation_arrays else None
+        mat2_psi = _clone_backend_array(zeros) if ignored_orientation_arrays else None
     else:
         raise AssertionError(
             f"Unsupported isotropic_representation {isotropic_representation!r}."
@@ -617,8 +633,8 @@ def test_backend_registry_reports_known_backends():
     assert get_backend_info("cyrsoxs").supported_dtypes == ("float32",)
     assert get_backend_info("cupy-rsoxs").default_resident_mode == "host"
     assert get_backend_info("cupy-rsoxs").supported_resident_modes == ("host", "device")
-    assert "dtype" in get_backend_info("cupy-rsoxs").supported_backend_options
     assert "execution_path" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "mixed_precision_mode" in get_backend_info("cupy-rsoxs").supported_backend_options
 
 
 @pytest.mark.backend_agnostic_contract
@@ -708,10 +724,13 @@ def test_cupy_backend_array_contract_defaults_to_host_resident_numpy():
     assert contract["resident_mode"] == "host"
     assert contract["namespace"] == "numpy"
     assert contract["device"] == "cpu"
+    assert contract["mixed_precision_mode"] is None
     assert contract["options"]["execution_path"] == "tensor_coeff"
+    assert contract["options"]["mixed_precision_mode"] is None
     assert runtime_contract["namespace"] == "cupy"
     assert runtime_contract["device"] == "gpu"
     assert runtime_contract["options"]["execution_path"] == "tensor_coeff"
+    assert runtime_contract["options"]["mixed_precision_mode"] is None
     assert plan.target_namespace == "numpy"
     assert plan.target_device == "cpu"
     assert plan.transfer == "none"
@@ -745,6 +764,7 @@ def test_cupy_device_resident_array_contract_normalizes_numpy_inputs_to_cupy():
 
         assert contract["resident_mode"] == "device"
         assert contract["dtype"] == "float32"
+        assert contract["mixed_precision_mode"] is None
         assert plan.target_namespace == "cupy"
         assert plan.target_device == "gpu"
         assert plan.transfer == "host_to_device"
@@ -759,13 +779,45 @@ def test_cupy_device_resident_array_contract_normalizes_numpy_inputs_to_cupy():
 
 @pytest.mark.backend_specific
 @pytest.mark.cpu
-def test_cupy_backend_rejects_float16_dtype_option():
-    """Ensure cupy-rsoxs rejects float16 until runtime-compute contracts are stabilized."""
-    with pytest.raises(BackendOptionError, match="does not support dtype"):
+def test_cupy_backend_rejects_legacy_dtype_option_with_migration_error():
+    """Ensure cupy-rsoxs rejects the removed dtype surface with a migration-focused message."""
+    with pytest.raises(BackendOptionError, match="does not expose a generic dtype option"):
         Morphology(
             1,
             backend="cupy-rsoxs",
             backend_options={"dtype": "float16"},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_mixed_precision_backend_option():
+    """Ensure cupy-rsoxs normalizes the approved mixed_precision_mode surface."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"mixed_precision_mode": "reduced_morphology_bit_depth"},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == {
+        "execution_path": "tensor_coeff",
+        "mixed_precision_mode": "reduced_morphology_bit_depth",
+    }
+    assert morph.backend_array_contract["dtype"] == "float16"
+    assert morph.runtime_compute_contract["dtype"] == "float16"
+    assert morph.runtime_compute_contract["runtime_compute_dtype"] == "float32"
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_unknown_mixed_precision_backend_option():
+    """Ensure cupy-rsoxs rejects unsupported mixed_precision_mode values up front."""
+    with pytest.raises(BackendOptionError, match="does not support mixed_precision_mode"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"mixed_precision_mode": "definitely-not-a-mode"},
             create_cy_object=False,
         )
 
@@ -781,8 +833,8 @@ def test_cupy_backend_accepts_execution_path_backend_option():
         create_cy_object=False,
     )
     assert morph.backend_options == {
-        "dtype": "float32",
         "execution_path": "direct_polarization",
+        "mixed_precision_mode": None,
     }
 
 
@@ -847,9 +899,14 @@ def test_morphology_normalizes_material_arrays_eagerly_for_selected_backend_defa
 
     expected_namespace = "numpy"
     expected_dtype = morph.backend_dtype
-    expected_backend_options = {"dtype": expected_dtype}
+    expected_backend_options = {}
     if nrss_backend == "cupy-rsoxs":
-        expected_backend_options["execution_path"] = "tensor_coeff"
+        expected_backend_options = {
+            "execution_path": "tensor_coeff",
+            "mixed_precision_mode": None,
+        }
+    else:
+        expected_backend_options = {"dtype": expected_dtype}
     assert morph.resident_mode == get_backend_info(nrss_backend).default_resident_mode
     assert morph.backend_options == expected_backend_options
     assert morph.backend_array_contract["resident_mode"] == morph.resident_mode
@@ -932,6 +989,152 @@ def test_cupy_device_resident_morphology_normalizes_material_arrays_to_cupy():
                 assert str(arr.dtype) == "float32"
                 assert info["c_contiguous"]
     finally:
+        _release_cupy_memory()
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_mixed_precision_mode_overrides_coerce_and_requires_strict_host_float16_inputs():
+    """Ensure mixed_precision_mode behaves as strict and rejects host inputs that would need coercion."""
+    shape = (1, 4, 4)
+    vfrac_1 = np.ones(shape, dtype=np.float32)
+    vfrac_2 = np.zeros(shape, dtype=np.float32)
+    zeros = np.zeros(shape, dtype=np.float32)
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=vfrac_1,
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=[285.0],
+        opt_constants={285.0: [1e-4, 2e-4, 1e-4, 2e-4]},
+        name="mat1",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=vfrac_2,
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=[285.0],
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="mat2",
+    )
+
+    with pytest.raises(TypeError, match="mixed_precision_mode"):
+        Morphology(
+            2,
+            materials={1: mat1, 2: mat2},
+            PhysSize=5.0,
+            backend="cupy-rsoxs",
+            backend_options={"mixed_precision_mode": "reduced_morphology_bit_depth"},
+            input_policy="coerce",
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_mixed_precision_host_resident_accepts_authoritative_numpy_float16_inputs():
+    """Ensure host-resident mixed_precision_mode accepts strict authoritative NumPy float16 arrays."""
+    morph = _build_two_material_isotropic_block_morphology(
+        backend="cupy-rsoxs",
+        backend_options={"mixed_precision_mode": "reduced_morphology_bit_depth"},
+        resident_mode="host",
+        field_namespace="numpy",
+        isotropic_representation="legacy_zero_array",
+        array_dtype=np.float16,
+    )
+
+    assert morph.backend_dtype == "float16"
+    assert morph.runtime_dtype == "float16"
+    for material in morph.materials.values():
+        for field_name in ("Vfrac", "S", "theta", "psi"):
+            arr = getattr(material, field_name)
+            assert str(arr.dtype) == "float16"
+            assert inspect_array(arr)["namespace"] == "numpy"
+    morph.check_materials(quiet=True)
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_mixed_precision_closure_budget_is_voxelwise_abs_1e_3():
+    """Ensure mixed_precision_mode applies the expert-mode voxelwise closure budget."""
+    shape = (1, 2, 2)
+    ones = np.ones(shape, dtype=np.float16)
+    zeros = np.zeros(shape, dtype=np.float16)
+
+    def _build(delta: float) -> Morphology:
+        vfrac_1 = ones.copy()
+        vfrac_2 = zeros.copy()
+        vfrac_2[0, 0, 0] = np.float16(delta)
+        mat1 = Material(
+            materialID=1,
+            Vfrac=vfrac_1,
+            S=zeros.copy(),
+            theta=zeros.copy(),
+            psi=zeros.copy(),
+            energies=[285.0],
+            opt_constants={285.0: [1e-4, 2e-4, 1e-4, 2e-4]},
+            name="mat1",
+        )
+        mat2 = Material(
+            materialID=2,
+            Vfrac=vfrac_2,
+            S=zeros.copy(),
+            theta=zeros.copy(),
+            psi=zeros.copy(),
+            energies=[285.0],
+            opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+            name="mat2",
+        )
+        return Morphology(
+            2,
+            materials={1: mat1, 2: mat2},
+            PhysSize=5.0,
+            backend="cupy-rsoxs",
+            backend_options={"mixed_precision_mode": "reduced_morphology_bit_depth"},
+            input_policy="strict",
+            create_cy_object=False,
+        )
+
+    morph_ok = _build(9.5e-4)
+    morph_ok.check_materials(quiet=True)
+
+    morph_bad = _build(1.5e-3)
+    with pytest.raises(AssertionError, match="voxelwise closure budget"):
+        morph_bad.check_materials(quiet=True)
+
+
+@pytest.mark.gpu
+def test_cupy_mixed_precision_device_resident_accepts_authoritative_cupy_float16_inputs():
+    """Ensure device-resident mixed_precision_mode accepts strict authoritative CuPy float16 arrays."""
+    morph = None
+    try:
+        morph = _build_two_material_isotropic_block_morphology(
+            backend="cupy-rsoxs",
+            backend_options={"mixed_precision_mode": "reduced_morphology_bit_depth"},
+            resident_mode="device",
+            field_namespace="cupy",
+            isotropic_representation="legacy_zero_array",
+            array_dtype=np.float16,
+        )
+
+        assert morph.backend_dtype == "float16"
+        assert morph.runtime_dtype == "float16"
+        for material in morph.materials.values():
+            for field_name in ("Vfrac", "S", "theta", "psi"):
+                arr = getattr(material, field_name)
+                assert str(arr.dtype) == "float16"
+                assert inspect_array(arr)["namespace"] == "cupy"
+        morph.check_materials(quiet=True)
+    finally:
+        if morph is not None:
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
         _release_cupy_memory()
 
 
@@ -1220,6 +1423,43 @@ def test_cupy_host_resident_runtime_stages_authoritative_numpy_fields_to_device(
 
 
 @pytest.mark.gpu
+def test_cupy_mixed_precision_host_runtime_stages_numpy_float16_fields_to_device_without_widening():
+    """Ensure host-resident mixed mode stages authoritative NumPy float16 fields to CuPy float16."""
+    cp = _import_cupy_required()
+    morph = None
+    try:
+        morph = _build_two_material_isotropic_block_morphology(
+            backend="cupy-rsoxs",
+            backend_options={"mixed_precision_mode": "reduced_morphology_bit_depth"},
+            resident_mode="host",
+            field_namespace="numpy",
+            isotropic_representation="legacy_zero_array",
+            array_dtype=np.float16,
+        )
+        result = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.Stream.null.synchronize()
+        assert list(result.to_backend_array().shape) == [1, 16, 16]
+        assert morph.last_runtime_staging_report
+        assert all(
+            plan.target_namespace == "cupy" and plan.target_dtype == "float16"
+            for plan in morph.last_runtime_staging_report
+            if plan.original_namespace != "missing"
+        )
+        assert any(
+            plan.transfer == "host_to_device"
+            for plan in morph.last_runtime_staging_report
+            if plan.original_namespace == "numpy"
+        )
+    finally:
+        if morph is not None:
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
+@pytest.mark.gpu
 def test_cupy_host_resident_runtime_skips_orientation_staging_for_explicit_isotropic_contract_materials():
     """Ensure enum-backed isotropic materials stage only Vfrac into the runtime CuPy contract."""
     cp = _import_cupy_required()
@@ -1415,6 +1655,51 @@ def test_cupy_direct_polarization_matches_tensor_coeff_on_anisotropic_sphere():
             rtol=1e-4,
             atol=5e-2,
         )
+
+
+@pytest.mark.gpu
+def test_cupy_mixed_precision_direct_polarization_matches_tensor_coeff_on_anisotropic_sphere():
+    """Ensure mixed mode preserves execution-path parity on a small anisotropic sphere."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for mixed-precision anisotropic execution-path comparison.")
+
+    outputs = {}
+    for execution_path in ("tensor_coeff", "direct_polarization"):
+        morph = None
+        try:
+            morph = _build_two_material_sphere_morphology(
+                energies=[285.0],
+                eangle_rotation=[0.0, 5.0, 165.0],
+                backend="cupy-rsoxs",
+                backend_options={
+                    "execution_path": execution_path,
+                    "mixed_precision_mode": "reduced_morphology_bit_depth",
+                },
+                resident_mode="host",
+                input_policy="coerce",
+                ownership_policy="borrow",
+                field_namespace="numpy",
+                array_dtype=np.float16,
+            )
+            outputs[execution_path] = morph.run(
+                stdout=False,
+                stderr=False,
+                return_xarray=True,
+            ).values.copy()
+        finally:
+            if morph is not None:
+                try:
+                    morph.release_runtime()
+                except Exception:
+                    pass
+            _release_cupy_memory()
+
+    np.testing.assert_allclose(
+        outputs["direct_polarization"],
+        outputs["tensor_coeff"],
+        rtol=3e-3,
+        atol=8e-2,
+    )
 
 
 @pytest.mark.gpu
@@ -2434,6 +2719,7 @@ def _build_two_material_sphere_morphology(
     input_policy: str = "coerce",
     ownership_policy: str | None = None,
     field_namespace: str = "numpy",
+    array_dtype=np.float32,
 ) -> Morphology:
     zz, yy, xx = np.indices(shape)
     cz = (shape[0] - 1) / 2.0
@@ -2455,12 +2741,12 @@ def _build_two_material_sphere_morphology(
     S_1 = (0.7 * vfrac_1).astype(np.float32)
     zeros = np.zeros(shape, dtype=np.float32)
 
-    vfrac_1 = _to_backend_namespace(vfrac_1, field_namespace)
-    vfrac_2 = _to_backend_namespace(vfrac_2.astype(np.float32), field_namespace)
-    theta = _to_backend_namespace(theta, field_namespace)
-    psi = _to_backend_namespace(psi, field_namespace)
-    S_1 = _to_backend_namespace(S_1, field_namespace)
-    zeros = _to_backend_namespace(zeros, field_namespace)
+    vfrac_1 = _to_backend_namespace(vfrac_1, field_namespace, dtype=array_dtype)
+    vfrac_2 = _to_backend_namespace(vfrac_2.astype(np.float32), field_namespace, dtype=array_dtype)
+    theta = _to_backend_namespace(theta, field_namespace, dtype=array_dtype)
+    psi = _to_backend_namespace(psi, field_namespace, dtype=array_dtype)
+    S_1 = _to_backend_namespace(S_1, field_namespace, dtype=array_dtype)
+    zeros = _to_backend_namespace(zeros, field_namespace, dtype=array_dtype)
 
     mat1 = Material(
         materialID=1,
@@ -2475,9 +2761,9 @@ def _build_two_material_sphere_morphology(
     mat2 = Material(
         materialID=2,
         Vfrac=vfrac_2,
-        S=zeros.copy(),
-        theta=zeros.copy(),
-        psi=zeros.copy(),
+        S=_clone_backend_array(zeros),
+        theta=_clone_backend_array(zeros),
+        psi=_clone_backend_array(zeros),
         energies=energies,
         opt_constants={e: [0.0, 0.0, 0.0, 0.0] for e in energies},
         name="matrix_vacuum",

@@ -960,8 +960,9 @@ Not part of the prep milestone, but enabled by it:
      backend-specific options at construction time
    - backend-specific option handling is now part of the explicit contract layer
      instead of being hardcoded inside array coercion; this should support
-     narrow surfaces like `execution_path` and the planned named
-     mixed-precision mode rather than a generic backend `dtype` knob
+     narrow surfaces like `execution_path` and the named
+     `mixed_precision_mode`, and the old generic backend `dtype` knob should be
+     considered stale
    - `input_policy='strict'` now fails early when normalization would require
      dtype/layout/device coercion
    - unsupported input array types now fail cleanly during `Morphology`
@@ -1057,9 +1058,12 @@ Not part of the prep milestone, but enabled by it:
     - result: `5 passed, 31 deselected`
 12. `/home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/smoke/test_smoke.py -k 'backend_registry_reports_known_backends or pybind_morphology_object_lifecycle_smoke or pybind_runtime_tiny_deterministic_pattern or cyrsoxs_morphology_normalizes_cupy_inputs_to_host_contract' -q`
     - result: `4 passed, 32 deselected`
-13. `/home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation --collect-only -q`
+13. These command fragments are historical verification snapshots only.
+    They are not the authority for the current `cupy-rsoxs` backend-option
+    surface, which is documented in `CUPY_RSOXS_BACKEND_SPEC.md`.
+14. `/home/deand/mambaforge/envs/nrss-dev/bin/python -m pytest tests/validation --collect-only -q`
     - result: `14 tests collected`
-14. latest full compatibility report after the runtime-interface refactor:
+15. latest full compatibility report after the runtime-interface refactor:
     - `./scripts/run_local_test_report.sh -e nrss-dev --nrss-backend cyrsoxs --no-plots`
     - report dir: `test-reports/20260322T202539Z`
     - result: `4/4 steps passed`
@@ -1090,22 +1094,50 @@ Not part of the prep milestone, but enabled by it:
      sim-regression physics gates on both the default host-resident and device
      strict/borrow `cupy-rsoxs` workflows because that validation exercises
      the maintained full-rotation CoreShell workflow.
-2. The principal cross-backend primary-time comparison now lives at
+2. The approved mixed-precision implementation plan now lives in:
+   - `CUPY_RSOXS_BACKEND_SPEC.md` for the stable option surface and execution
+     contract,
+   - `CUPY_RSOXS_OPTIMIZATION_LEDGER.md` for the implementation order, timing
+     interpretation, and CoreShell graphical-abstract plan.
+   - current lock-ins:
+     - no exposed generic backend `dtype` option for `cupy-rsoxs`,
+     - `mixed_precision_mode` remains orthogonal to `execution_path`,
+     - both `tensor_coeff` and `direct_polarization` are expected to carry
+       strict authoritative `float16` morphology inputs through authoritative
+       normalization and runtime staging,
+     - the dev harnesses must be able to generate the strict `float16` inputs
+       required by that mode.
+   - progress recorded on April 4, 2026:
+     - the initial runtime/contracts/tests implementation pass is now landed,
+     - the public `cupy-rsoxs` reduced-precision surface is
+       `mixed_precision_mode='reduced_morphology_bit_depth'`,
+     - mixed mode now enforces strict authoritative `float16` inputs and the
+       mixed-mode voxelwise closure budget,
+     - both supported execution paths now implement the intended morphology
+       precision ladder through FFT ingress compute,
+     - current documented `tensor_coeff` implementation widens half inputs
+       during `Nt` construction and FFTs the resulting `complex64 Nt`,
+     - that exact internal widening point is documented implementation state,
+       not yet a separately maintained test-backed contract,
+     - the maintained smoke suite passes with the new mixed-mode coverage,
+     - maintained validation-surface expansion and graphical-abstract/dev-harness
+       work remain intentionally deferred to a later phase.
+3. The principal cross-backend primary-time comparison now lives at
    `tests/validation/dev/core_shell_backend_performance/run_primary_backend_speed_comparison.py`
    and emits a combined summary, TSV, and PNG table for the fixed single-energy
    CoreShell comparison panel.
-3. The legacy full-energy backend-comparison harness under
+4. The legacy full-energy backend-comparison harness under
    `tests/validation/dev/core_shell_backend_performance/` is no longer the
    authoritative timing harness for optimization work.
-4. Backend-native result/output policy is still scaffolding only; current run
+5. Backend-native result/output policy is still scaffolding only; current run
    behavior remains xarray/NumPy-oriented for parity and comparison workflows.
-5. Serialization and write helpers remain effectively NumPy/CyRSoXS-oriented,
+6. Serialization and write helpers remain effectively NumPy/CyRSoXS-oriented,
    which is acceptable for prep but will need review once a non-CyRSoXS runtime
    starts emitting backend-native arrays.
-6. Resident-mode control now ships as the public `resident_mode` API surface
+7. Resident-mode control now ships as the public `resident_mode` API surface
    for choosing host-resident vs device-resident authoritative morphology
    behavior.
-7. Package/dependency policy for CuPy was later tightened after this historical
+8. Package/dependency policy for CuPy was later tightened after this historical
    snapshot:
    - this March 22, 2026 snapshot still reflects the older extras-based
      metadata state,
@@ -1113,6 +1145,6 @@ Not part of the prep milestone, but enabled by it:
      "Packaging and Environment Direction",
    - keep this note only as historical context for why older prep-era text may
      still mention extras or packaging-standard limitations
-8. If a future environment has no runnable backend at all, `Morphology`
+9. If a future environment has no runnable backend at all, `Morphology`
    construction still fails cleanly rather than creating a backend-less object;
    this is consistent with the current one-backend-per-instance decision.

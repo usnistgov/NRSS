@@ -1275,7 +1275,10 @@ Current campaign steps:
       - `execution_path` remains orthogonal to future mixed-precision work,
       - the old generic backend `dtype` framing should be considered stale and
         replaced by a named mixed-precision mode,
-      - no reduced-precision compute-path work was accepted in this state.
+      - no reduced-precision compute-path work was accepted in this state,
+      - this scaffold is historical only and is superseded by the approved
+        mixed-precision implementation plan recorded later in this ledger and
+        in `CUPY_RSOXS_BACKEND_SPEC.md`.
 11. `plan11_elementwise_kernel_experiment` - `rejected`
     - try one last `ElementwiseKernel` implementation aimed at Segment `B`,
     - scope it narrowly to the aligned-angle/default-lane path first rather
@@ -1387,12 +1390,16 @@ Precision and option-surface notes for this campaign:
    runtime-behavior surface rather than overloading `AlgorithmType` directly in
    `cupy-rsoxs`.
 2. The mixed-precision plan is orthogonal to `execution_path`.
-   - intended future direction:
-     - reduced morphology storage / host->device transfer precision as the
+   - approved implementation direction:
+     - remove the exposed generic backend `dtype` option entirely,
+     - use a named `mixed_precision_mode`,
+     - treat reduced morphology storage / host->device transfer precision as the
        first target,
-     - optional low-precision pre-FFT experiments only if validation permits,
-     - promotion to `float32` / `complex64` before FFT ingress for
-       parity-sensitive math.
+     - carry `float16` morphology inputs through pre-FFT work in both
+       `tensor_coeff` and `direct_polarization`,
+     - widen into parity-sensitive FFT-ingress compute without widening the
+       authoritative morphology arrays during normalization/staging,
+     - keep FFT/projection math parity-sensitive.
 3. Reduced precision should not be exposed as a generic backend `dtype` knob.
    - the agreed option surface is a named mixed-precision mode,
    - the mode overrides `input_policy` and behaves as strict regardless of the
@@ -1493,22 +1500,62 @@ Precision and option-surface notes for this campaign:
    - a rejected item means that specific implementation did not clear the bar,
      not that the whole idea class is permanently closed.
 
-### Explicit experiments and deferred directions
+### Explicit experiments and approved directions
 
-1. Mixed-precision morphology handling remains deferred until after the next
-   speed campaigns; parity-sensitive compute remains `float32/complex64`.
-   - near-term intended shape of that work:
-     - `backend_options` should carry a named `mixed_precision_mode`
-       orthogonally to `execution_path`,
-     - the first target is host/device storage and transfer reduction rather
-       than end-to-end low-precision FFT/projection math,
-     - the expert mixed-precision mode should be double-gated: the user must
-       opt into the mode and must already submit conforming authoritative
-       `float16` arrays in the correct namespace,
-     - the expected precision ladder is reduced-precision morphology handling
-       followed by promotion to `float32` / `complex64` before FFT ingress,
-     - the closure validator for this mode should use a voxelwise absolute
-       tolerance budget of `1e-3`.
+1. Mixed-precision morphology handling is now an approved implementation track;
+   parity-sensitive compute remains `float32/complex64`.
+   - required public surface:
+     - `backend_options={"mixed_precision_mode": "reduced_morphology_bit_depth"}`
+       plus the existing `execution_path`,
+     - no exposed generic backend `dtype` option.
+   - required strict input contract:
+     - host-resident mode requires authoritative `numpy.float16` morphology
+       arrays,
+     - device-resident mode requires authoritative `cupy.float16` morphology
+       arrays,
+     - mixed mode overrides `input_policy` and behaves as strict.
+   - required runtime precision ladder:
+     - keep authoritative and staged morphology handling at `float16`,
+     - in both `tensor_coeff` and `direct_polarization`, carry `float16`
+       morphology inputs through the pre-FFT decode/composition work,
+     - widen into `float32/complex64` FFT-ingress compute without a required
+       standalone pre-FFT conversion pass,
+     - keep FFT/q-space and detector/projection math at `float32/complex64`.
+   - required validation change:
+     - mixed-mode closure budget remains
+       `abs(sum_i Vfrac_i - 1) <= 1e-3` per voxel in the authoritative dtype.
+   - required harness change:
+     - extend the maintained CoreShell helper and the
+       `run_cupy_rsoxs_optimization_matrix.py` dev harness so they can emit the
+       strict `float16` inputs required by this mode,
+     - compare standard versus mixed host/device lanes across both supported
+       execution paths.
+   - required graphical-abstract output:
+     - produce a CoreShell graphical abstract comparing the standard
+       `tensor_coeff` path against the mixed-precision `tensor_coeff` path so
+       precision loss can be inspected directly.
+   - implementation status on April 4, 2026:
+     - completed the initial runtime/contracts/tests pass in the maintained
+       codebase,
+     - removed the exposed generic `dtype` option from `cupy-rsoxs`,
+     - implemented the public surface
+       `backend_options={"mixed_precision_mode": "reduced_morphology_bit_depth"}`,
+     - implemented strict authoritative `float16` host/device input handling,
+     - implemented the mixed-mode closure budget
+       `abs(sum_i Vfrac_i - 1) <= 1e-3`,
+     - implemented mixed authoritative/staged morphology handling for both
+       `tensor_coeff` and `direct_polarization`,
+     - preserved `float32/complex64` FFT/post-FFT math,
+     - added smoke coverage for the new contracts and runtime behavior,
+     - verified the maintained smoke suite in `nrss-dev`,
+     - current documented `tensor_coeff` implementation widens half inputs
+       during `Nt` construction and writes `complex64 Nt` directly, so the FFT
+       runs on `complex64 Nt` rather than after a separate full-volume
+       pre-FFT cast,
+     - this exact widening boundary is documented implementation state, not a
+       separately maintained test-backed contract,
+     - intentionally deferred any maintained validation-surface expansion tied
+       specifically to that internal promotion boundary to a later context.
 2. Reduced angle sampling, alternate interpolation rules, and multi-GPU fan-out
    remain outside the current exact-tuning track.
 3. Host-resident staged mode creates room for explicit experiments with deeper

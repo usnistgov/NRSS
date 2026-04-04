@@ -316,16 +316,21 @@ def _build_core_shell_fields(scenario: CoreShellScenario) -> dict[str, np.ndarra
 def _convert_fields_namespace(
     fields: dict[str, np.ndarray],
     field_namespace: str,
+    array_dtype: np.dtype | type[np.floating] = np.float32,
 ) -> dict[str, np.ndarray]:
+    target_dtype = np.dtype(array_dtype)
     if field_namespace == "numpy":
-        return fields
+        return {
+            key: np.ascontiguousarray(np.asarray(value, dtype=target_dtype))
+            for key, value in fields.items()
+        }
     if field_namespace != "cupy":
         raise AssertionError(f"Unsupported field namespace: {field_namespace}")
 
     cp = importlib.import_module("cupy")
     converted = {}
     for key, value in fields.items():
-        converted[key] = cp.ascontiguousarray(cp.asarray(value, dtype=cp.float32))
+        converted[key] = cp.ascontiguousarray(cp.asarray(value, dtype=target_dtype))
     return converted
 
 
@@ -339,6 +344,7 @@ def build_core_shell_morphology(
     input_policy: str = "coerce",
     ownership_policy: str | None = None,
     field_namespace: str = "numpy",
+    array_dtype: np.dtype | type[np.floating] = np.float32,
 ) -> Morphology:
     if isinstance(scenario, str):
         if scenario != "baseline":
@@ -350,6 +356,7 @@ def build_core_shell_morphology(
     fields = _convert_fields_namespace(
         _build_core_shell_fields(scenario=scenario),
         field_namespace=field_namespace,
+        array_dtype=array_dtype,
     )
 
     materials = {

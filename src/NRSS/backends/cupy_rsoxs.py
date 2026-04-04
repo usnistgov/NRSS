@@ -24,6 +24,34 @@ _CUPY_SEGMENT_MEASUREMENTS = {
     "E": "cuda_event",
     "F": "cuda_event",
 }
+_HALF_BITS_TO_FLOAT_DEVICE_FUNCTION = r"""
+__device__ inline float nrss_half_bits_to_float(const unsigned short h) {
+    const unsigned int sign = ((unsigned int)h & 0x8000u) << 16;
+    unsigned int exp = ((unsigned int)h >> 10) & 0x1Fu;
+    unsigned int mant = (unsigned int)h & 0x03FFu;
+    unsigned int bits = 0u;
+
+    if (exp == 0u) {
+        if (mant == 0u) {
+            bits = sign;
+        } else {
+            exp = 127u - 15u + 1u;
+            while ((mant & 0x0400u) == 0u) {
+                mant <<= 1;
+                exp -= 1u;
+            }
+            mant &= 0x03FFu;
+            bits = sign | (exp << 23) | (mant << 13);
+        }
+    } else if (exp == 0x1Fu) {
+        bits = sign | 0x7F800000u | (mant << 13);
+    } else {
+        bits = sign | ((exp + (127u - 15u)) << 23) | (mant << 13);
+    }
+
+    return __uint_as_float(bits);
+}
+"""
 
 
 @dataclass(frozen=True)
@@ -651,6 +679,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return sx, sy, sz
 
     def _compute_nt_components(self, runtime_materials, energy, cp, required_components=None):
+        if cp.dtype(runtime_materials[0].Vfrac.dtype).name == "float16":
+            return self._compute_nt_components_half_input(
+                runtime_materials,
+                energy,
+                cp,
+                required_components=required_components,
+            )
+
         required = {0, 1, 2, 3, 4} if required_components is None else set(required_components)
         need0 = 0 in required
         need1 = 1 in required
@@ -697,6 +733,197 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             del phi_a, sx, sy, sz
 
         return nt
+
+    def _compute_nt_components_half_input(self, runtime_materials, energy, cp, required_components=None):
+        required = {0, 1, 2, 3, 4} if required_components is None else set(required_components)
+        need0 = np.int32(0 in required)
+        need1 = np.int32(1 in required)
+        need2 = np.int32(2 in required)
+        need3 = np.int32(3 in required)
+        need4 = np.int32(4 in required)
+        shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
+        nt = cp.zeros((5, *shape), dtype=cp.complex64)
+        nt0, nt1, nt2, nt3, nt4 = (nt[idx] for idx in range(5))
+        threads = 256
+
+        for material in runtime_materials:
+            isotropic_diag, aligned_base, anisotropic_delta = self._material_optical_scalars(
+                material,
+                energy,
+            )
+            total = np.uint64(material.Vfrac.size)
+            blocks = (material.Vfrac.size + threads - 1) // threads
+
+            if material.is_full_isotropic:
+                self._nt_accumulate_isotropic_half_kernel(cp)(
+                    (blocks,),
+                    (threads,),
+                    (
+                        material.Vfrac,
+                        isotropic_diag,
+                        need0,
+                        need3,
+                        nt0,
+                        nt3,
+                        total,
+                    ),
+                )
+                continue
+
+            self._nt_accumulate_anisotropic_half_kernel(cp)(
+                (blocks,),
+                (threads,),
+                (
+                    material.Vfrac,
+                    material.S,
+                    material.theta,
+                    material.psi,
+                    isotropic_diag,
+                    aligned_base,
+                    anisotropic_delta,
+                    need0,
+                    need1,
+                    need2,
+                    need3,
+                    need4,
+                    nt0,
+                    nt1,
+                    nt2,
+                    nt3,
+                    nt4,
+                    total,
+                ),
+            )
+
+        return nt
+
+    def _nt_accumulate_isotropic_half_kernel(self, cp):
+        kernel = _CUPY_KERNEL_CACHE.get("nt_accumulate_isotropic_half_input")
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            rf"""
+            {_HALF_BITS_TO_FLOAT_DEVICE_FUNCTION}
+
+            extern "C" __global__
+            void nt_accumulate_isotropic_half_input(
+                const unsigned short* vfrac,
+                const float2 isotropic_diag,
+                const int need0,
+                const int need3,
+                float2* nt0,
+                float2* nt3,
+                const unsigned long long total
+            ) {{
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {{
+                    return;
+                }}
+
+                const float vf = nrss_half_bits_to_float(vfrac[idx]);
+                if (need0) {{
+                    nt0[idx].x += vf * isotropic_diag.x;
+                    nt0[idx].y += vf * isotropic_diag.y;
+                }}
+                if (need3) {{
+                    nt3[idx].x += vf * isotropic_diag.x;
+                    nt3[idx].y += vf * isotropic_diag.y;
+                }}
+            }}
+            """,
+            "nt_accumulate_isotropic_half_input",
+        )
+        _CUPY_KERNEL_CACHE["nt_accumulate_isotropic_half_input"] = kernel
+        return kernel
+
+    def _nt_accumulate_anisotropic_half_kernel(self, cp):
+        kernel = _CUPY_KERNEL_CACHE.get("nt_accumulate_anisotropic_half_input")
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            rf"""
+            {_HALF_BITS_TO_FLOAT_DEVICE_FUNCTION}
+
+            extern "C" __global__
+            void nt_accumulate_anisotropic_half_input(
+                const unsigned short* vfrac,
+                const unsigned short* s,
+                const unsigned short* theta,
+                const unsigned short* psi,
+                const float2 isotropic_diag,
+                const float2 aligned_base,
+                const float2 anisotropic_delta,
+                const int need0,
+                const int need1,
+                const int need2,
+                const int need3,
+                const int need4,
+                float2* nt0,
+                float2* nt1,
+                float2* nt2,
+                float2* nt3,
+                float2* nt4,
+                const unsigned long long total
+            ) {{
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {{
+                    return;
+                }}
+
+                const float vf = nrss_half_bits_to_float(vfrac[idx]);
+                if (need0 || need3) {{
+                    const float iso_x = vf * isotropic_diag.x;
+                    const float iso_y = vf * isotropic_diag.y;
+                    if (need0) {{
+                        nt0[idx].x += iso_x;
+                        nt0[idx].y += iso_y;
+                    }}
+                    if (need3) {{
+                        nt3[idx].x += iso_x;
+                        nt3[idx].y += iso_y;
+                    }}
+                }}
+
+                const float phi = vf * nrss_half_bits_to_float(s[idx]);
+                const float theta_i = nrss_half_bits_to_float(theta[idx]);
+                const float psi_i = nrss_half_bits_to_float(psi[idx]);
+                const float sin_theta = sinf(theta_i);
+                const float sx = cosf(psi_i) * sin_theta;
+                const float sy = sinf(psi_i) * sin_theta;
+                const float sz = cosf(theta_i);
+
+                if (need0) {{
+                    nt0[idx].x += phi * (aligned_base.x + anisotropic_delta.x * sx * sx);
+                    nt0[idx].y += phi * (aligned_base.y + anisotropic_delta.y * sx * sx);
+                }}
+                if (need1) {{
+                    nt1[idx].x += phi * anisotropic_delta.x * sx * sy;
+                    nt1[idx].y += phi * anisotropic_delta.y * sx * sy;
+                }}
+                if (need2) {{
+                    nt2[idx].x += phi * anisotropic_delta.x * sx * sz;
+                    nt2[idx].y += phi * anisotropic_delta.y * sx * sz;
+                }}
+                if (need3) {{
+                    nt3[idx].x += phi * (aligned_base.x + anisotropic_delta.x * sy * sy);
+                    nt3[idx].y += phi * (aligned_base.y + anisotropic_delta.y * sy * sy);
+                }}
+                if (need4) {{
+                    nt4[idx].x += phi * anisotropic_delta.x * sy * sz;
+                    nt4[idx].y += phi * anisotropic_delta.y * sy * sz;
+                }}
+            }}
+            """,
+            "nt_accumulate_anisotropic_half_input",
+        )
+        _CUPY_KERNEL_CACHE["nt_accumulate_anisotropic_half_input"] = kernel
+        return kernel
 
     def _compute_fft_nt_components(self, nt, cp, window, component_indices=None):
         component_indices = tuple(range(nt.shape[0])) if component_indices is None else tuple(component_indices)
@@ -1012,12 +1239,21 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
 
     def _compute_direct_polarization(self, runtime_materials, energy, angle_plan, cp):
+        if cp.dtype(runtime_materials[0].Vfrac.dtype).name == "float16":
+            return self._compute_direct_polarization_half_input(
+                runtime_materials,
+                energy,
+                angle_plan,
+                cp,
+            )
+
         shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
         p_x = cp.zeros(shape, dtype=cp.complex64)
         p_y = cp.zeros(shape, dtype=cp.complex64)
         p_z = cp.zeros(shape, dtype=cp.complex64)
         mx = angle_plan.mx
         my = angle_plan.my
+        kernel = self._direct_polarization_kernel(cp, runtime_materials[0].Vfrac.dtype)
 
         for material in runtime_materials:
             isotropic_diag, aligned_base, anisotropic_delta = self._material_optical_scalars(
@@ -1032,7 +1268,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 del isotropic_term
                 continue
 
-            self._direct_generic_kernel(cp)(
+            kernel(
                 ((vfrac.size + 255) // 256,),
                 (256,),
                 (
@@ -1057,7 +1293,76 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         p_z *= self._one_by_four_pi
         return p_x, p_y, p_z
 
-    def _direct_generic_kernel(self, cp):
+    def _compute_direct_polarization_half_input(self, runtime_materials, energy, angle_plan, cp):
+        shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
+        p_x = cp.zeros(shape, dtype=cp.complex64)
+        p_y = cp.zeros(shape, dtype=cp.complex64)
+        p_z = cp.zeros(shape, dtype=cp.complex64)
+        mx = angle_plan.mx
+        my = angle_plan.my
+        threads = 256
+
+        for material in runtime_materials:
+            isotropic_diag, aligned_base, anisotropic_delta = self._material_optical_scalars(
+                material,
+                energy,
+            )
+            total = np.uint64(material.Vfrac.size)
+            blocks = (material.Vfrac.size + threads - 1) // threads
+
+            if material.is_full_isotropic:
+                self._direct_isotropic_kernel_float16(cp)(
+                    (blocks,),
+                    (threads,),
+                    (
+                        material.Vfrac,
+                        isotropic_diag,
+                        np.float32(mx),
+                        np.float32(my),
+                        p_x,
+                        p_y,
+                        total,
+                    ),
+                )
+                continue
+
+            self._direct_anisotropic_kernel_float16(cp)(
+                (blocks,),
+                (threads,),
+                (
+                    material.Vfrac,
+                    material.S,
+                    material.theta,
+                    material.psi,
+                    isotropic_diag,
+                    aligned_base,
+                    anisotropic_delta,
+                    np.float32(mx),
+                    np.float32(my),
+                    p_x,
+                    p_y,
+                    p_z,
+                    total,
+                ),
+            )
+
+        p_x *= self._one_by_four_pi
+        p_y *= self._one_by_four_pi
+        p_z *= self._one_by_four_pi
+        return p_x, p_y, p_z
+
+    def _direct_polarization_kernel(self, cp, morphology_dtype):
+        dtype_name = cp.dtype(morphology_dtype).name
+        if dtype_name == "float16":
+            return self._direct_generic_kernel_float16(cp)
+        if dtype_name == "float32":
+            return self._direct_generic_kernel_float32(cp)
+        raise TypeError(
+            "cupy-rsoxs direct_polarization received unsupported runtime morphology "
+            f"dtype {dtype_name!r}."
+        )
+
+    def _direct_generic_kernel_float32(self, cp):
         kernel = _CUPY_KERNEL_CACHE.get("direct_polarization_generic_complex64")
         if kernel is not None:
             return kernel
@@ -1106,6 +1411,158 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             "direct_polarization_generic_complex64",
         )
         _CUPY_KERNEL_CACHE["direct_polarization_generic_complex64"] = kernel
+        return kernel
+
+    def _direct_generic_kernel_float16(self, cp):
+        kernel = _CUPY_KERNEL_CACHE.get("direct_polarization_generic_complex64_half_input")
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            _HALF_BITS_TO_FLOAT_DEVICE_FUNCTION
+            + r"""
+
+            extern "C" __global__
+            void direct_polarization_generic_complex64_half_input(
+                const unsigned short* vfrac,
+                const unsigned short* s,
+                const unsigned short* theta,
+                const unsigned short* psi,
+                const float2 aligned_base,
+                const float2 anisotropic_delta,
+                const float mx,
+                const float my,
+                float2* p_x,
+                float2* p_y,
+                float2* p_z,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+
+                const float phi =
+                    nrss_half_bits_to_float(vfrac[idx]) * nrss_half_bits_to_float(s[idx]);
+                const float theta_i = nrss_half_bits_to_float(theta[idx]);
+                const float psi_i = nrss_half_bits_to_float(psi[idx]);
+                const float sin_theta = sinf(theta_i);
+                const float sx = cosf(psi_i) * sin_theta;
+                const float sy = sinf(psi_i) * sin_theta;
+                const float sz = cosf(theta_i);
+                const float field_projection = sx * mx + sy * my;
+
+                p_x[idx].x += phi * (mx * aligned_base.x + anisotropic_delta.x * sx * field_projection);
+                p_x[idx].y += phi * (mx * aligned_base.y + anisotropic_delta.y * sx * field_projection);
+                p_y[idx].x += phi * (my * aligned_base.x + anisotropic_delta.x * sy * field_projection);
+                p_y[idx].y += phi * (my * aligned_base.y + anisotropic_delta.y * sy * field_projection);
+                p_z[idx].x += phi * (anisotropic_delta.x * sz * field_projection);
+                p_z[idx].y += phi * (anisotropic_delta.y * sz * field_projection);
+            }
+            """,
+            "direct_polarization_generic_complex64_half_input",
+        )
+        _CUPY_KERNEL_CACHE["direct_polarization_generic_complex64_half_input"] = kernel
+        return kernel
+
+    def _direct_isotropic_kernel_float16(self, cp):
+        kernel = _CUPY_KERNEL_CACHE.get("direct_polarization_isotropic_complex64_half_input")
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            _HALF_BITS_TO_FLOAT_DEVICE_FUNCTION
+            + r"""
+
+            extern "C" __global__
+            void direct_polarization_isotropic_complex64_half_input(
+                const unsigned short* vfrac,
+                const float2 isotropic_diag,
+                const float mx,
+                const float my,
+                float2* p_x,
+                float2* p_y,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+
+                const float vf = nrss_half_bits_to_float(vfrac[idx]);
+                p_x[idx].x += vf * isotropic_diag.x * mx;
+                p_x[idx].y += vf * isotropic_diag.y * mx;
+                p_y[idx].x += vf * isotropic_diag.x * my;
+                p_y[idx].y += vf * isotropic_diag.y * my;
+            }
+            """,
+            "direct_polarization_isotropic_complex64_half_input",
+        )
+        _CUPY_KERNEL_CACHE["direct_polarization_isotropic_complex64_half_input"] = kernel
+        return kernel
+
+    def _direct_anisotropic_kernel_float16(self, cp):
+        kernel = _CUPY_KERNEL_CACHE.get("direct_polarization_anisotropic_complex64_half_input")
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            _HALF_BITS_TO_FLOAT_DEVICE_FUNCTION
+            + r"""
+
+            extern "C" __global__
+            void direct_polarization_anisotropic_complex64_half_input(
+                const unsigned short* vfrac,
+                const unsigned short* s,
+                const unsigned short* theta,
+                const unsigned short* psi,
+                const float2 isotropic_diag,
+                const float2 aligned_base,
+                const float2 anisotropic_delta,
+                const float mx,
+                const float my,
+                float2* p_x,
+                float2* p_y,
+                float2* p_z,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+
+                const float vf = nrss_half_bits_to_float(vfrac[idx]);
+                p_x[idx].x += vf * isotropic_diag.x * mx;
+                p_x[idx].y += vf * isotropic_diag.y * mx;
+                p_y[idx].x += vf * isotropic_diag.x * my;
+                p_y[idx].y += vf * isotropic_diag.y * my;
+
+                const float phi = vf * nrss_half_bits_to_float(s[idx]);
+                const float theta_i = nrss_half_bits_to_float(theta[idx]);
+                const float psi_i = nrss_half_bits_to_float(psi[idx]);
+                const float sin_theta = sinf(theta_i);
+                const float sx = cosf(psi_i) * sin_theta;
+                const float sy = sinf(psi_i) * sin_theta;
+                const float sz = cosf(theta_i);
+                const float field_projection = sx * mx + sy * my;
+
+                p_x[idx].x += phi * (mx * aligned_base.x + anisotropic_delta.x * sx * field_projection);
+                p_x[idx].y += phi * (mx * aligned_base.y + anisotropic_delta.y * sx * field_projection);
+                p_y[idx].x += phi * (my * aligned_base.x + anisotropic_delta.x * sy * field_projection);
+                p_y[idx].y += phi * (my * aligned_base.y + anisotropic_delta.y * sy * field_projection);
+                p_z[idx].x += phi * (anisotropic_delta.x * sz * field_projection);
+                p_z[idx].y += phi * (anisotropic_delta.y * sz * field_projection);
+            }
+            """,
+            "direct_polarization_anisotropic_complex64_half_input",
+        )
+        _CUPY_KERNEL_CACHE["direct_polarization_anisotropic_complex64_half_input"] = kernel
         return kernel
 
     def _projection_from_polarization(self, morphology, energy, cp, p_x, p_y, p_z, window):

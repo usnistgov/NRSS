@@ -327,8 +327,8 @@ Operational policy:
 4. In the mixed-precision mode, authoritative morphology storage is `float16`
    while FFT/q-space and projection math remain `float32` / `complex64`.
 5. Avoid full pipeline compute in 16-bit when parity is required; the intended
-   ladder is reduced-precision morphology handling followed by promotion before
-   FFT ingress.
+   ladder is reduced-precision morphology handling followed by promotion into
+   parity-sensitive FFT-ingress compute.
 
 Note on cast cost:
 
@@ -352,6 +352,9 @@ Public surface:
 4. `execution_path` and `mixed_precision_mode` are orthogonal backend-option
    surfaces.
 5. The legacy backend `dtype` option should be removed rather than broadened.
+6. Any attempt to use a generic backend `dtype` option for `cupy-rsoxs`
+   should fail with a migration-focused error that points users to
+   `mixed_precision_mode`.
 
 Authoritative input contract:
 
@@ -369,10 +372,24 @@ Runtime-compute intent:
 
 1. The mixed-precision mode is a morphology-storage / transfer optimization.
 2. It is not a declaration that the backend compute dtype is `float16`.
-3. Pre-FFT compute may use reduced-precision morphology inputs where validation
-   and profiling permit, but parity-sensitive FFT ingress must be promoted to
-   `float32` / `complex64`.
-4. FFT/q-space and detector/projection math remain `float32` / `complex64` for
+3. In this mode, authoritative morphology fields remain `float16` through
+   `Morphology(...)` construction, validator checks, and backend runtime
+   staging.
+4. For both `execution_path='tensor_coeff'` and
+   `execution_path='direct_polarization'`, the intended fast path carries those
+   `float16` morphology inputs through the pre-FFT orientation decode and local
+   field-composition work.
+5. Current implementation detail:
+   - this document describes the current code path, but that exact promotion
+     boundary is not yet treated as a stable, maintained test-backed contract,
+   - for `execution_path='tensor_coeff'`, the authoritative `float16`
+     morphology inputs are decoded from half inside the `Nt` accumulation raw
+     kernel,
+   - that kernel writes the parity-sensitive tensor field directly into
+     `complex64 Nt`,
+   - the FFT then runs on that `complex64 Nt` field rather than on a separate
+     `float16` or `float32` pre-FFT morphology buffer.
+6. FFT/q-space and detector/projection math remain `float32` / `complex64` for
    parity-sensitive runs.
 
 Validation contract:
@@ -388,6 +405,140 @@ Validation contract:
    tolerance of `1e-3` per voxel.
 5. Other validator checks remain the same in spirit: populated fields, shape
    agreement, float dtype, finite values, and `0 <= S,Vfrac <= 1`.
+
+## Mixed-Precision Implementation Plan
+
+This section is the current approved implementation plan for the first
+maintained mixed-precision fast path.
+
+Implementation status as of April 4, 2026:
+
+1. Completed in code for the initial runtime/contracts/tests pass:
+   - removed the exposed generic `dtype` option from the public
+     `cupy-rsoxs` backend-option surface,
+   - implemented `mixed_precision_mode='reduced_morphology_bit_depth'`,
+   - made mixed mode override `input_policy` and behave as strict,
+   - implemented the mixed-mode voxelwise closure budget
+     `abs(sum_i Vfrac_i - 1) <= 1e-3`,
+   - kept authoritative and staged morphology handling at `float16` for both
+     supported execution paths,
+   - preserved `float32/complex64` FFT-ingress and parity-sensitive compute,
+   - updated the maintained smoke suite to cover the new option surface and
+     runtime behavior.
+2. Additional implementation detail now documented as of April 4, 2026:
+   - this is descriptive implementation-state documentation rather than a new
+     stable parity contract,
+   - in the current `tensor_coeff` mixed path, `float16` morphology arrays are
+     not widened in a separate pass immediately before `cp.fft.fftn(...)`,
+   - instead, the half-input raw kernels decode `Vfrac`, `S`, `theta`, and
+     `psi` from half while accumulating directly into `complex64 Nt`,
+   - the FFT-ingress object is therefore `complex64 Nt`, and the widening work
+     is fused into `Nt` construction rather than split into a later
+     full-volume conversion pass.
+3. Intentionally deferred from this first implementation pass:
+   - maintained validation-surface expansion,
+   - CoreShell dev-harness updates for mixed-mode input generation,
+   - graphical-abstract production and interpretation.
+4. The initial implementation was verified with the full maintained smoke lane
+   in `nrss-dev`.
+
+Option-surface refactor:
+
+1. Remove the exposed generic backend `dtype` option from the public
+   `cupy-rsoxs` surface.
+2. Keep `execution_path` as the execution-algorithm selector.
+3. Add or preserve `mixed_precision_mode` as the only reduced-precision option
+   surface for `cupy-rsoxs`.
+4. Keep `execution_path` and `mixed_precision_mode` orthogonal.
+
+Contract separation:
+
+1. Do not model this feature as one backend-wide dtype.
+2. Track at least three precision concepts explicitly:
+   - authoritative morphology precision,
+   - staged runtime morphology precision,
+   - FFT-ingress / parity-sensitive compute precision.
+3. Default mode keeps those surfaces at `float32`.
+4. `mixed_precision_mode='reduced_morphology_bit_depth'` uses authoritative and
+   staged morphology precision `float16`.
+5. Current `tensor_coeff` implementation:
+   - half morphology inputs are promoted during `Nt` construction,
+   - `Nt` is accumulated directly as `complex64`,
+   - and FFT ingress therefore begins at `complex64 Nt`.
+6. This precise promotion boundary is currently documented implementation
+   state, not a separately maintained test-backed contract.
+
+Execution-path scope:
+
+1. The first maintained mixed-precision pass must cover both supported
+   execution paths:
+   - `tensor_coeff`,
+   - `direct_polarization`.
+2. Neither path should widen morphology inputs back to `float32` during
+   authoritative normalization or runtime staging.
+3. The current mixed-precision execution-path ladder in maintained code is:
+   - strict authoritative `float16` morphology inputs,
+   - `float16` authoritative normalization and runtime staging,
+   - path-local decode/composition work that consumes half inputs without
+     widening the authoritative morphology arrays,
+   - `float32/complex64` FFT and post-FFT math.
+4. Current `tensor_coeff` implementation detail:
+   - the half-to-float promotion occurs inside `Nt` construction, not in a
+     standalone buffer-conversion step immediately before FFT.
+5. The exact widening boundary in `direct_polarization` is allowed to evolve
+   independently from `tensor_coeff` while the mixed-precision surface remains
+   one public mode.
+
+Implementation order:
+
+1. Refactor backend option normalization and remove the old `dtype` option.
+2. Update `Morphology(...)` normalization so mixed mode behaves as strict even
+   if the user requested `input_policy='coerce'`.
+3. Narrow the validator change to the mixed-mode closure rule.
+4. Refactor runtime staging so host-resident `numpy.float16` morphology is
+   transferred to `cupy.float16` without widening on CPU.
+5. Implement the `tensor_coeff` mixed path so authoritative/staged morphology
+   remains `float16` and any widening is fused into the last useful pre-FFT
+   composition step rather than paying for a separate full-volume conversion
+   pass.
+6. Implement the `direct_polarization` mixed path with the same FFT-ingress
+   promotion boundary.
+7. Leave detector/projection math unchanged at `float32/complex64` in the
+   first maintained pass.
+
+Testing and harness plan:
+
+1. Update the smoke suite so `dtype`-option rejection tests are replaced by
+   mixed-mode option, strict-input, and closure-budget tests.
+2. Extend the maintained CoreShell helper and the `cupy-rsoxs` optimization
+   matrix harness so they can emit strict authoritative `numpy.float16` and
+   `cupy.float16` morphology inputs on demand.
+3. The optimization harness should compare, at minimum:
+   - standard host,
+   - mixed host,
+   - standard device,
+   - mixed device,
+   across both `tensor_coeff` and `direct_polarization`.
+4. Runtime reports should expose enough metadata to confirm that the submitted
+   authoritative morphology stayed `float16` through normalization and staging,
+   and to document where the current implementation widens into FFT-ingress
+   compute.
+
+Graphical-abstract plan:
+
+1. Produce a CoreShell graphical abstract that compares the standard
+   `tensor_coeff` path against the mixed-precision `tensor_coeff` path.
+2. The figure should be built around direct user inspection of precision loss,
+   not only summary metrics.
+3. Recommended figure content:
+   - timing comparison panels across representative CoreShell sizes,
+   - `A(E)` overlay,
+   - `A(q)` overlays at `284.7` and `285.2 eV` with residual inset,
+   - a heatmap of relative drift metrics,
+   - at least one detector-image delta panel for a canonical small case.
+4. The same harness may optionally emit a parallel `direct_polarization`
+   comparison, but the required published abstract for this plan is the
+   standard-versus-mixed `tensor_coeff` comparison.
 
 ## Representation Roadmap (Euler, Vector, Tensor)
 
@@ -539,8 +690,8 @@ Current prep/implementation status to preserve:
 3. The current normalized option surface is intentionally small:
    - no backend `dtype` knob,
    - `execution_path` for `cupy-rsoxs`,
-   - a named `mixed_precision_mode` for future reduced-precision work in
-     `cupy-rsoxs`.
+   - a named `mixed_precision_mode` for the approved reduced-precision
+     morphology plan in `cupy-rsoxs`.
 4. Current contract table:
    - `cyrsoxs`: authoritative/runtime namespace `numpy`, device `cpu`, default
      dtype `float32`

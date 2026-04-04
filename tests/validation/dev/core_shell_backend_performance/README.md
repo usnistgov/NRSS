@@ -101,3 +101,32 @@ Historical full-energy comparison:
   - writes timing summaries, compact A-wedge artifacts, and a graphical abstract,
   - remains useful as historical context and as a deeper full-energy / A-wedge study,
     but it is no longer the principal cross-backend comparison path.
+
+Mixed-precision sim-regression comparison:
+
+- `run_core_shell_mixed_precision_abstract.py`
+  - dev-only CoreShell sim-regression comparison focused on the maintained
+    vendored sim golden at `tests/validation/data/core_shell/CS_sim_reference.h5`,
+  - runs four subprocess-isolated cases:
+    - `tensor_coeff` default,
+    - `tensor_coeff` mixed precision,
+    - `direct_polarization` default,
+    - `direct_polarization` mixed precision,
+  - keeps the maintained CoreShell morphology, full energy panel, and A-wedge
+    reduction path from `tests/validation/lib/core_shell.py`,
+  - writes cached A-wedge artifacts, a JSON summary, a TSV table, and one
+    graphical abstract per execution path with:
+    - sim golden overlays,
+    - default-path overlays,
+    - mixed-path overlays,
+    - residuals and timing/metric summaries,
+  - supports `--plot-only` to restyle from a saved summary without rerunning
+    the simulations.
+
+Recommended workflow:
+
+```bash
+mamba run -n nrss-dev python \
+  tests/validation/dev/core_shell_backend_performance/run_core_shell_mixed_precision_abstract.py \
+  --label mixed_precision_core_shell
+```

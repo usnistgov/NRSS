@@ -28,6 +28,10 @@ _BACKEND_ARRAY_CONTRACTS = {
         "default_dtype": "float32",
         "supported_dtypes": ("float32",),
         "supported_backend_options": ("dtype",),
+        "default_mixed_precision_mode": None,
+        "supported_mixed_precision_modes": (None,),
+        "runtime_compute_dtype": "float32",
+        "runtime_complex_dtype": "complex64",
     },
     "cupy-rsoxs": {
         "default_resident_mode": "host",
@@ -45,13 +49,20 @@ _BACKEND_ARRAY_CONTRACTS = {
         "runtime_namespace": "cupy",
         "runtime_device": "gpu",
         "default_dtype": "float32",
-        "supported_dtypes": ("float32",),
+        "supported_dtypes": ("float32", "float16"),
         "default_execution_path": "tensor_coeff",
         "supported_execution_paths": (
             "tensor_coeff",
             "direct_polarization",
         ),
-        "supported_backend_options": ("dtype", "execution_path"),
+        "default_mixed_precision_mode": None,
+        "supported_mixed_precision_modes": (
+            None,
+            "reduced_morphology_bit_depth",
+        ),
+        "supported_backend_options": ("execution_path", "mixed_precision_mode"),
+        "runtime_compute_dtype": "float32",
+        "runtime_complex_dtype": "complex64",
     },
 }
 
@@ -72,6 +83,21 @@ def normalize_dtype_name(dtype: Any) -> str:
         raise BackendOptionError(
             f"Unsupported backend dtype option {dtype!r}."
         ) from exc
+
+
+def normalize_mixed_precision_mode_name(mode: Any) -> str | None:
+    if mode is None:
+        return None
+
+    cleaned = str(mode).strip().lower()
+    aliases = {
+        "": None,
+        "none": None,
+        "off": None,
+        "default": None,
+        "reduced-morphology-bit-depth": "reduced_morphology_bit_depth",
+    }
+    return aliases.get(cleaned, cleaned)
 
 
 def normalize_resident_mode(
@@ -104,6 +130,14 @@ def normalize_backend_options(
     spec = _backend_contract_spec(backend_name)
     options = {} if backend_options is None else dict(backend_options)
 
+    if backend_name == "cupy-rsoxs" and "dtype" in options:
+        raise BackendOptionError(
+            "Backend 'cupy-rsoxs' does not expose a generic dtype option. "
+            "Remove backend_options['dtype']; for the approved reduced-precision "
+            "path use backend_options={'mixed_precision_mode': "
+            "'reduced_morphology_bit_depth'}."
+        )
+
     unknown = sorted(set(options) - set(spec["supported_backend_options"]))
     if unknown:
         raise BackendOptionError(
@@ -111,14 +145,16 @@ def normalize_backend_options(
             f"Supported options are: {', '.join(spec['supported_backend_options'])}."
         )
 
-    normalized_dtype = normalize_dtype_name(options.get("dtype", spec["default_dtype"]))
-    if normalized_dtype not in spec["supported_dtypes"]:
-        raise BackendOptionError(
-            f"Backend {backend_name!r} does not support dtype {normalized_dtype!r}. "
-            f"Supported dtypes: {', '.join(spec['supported_dtypes'])}."
-        )
+    normalized_options = {}
+    if "dtype" in spec["supported_backend_options"]:
+        normalized_dtype = normalize_dtype_name(options.get("dtype", spec["default_dtype"]))
+        if normalized_dtype not in spec["supported_dtypes"]:
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support dtype {normalized_dtype!r}. "
+                f"Supported dtypes: {', '.join(spec['supported_dtypes'])}."
+            )
+        normalized_options["dtype"] = normalized_dtype
 
-    normalized_options = {"dtype": normalized_dtype}
     if "execution_path" in spec["supported_backend_options"]:
         execution_path = str(
             options.get("execution_path", spec["default_execution_path"])
@@ -136,8 +172,43 @@ def normalize_backend_options(
                 f"{', '.join(spec['supported_execution_paths'])}."
             )
         normalized_options["execution_path"] = execution_path
+    if "mixed_precision_mode" in spec["supported_backend_options"]:
+        mixed_precision_mode = normalize_mixed_precision_mode_name(
+            options.get("mixed_precision_mode", spec["default_mixed_precision_mode"])
+        )
+        if mixed_precision_mode not in spec["supported_mixed_precision_modes"]:
+            supported_modes = tuple(
+                "None" if mode is None else mode
+                for mode in spec["supported_mixed_precision_modes"]
+            )
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support mixed_precision_mode "
+                f"{mixed_precision_mode!r}. Supported modes: {', '.join(supported_modes)}."
+            )
+        normalized_options["mixed_precision_mode"] = mixed_precision_mode
 
     return normalized_options
+
+
+def _resolve_precision_contract(
+    backend_name: str,
+    spec: Mapping[str, Any],
+    normalized_options: Mapping[str, Any],
+) -> dict[str, str | None]:
+    mixed_precision_mode = normalized_options.get("mixed_precision_mode")
+    authoritative_dtype = spec["default_dtype"]
+    runtime_dtype = spec["default_dtype"]
+    if backend_name == "cupy-rsoxs" and mixed_precision_mode == "reduced_morphology_bit_depth":
+        authoritative_dtype = "float16"
+        runtime_dtype = "float16"
+
+    return {
+        "mixed_precision_mode": mixed_precision_mode,
+        "authoritative_dtype": authoritative_dtype,
+        "runtime_dtype": runtime_dtype,
+        "runtime_compute_dtype": spec["runtime_compute_dtype"],
+        "runtime_complex_dtype": spec["runtime_complex_dtype"],
+    }
 
 
 def resolve_backend_array_contract(
@@ -147,6 +218,7 @@ def resolve_backend_array_contract(
 ) -> dict[str, Any]:
     spec = _backend_contract_spec(backend_name)
     normalized_options = normalize_backend_options(backend_name, backend_options)
+    precision = _resolve_precision_contract(backend_name, spec, normalized_options)
     normalized_resident_mode = normalize_resident_mode(
         backend_name,
         resident_mode,
@@ -162,8 +234,15 @@ def resolve_backend_array_contract(
         "supported_dtypes": spec["supported_dtypes"],
         "default_execution_path": spec.get("default_execution_path"),
         "supported_execution_paths": spec.get("supported_execution_paths", ()),
+        "default_mixed_precision_mode": spec.get("default_mixed_precision_mode"),
+        "supported_mixed_precision_modes": spec.get("supported_mixed_precision_modes", (None,)),
         "supported_backend_options": spec["supported_backend_options"],
-        "dtype": normalized_options["dtype"],
+        "dtype": precision["authoritative_dtype"],
+        "authoritative_dtype": precision["authoritative_dtype"],
+        "runtime_dtype": precision["runtime_dtype"],
+        "runtime_compute_dtype": precision["runtime_compute_dtype"],
+        "runtime_complex_dtype": precision["runtime_complex_dtype"],
+        "mixed_precision_mode": precision["mixed_precision_mode"],
         "options": normalized_options,
     }
 
@@ -174,6 +253,7 @@ def resolve_backend_runtime_contract(
 ) -> dict[str, Any]:
     spec = _backend_contract_spec(backend_name)
     normalized_options = normalize_backend_options(backend_name, backend_options)
+    precision = _resolve_precision_contract(backend_name, spec, normalized_options)
     return {
         "namespace": spec["runtime_namespace"],
         "device": spec["runtime_device"],
@@ -184,7 +264,14 @@ def resolve_backend_runtime_contract(
         "supported_dtypes": spec["supported_dtypes"],
         "default_execution_path": spec.get("default_execution_path"),
         "supported_execution_paths": spec.get("supported_execution_paths", ()),
+        "default_mixed_precision_mode": spec.get("default_mixed_precision_mode"),
+        "supported_mixed_precision_modes": spec.get("supported_mixed_precision_modes", (None,)),
         "supported_backend_options": spec["supported_backend_options"],
-        "dtype": normalized_options["dtype"],
+        "dtype": precision["runtime_dtype"],
+        "authoritative_dtype": precision["authoritative_dtype"],
+        "runtime_dtype": precision["runtime_dtype"],
+        "runtime_compute_dtype": precision["runtime_compute_dtype"],
+        "runtime_complex_dtype": precision["runtime_complex_dtype"],
+        "mixed_precision_mode": precision["mixed_precision_mode"],
         "options": normalized_options,
     }
