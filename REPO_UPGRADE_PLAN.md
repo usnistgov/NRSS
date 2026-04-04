@@ -47,6 +47,137 @@ Build a new NRSS backend architecture that:
    `CUPY_RSOXS_OPTIMIZATION_LEDGER.md` so timing history no longer dominates the
    repo-wide plan.
 
+## Expert-Only Approximate 2D Z-Collapse Mode (Proposed April 4, 2026)
+
+This section records a proposed expert-only approximation mode for
+`cupy-rsoxs`. It is intentionally documented before implementation so a fresh
+context can resume the work without reconstructing the design discussion.
+
+### Purpose
+
+The goal is to provide a fast approximate-physics path for arbitrary `3D`
+morphologies by collapsing the locally composed field through `z` before the
+FFT and then continuing the run as an effective `z=1` problem.
+
+This is not a parity target. It is explicitly an opt-in approximation intended
+for expert use when the user wants a faster qualitative or semi-quantitative
+view of the scattering and accepts that:
+
+1. deviations should increase when the morphology has stronger heterogeneity
+   through `z`,
+2. deviations should generally grow at higher `q`,
+3. and agreement with the maintained full `3D` path is something to measure on
+   representative cases rather than assume.
+
+### Decisions already made
+
+The following design decisions were explicitly selected on April 4, 2026 and
+should be treated as the resume baseline:
+
+1. This should be a new expert-only approximation option rather than a new
+   `execution_path`.
+2. The approximation should be available for arbitrary `3D` boxes, not just
+   native `z=1` morphologies.
+3. The initial collapse rule should be `mean` through `z`.
+   - `sum` was discussed and may still be interesting later, but `mean` is the
+     current working choice.
+4. The collapse should happen before detector windowing / FFT work.
+5. After the collapse, the simulation should proceed with effective-`2D`
+   semantics as if the input problem were `z=1`.
+6. The approximation should be available regardless of `EAngleRotation`.
+7. The approximation is desired for both maintained `cupy-rsoxs` execution
+   paths:
+   - `tensor_coeff`
+   - `direct_polarization`
+8. Validation support should remain exploratory at first.
+   - Do not add maintained tests for this mode until its deviation is judged
+     useful on representative cases such as CoreShell and at least one
+     form-factor / `I(q)` comparison surface.
+
+### Corrected current implementation detail for effective `2D`
+
+One earlier hypothesis was that the current `z=1` path might effectively
+"just provide the FFT." That is not the current backend behavior.
+
+What is true today:
+
+1. the Hann factor in `z` is identity for `z=1`,
+2. but the backend still runs detector-projection math on the single `qz=0`
+   slice rather than returning a raw FFT panel.
+
+This matters because the proposed approximation should initially be thought of
+as:
+
+1. compose the `3D` local field,
+2. collapse it through `z`,
+3. then continue with the current effective-`z=1` detector semantics,
+
+not as "collapse through `z` and return the raw `2D` FFT."
+
+### Intended option surface
+
+Tentative preferred naming:
+
+1. `backend_options={"z_collapse_mode": "mean"}`
+
+Current design intent:
+
+1. default remains off / `None`,
+2. `z_collapse_mode` should remain orthogonal to `execution_path`,
+3. `z_collapse_mode` should remain orthogonal to `mixed_precision_mode`,
+4. and this mode should be documented as expert-only and approximation-only.
+
+### Path-specific implementation intent
+
+For `execution_path='tensor_coeff'`:
+
+1. build the usual energy-specific local tensor coefficients,
+2. collapse the required `Nt` component fields through `z` by `mean`,
+3. treat the collapsed result as a reusable `2D` tensor field,
+4. then continue through FFT and detector projection with effective-`z=1`
+   semantics.
+
+This is currently the cleaner first prototype target because it preserves the
+existing reuse story of the maintained `tensor_coeff` architecture.
+
+For `execution_path='direct_polarization'`:
+
+1. build the usual angle-specific `p_x`, `p_y`, `p_z` fields,
+2. collapse those polarization fields through `z` by `mean`,
+3. then continue through FFT and detector projection with effective-`z=1`
+   semantics.
+
+This is still desired, but it is a slightly less clean first prototype because
+the direct path remains more angle-local and therefore gains less reuse from
+the collapsed intermediate.
+
+### Recommended implementation order
+
+If this proposal is resumed in a fresh context, the intended order is:
+
+1. prototype the approximation in `tensor_coeff` first,
+2. measure detector-image and `I(q)` deviation on representative cases,
+3. then add the same approximation surface to `direct_polarization`,
+4. and only after that decide whether the mode deserves maintained validation
+   support or should remain a dev-only exploratory path.
+
+### Separate but related optimization goal
+
+The approximate `z`-collapse mode should not be conflated with the distinct
+"effective `2D` detector simplification" goal.
+
+That separate goal is:
+
+1. detect when the input to detector projection is already effectively `2D`
+   (`z=1` natively, and later also the collapsed approximation mode),
+2. and route it through a simpler detector routine instead of the current more
+   general detector-projection work.
+
+That detector simplification should be treated as its own optimization thread,
+but as a low-priority one for now, because it is potentially useful even
+without the approximation mode and should preserve current effective-`2D`
+semantics rather than redefine them.
+
 ## Test-First Program (Highest Priority)
 
 ### Immediate objective

@@ -489,6 +489,112 @@ Execution-path scope:
    independently from `tensor_coeff` while the mixed-precision surface remains
    one public mode.
 
+## Proposed Expert Approximation: `z_collapse_mode`
+
+This section records a proposed future expert-only approximation mode. It is
+not implemented as of April 4, 2026 and is not part of the current normalized
+option surface, but it is documented here so a fresh context can resume the
+design with the decisions already made.
+
+### Intent
+
+Provide an opt-in fast approximate-physics path for arbitrary `3D`
+morphologies by collapsing the locally composed field through `z` before FFT
+and then continuing as an effective `z=1` problem.
+
+This mode is explicitly:
+
+1. an approximation,
+2. expert-only,
+3. not a parity promise,
+4. and expected to diverge more strongly as `z` heterogeneity and `q`
+   increase.
+
+### Tentative public surface
+
+Preferred current naming:
+
+1. `backend_options={"z_collapse_mode": "mean"}`
+
+Current design intent:
+
+1. default is off / `None`,
+2. the first supported reduction would be `"mean"`,
+3. `z_collapse_mode` should remain orthogonal to `execution_path`,
+4. `z_collapse_mode` should remain orthogonal to `mixed_precision_mode`,
+5. and this should be documented as an approximation mode rather than an
+   alternate exact execution algorithm.
+
+### Semantics locked in for the current proposal
+
+The following design choices were explicitly selected on April 4, 2026:
+
+1. The mode should work on arbitrary `3D` boxes, not only native `z=1`
+   morphologies.
+2. The initial reduction should be `mean` through `z`.
+3. The collapse should occur after local-field composition and before
+   detector-windowing / FFT work.
+4. After collapse, downstream execution should proceed as an effective `z=1`
+   simulation.
+5. The mode should be available for any `EAngleRotation` scheme.
+6. The mode should be available for both maintained execution paths.
+
+### Path-specific implementation sketch
+
+For `execution_path='tensor_coeff'`:
+
+1. compute the usual energy-specific `Nt` component fields,
+2. collapse the required `Nt` components through `z` by `mean`,
+3. treat the result as a reusable `2D` tensor field,
+4. then continue with effective-`z=1` FFT and detector logic.
+
+For `execution_path='direct_polarization'`:
+
+1. compute the usual angle-specific `p_x`, `p_y`, `p_z` fields,
+2. collapse those polarization fields through `z` by `mean`,
+3. then continue with effective-`z=1` FFT and detector logic.
+
+### Current effective-`2D` behavior note
+
+The current backend behavior for native `z=1` inputs is important context:
+
+1. the Hann factor in `z` is identity for `z=1`,
+2. but the backend does not simply return a raw `2D` FFT,
+3. instead, it still evaluates detector-projection math on the single
+   `qz=0` slice.
+
+The proposed `z_collapse_mode` should therefore initially be understood as
+"collapse to an effective `z=1` problem and reuse the current effective-`2D`
+detector semantics," not as "collapse and expose the raw FFT."
+
+### Validation and acceptance posture
+
+This mode is intentionally not yet part of the maintained validation contract.
+
+Current planned evaluation order:
+
+1. prototype `tensor_coeff` first,
+2. compare against the maintained full `3D` path on representative cases such
+   as CoreShell,
+3. include at least one `I(q)` / form-factor style comparison surface,
+4. then decide whether the mode is useful enough to justify maintained tests,
+5. and only after that broaden any official support claims.
+
+### Separate optimization thread: effective-`2D` detector simplification
+
+Do not conflate `z_collapse_mode` with the separate optimization goal of a
+simpler detector routine for effective-`2D` inputs.
+
+That detector simplification should be treated as a distinct project because:
+
+1. it should apply to native `z=1` morphologies even without approximation,
+2. it may later also serve collapsed `z_collapse_mode` inputs,
+3. and it should preserve current effective-`2D` semantics rather than
+   redefining the approximation.
+
+For current planning, treat this as low priority relative to the maintained
+validation/test-first work and the more central backend upgrade items.
+
 Implementation order:
 
 1. Refactor backend option normalization and remove the old `dtype` option.

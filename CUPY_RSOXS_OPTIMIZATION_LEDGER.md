@@ -1556,23 +1556,74 @@ Precision and option-surface notes for this campaign:
        separately maintained test-backed contract,
      - intentionally deferred any maintained validation-surface expansion tied
        specifically to that internal promotion boundary to a later context.
-2. Reduced angle sampling, alternate interpolation rules, and multi-GPU fan-out
+2. Effective-`2D` detector simplification remains a separate optimization
+   track, but it is low priority for now.
+   - current behavior to remember:
+     - for native `z=1`, the Hann factor in `z` is identity,
+     - but the backend still runs detector-projection math on the single
+       `qz=0` slice rather than exposing a raw FFT panel,
+     - this means current effective-`2D` semantics are already "detector
+       projection on one slice," not "skip detector work entirely."
+   - separate goal:
+     - add a simpler detector routine for inputs that are already effectively
+       `2D`,
+     - treat this as applicable first to native `z=1` morphologies,
+     - and later also to any future approximation mode that collapses `3D`
+       fields through `z` before FFT.
+   - important separation rule:
+     - keep this detector simplification distinct from the proposed
+       approximation mode that collapses `3D` fields through `z`,
+     - because the detector simplification should be useful even without the
+       approximation and should preserve current effective-`2D` semantics.
+   - first acceptance target:
+     - preserve the current native `z=1` output contract while reducing
+       unnecessary detector-work overhead in Segment `D`.
+3. An expert-only approximate `z`-collapse mode is now an approved exploratory
+   implementation track for `cupy-rsoxs`.
+   - preferred tentative public surface:
+     - `backend_options={"z_collapse_mode": "mean"}`
+   - scope:
+     - arbitrary `3D` boxes are in scope,
+     - this is not intended only for native `z=1` morphologies.
+   - intended semantics:
+     - explicit approximation mode for experts only,
+     - collapse the locally composed field through `z` by `mean`,
+     - perform the collapse before detector windowing / FFT work,
+     - and then continue as an effective `z=1` simulation.
+   - required orthogonality:
+     - `z_collapse_mode` should remain orthogonal to `execution_path`,
+     - `z_collapse_mode` should remain orthogonal to
+       `mixed_precision_mode`.
+   - path-specific intended implementation:
+     - `tensor_coeff`:
+       - collapse energy-specific required `Nt` components to reusable `2D`
+         fields before FFT,
+     - `direct_polarization`:
+       - collapse angle-specific `p_x`, `p_y`, `p_z` fields to `2D`
+         before FFT.
+   - current recommended prototype order:
+     - implement and inspect `tensor_coeff` first,
+     - then add `direct_polarization`,
+     - and do not promote the mode to maintained validation until exploratory
+       deviation checks on cases such as CoreShell and at least one
+       form-factor / `I(q)` comparison show it is useful.
+4. Reduced angle sampling, alternate interpolation rules, and multi-GPU fan-out
    remain outside the current exact-tuning track.
-3. Host-resident staged mode creates room for explicit experiments with deeper
+5. Host-resident staged mode creates room for explicit experiments with deeper
    CPU-side precompute, including testing whether some early field math is
    faster on CPU before transfer.
-4. Deeper CPU-side precompute should be treated as an explicit experiment, not
+6. Deeper CPU-side precompute should be treated as an explicit experiment, not
    as the default plan.
    - it may help some host-resident workflows,
    - but it may also become transfer-dominated if large per-energy
      intermediates are moved to GPU,
    - therefore it must be measured before being promoted into recommended
      architecture.
-5. Export timing / host-conversion timing remains intentionally deferred as
+7. Export timing / host-conversion timing remains intentionally deferred as
    Segment `G`.
-6. Per-stage memory instrumentation remains deferred; the existing coarse peak
+8. Per-stage memory instrumentation remains deferred; the existing coarse peak
    memory monitoring is enough for the current pass.
-7. Host-resident repeated-run staging reuse remains explicitly deferred as a
+9. Host-resident repeated-run staging reuse remains explicitly deferred as a
    low-priority niche possibility.
    - examples include registered-host buffers, reusable staged device mirrors,
      or other host-lane transfer caches,
@@ -1581,7 +1632,7 @@ Precision and option-surface notes for this campaign:
    - if a workflow benefits from persistent GPU morphology residency, prefer
      `resident_mode='device'` rather than adding host-resident caching by
      default.
-8. Resume rule for a fresh optimization context:
+10. Resume rule for a fresh optimization context:
    - start from the current accepted backend state in this repo, including the
      Segment `A1/A2` split and the accepted host-resident `A2` staging fast
      path,
