@@ -53,6 +53,7 @@ from tests.validation.dev.cupy_rsoxs_optimization.run_cupy_rsoxs_optimization_ma
     _parse_energy_lists,
     _parse_positive_int_csv,
     _parse_rotation_specs,
+    _parse_worker_warmup_runs,
     _rotation_label_fragment,
     _timestamp,
     build_scaled_core_shell_materials,
@@ -100,6 +101,7 @@ class BenchmarkCase:
     input_policy: str = DEFAULT_INPUT_POLICY
     ownership_policy: str = DEFAULT_OWNERSHIP_POLICY
     create_cy_object: bool = True
+    worker_warmup_runs: int = 0
     notes: str | None = None
 
 
@@ -135,6 +137,7 @@ def _case_note(case: BenchmarkCase) -> str:
             f"resident_mode={case.resident_mode} field_namespace={case.field_namespace} "
             f"isotropic_representation={case.isotropic_representation} "
             f"cuda_prewarm_mode={case.cuda_prewarm_mode} "
+            f"worker_warmup_runs={case.worker_warmup_runs} "
             f"input_policy={case.input_policy} ownership_policy={case.ownership_policy}"
         )
     raise AssertionError(f"Unsupported benchmark family for the timing harness: {case.family}")
@@ -290,44 +293,20 @@ def _sanitize_worker_output(text: str) -> str:
     return "\n".join(kept_lines).strip()
 
 
-def _worker_main(case_path: Path, result_path: Path) -> int:
-    case = BenchmarkCase(**json.loads(case_path.read_text()))
-    result: dict[str, Any] = {
-        "label": case.label,
-        "family": case.family,
-        "backend": case.backend,
-        "shape_label": case.shape_label,
-        "resident_mode": case.resident_mode,
-        "field_namespace": case.field_namespace,
-        "isotropic_representation": case.isotropic_representation,
-        "cuda_prewarm_requested_mode": case.cuda_prewarm_mode,
-        "input_policy": case.input_policy,
-        "ownership_policy": case.ownership_policy,
-        "energies_ev": list(case.energies_ev),
-        "eangle_rotation": list(case.eangle_rotation),
-        "timing_boundary": PRIMARY_TIMING_BOUNDARY,
-        "note": case.notes or _case_note(case),
-        "status": "error",
-    }
-
-    if case.backend != DEFAULT_BACKEND:
-        raise AssertionError(f"The cyrsoxs timing harness only supports backend={DEFAULT_BACKEND!r}.")
-
-    prepared_inputs = None
+def _run_case_once(
+    *,
+    case: BenchmarkCase,
+    prepared_inputs: dict[str, Any],
+) -> dict[str, Any]:
     morphology = None
     try:
-        prewarm_mode, prewarm_note = _resolve_case_cuda_prewarm(case)
-        result["cuda_prewarm_applied_mode"] = prewarm_mode
-        if prewarm_note is not None:
-            result["cuda_prewarm_note"] = prewarm_note
-        if prewarm_mode == "before_prepare_inputs":
-            result["cuda_prewarm_seconds"] = _prewarm_cyrsoxs_runtime()
-
-        prepared_inputs = _prepare_core_shell_case_inputs(case)
         with _suppress_process_streams():
             primary_start = time.perf_counter()
             morphology = _construct_morphology_for_timing_case(case, prepared_inputs)
-            result["resolved_backend_options"] = dict(morphology.backend_options)
+            result = {
+                "primary_seconds": time.perf_counter() - primary_start,
+                "resolved_backend_options": dict(morphology.backend_options),
+            }
             morphology.run(stdout=False, stderr=False, return_xarray=False)
             result["primary_seconds"] = time.perf_counter() - primary_start
 
@@ -346,6 +325,68 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         }
         result["backend_timing_details"] = morphology.backend_timings
         result["panel_shape"] = _expected_panel_shape(morphology)
+        return result
+    finally:
+        if morphology is not None:
+            try:
+                morphology.release_runtime()
+            except Exception:
+                pass
+        del morphology
+
+
+def _worker_main(case_path: Path, result_path: Path) -> int:
+    case = BenchmarkCase(**json.loads(case_path.read_text()))
+    result: dict[str, Any] = {
+        "label": case.label,
+        "family": case.family,
+        "backend": case.backend,
+        "shape_label": case.shape_label,
+        "resident_mode": case.resident_mode,
+        "field_namespace": case.field_namespace,
+        "isotropic_representation": case.isotropic_representation,
+        "cuda_prewarm_requested_mode": case.cuda_prewarm_mode,
+        "input_policy": case.input_policy,
+        "ownership_policy": case.ownership_policy,
+        "energies_ev": list(case.energies_ev),
+        "eangle_rotation": list(case.eangle_rotation),
+        "timing_boundary": PRIMARY_TIMING_BOUNDARY,
+        "note": case.notes or _case_note(case),
+        "worker_warmup_runs_requested": int(case.worker_warmup_runs),
+        "status": "error",
+    }
+
+    if case.backend != DEFAULT_BACKEND:
+        raise AssertionError(f"The cyrsoxs timing harness only supports backend={DEFAULT_BACKEND!r}.")
+
+    prepared_inputs = None
+    morphology = None
+    try:
+        prewarm_mode, prewarm_note = _resolve_case_cuda_prewarm(case)
+        result["cuda_prewarm_applied_mode"] = prewarm_mode
+        if prewarm_note is not None:
+            result["cuda_prewarm_note"] = prewarm_note
+        if prewarm_mode == "before_prepare_inputs":
+            result["cuda_prewarm_seconds"] = _prewarm_cyrsoxs_runtime()
+
+        prepared_inputs = _prepare_core_shell_case_inputs(case)
+        warmup_seconds_total = 0.0
+        warmup_runs_completed = 0
+        for _ in range(case.worker_warmup_runs):
+            warmup_started = time.perf_counter()
+            warmup_result = _run_case_once(case=case, prepared_inputs=prepared_inputs)
+            warmup_seconds_total += time.perf_counter() - warmup_started
+            warmup_runs_completed += 1
+            if "resolved_backend_options" not in result:
+                result["resolved_backend_options"] = warmup_result["resolved_backend_options"]
+            del warmup_result
+
+        result["worker_warmup_runs_completed"] = warmup_runs_completed
+        if warmup_runs_completed:
+            result["worker_warmup_seconds_total"] = warmup_seconds_total
+
+        timed_result = _run_case_once(case=case, prepared_inputs=prepared_inputs)
+        result.update(timed_result)
         result["status"] = "ok"
 
     except BaseException as exc:  # noqa: BLE001 - worker must serialize failures
@@ -354,11 +395,6 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         result["error"] = str(exc)
         result["traceback"] = traceback.format_exc()
     finally:
-        if morphology is not None:
-            try:
-                morphology.release_runtime()
-            except Exception:
-                pass
         del morphology, prepared_inputs
         release_runtime_memory()
         result_path.parent.mkdir(parents=True, exist_ok=True)
@@ -434,6 +470,7 @@ def _timing_cases(
     no_rotation_energy_counts: tuple[int, ...],
     rotation_specs: tuple[tuple[float, float, float], ...],
     energy_lists: tuple[tuple[float, ...], ...],
+    worker_warmup_runs: int,
 ) -> list[BenchmarkCase]:
     cases: list[BenchmarkCase] = []
     include_representation_in_label = (
@@ -468,6 +505,7 @@ def _timing_cases(
                     eangle_rotation=eangle_rotation,
                     isotropic_representation=isotropic_representation,
                     cuda_prewarm_mode=cuda_prewarm_mode,
+                    worker_warmup_runs=worker_warmup_runs,
                     notes=notes,
                 )
             )
@@ -631,6 +669,7 @@ def run_matrix(args: argparse.Namespace) -> int:
     no_rotation_energy_counts = _parse_positive_int_csv(args.no_rotation_energy_counts)
     rotation_specs = _parse_rotation_specs(args.rotation_specs)
     energy_lists = _parse_energy_lists(args.energy_lists)
+    worker_warmup_runs = _parse_worker_warmup_runs(args.worker_warmup_runs)
 
     run_dir = OUT_ROOT / run_label
     output_dir = run_dir / "cases"
@@ -648,6 +687,7 @@ def run_matrix(args: argparse.Namespace) -> int:
         "ownership_policy": DEFAULT_OWNERSHIP_POLICY,
         "isotropic_material_representations": list(isotropic_representations),
         "cuda_prewarm_mode": cuda_prewarm_mode,
+        "worker_warmup_runs": worker_warmup_runs,
         "size_labels": list(size_labels),
         "include_triple_no_rotation": bool(args.include_triple_no_rotation),
         "include_triple_limited": bool(args.include_triple_limited),
@@ -667,11 +707,12 @@ def run_matrix(args: argparse.Namespace) -> int:
         size_labels=size_labels,
         include_triple_no_rotation=args.include_triple_no_rotation,
         include_triple_limited=args.include_triple_limited,
-        include_full_small_check=args.include_full_small_check,
-        no_rotation_energy_counts=no_rotation_energy_counts,
-        rotation_specs=rotation_specs,
-        energy_lists=energy_lists,
-    ):
+            include_full_small_check=args.include_full_small_check,
+            no_rotation_energy_counts=no_rotation_energy_counts,
+            rotation_specs=rotation_specs,
+            energy_lists=energy_lists,
+            worker_warmup_runs=worker_warmup_runs,
+        ):
         result = _run_case_subprocess(case=case, output_dir=output_dir)
         summary["timing_cases"][case.label] = result
         print(_result_summary_line(result), flush=True)
@@ -722,6 +763,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--size-labels",
         default="small",
         help="Comma-separated subset of size labels to run, for example 'small,medium'.",
+    )
+    parser.add_argument(
+        "--worker-warmup-runs",
+        type=int,
+        default=0,
+        help=(
+            "Development-only fully-hot mode. Run this many untimed identical warm-up passes "
+            "inside each worker subprocess before the timed boundary. Default: 0."
+        ),
     )
     parser.add_argument(
         "--include-triple-no-rotation",

@@ -56,7 +56,7 @@ def _find_import_target(*candidates: str) -> str | None:
 
 def _detect_cyrsoxs() -> BackendInfo:
     contract = resolve_backend_array_contract("cyrsoxs")
-    import_target = _find_import_target("CyRSoXS", "cyrsoxs")
+    import_target = _find_import_target("CyRSoXS")
     if import_target is None:
         return BackendInfo(
             name="cyrsoxs",

@@ -7,17 +7,13 @@ from .runtime import BackendRuntime
 
 
 def require_cyrsoxs_module():
-    errors = []
-    for name in ("CyRSoXS", "cyrsoxs"):
-        try:
-            return importlib.import_module(name)
-        except Exception as exc:  # pragma: no cover - exercised only when unavailable
-            errors.append(f"{name}: {exc.__class__.__name__}({exc})")
-
-    raise BackendUnavailableError(
-        "CyRSoXS backend is unavailable. "
-        f"Import attempts failed: {'; '.join(errors)}"
-    )
+    try:
+        return importlib.import_module("CyRSoXS")
+    except Exception as exc:  # pragma: no cover - exercised only when unavailable
+        raise BackendUnavailableError(
+            "CyRSoXS backend is unavailable. "
+            f"Import failed for 'CyRSoXS': {exc.__class__.__name__}({exc})"
+        ) from exc
 
 
 def cyrsoxs_input_mapping(cy_module):

@@ -48,16 +48,13 @@ def _import_required(module_name: str):
 
 def _import_cyrsoxs_required():
     # CyRSoXS remains an explicitly supported legacy backend and reference target.
-    errors = []
-    for name in ("CyRSoXS", "cyrsoxs"):
-        try:
-            return importlib.import_module(name)
-        except Exception as exc:  # pragma: no cover - exercised when import fails
-            errors.append(f"{name}: {exc.__class__.__name__}({exc})")
-    raise AssertionError(
-        "CyRSoXS import failed for listed attempts below. "
-        f"Attempts: {'; '.join(errors)}"
-    )
+    try:
+        return importlib.import_module("CyRSoXS")
+    except Exception as exc:  # pragma: no cover - exercised when import fails
+        raise AssertionError(
+            "CyRSoXS import failed for the supported module name. "
+            f"Failure: {exc.__class__.__name__}({exc})"
+        ) from exc
 
 
 def _import_cupy_required():

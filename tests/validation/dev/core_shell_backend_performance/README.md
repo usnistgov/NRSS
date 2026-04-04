@@ -33,6 +33,21 @@ Principal cross-backend comparison:
   - reuses the component timing summaries automatically if they already exist for the selected label,
   - supports `--plot-only` to regenerate the TSV and PNG from the combined summary.
 
+- `run_comprehensive_backend_comparison.py`
+  - dev-only small-CoreShell comprehensive comparison tier,
+  - keeps the maintained default benchmark unchanged,
+  - runs separate speed and memory passes over:
+    - host `warm`: `cyrsoxs`, `cupy-rsoxs tensor_coeff`, `cupy-rsoxs direct_polarization`,
+    - host `hot`: the same three host paths with one untimed identical warm-up run inside each worker,
+    - device `steady`: `cupy-rsoxs tensor_coeff`, `cupy-rsoxs direct_polarization`,
+  - uses single energy only,
+  - uses the two requested rotation schemes only:
+    - `no rotation`: `[0, 0, 0]`,
+    - `0:5:165`: `[0, 5, 165]`,
+  - records speed from the backend-specific maintained timing boundaries,
+  - records memory in a separate pass with external peak GPU polling plus process RSS polling,
+  - writes a combined summary plus separate speed and memory TSVs.
+
 Recommended workflow:
 
 1. Run the principal cross-backend comparison panel:

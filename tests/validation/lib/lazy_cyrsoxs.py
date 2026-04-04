@@ -11,18 +11,14 @@ class _LazyCyRSoXS:
         if self._module is not None:
             return self._module
 
-        errors = []
-        for name in ("CyRSoXS", "cyrsoxs"):
-            try:
-                self._module = importlib.import_module(name)
-                return self._module
-            except Exception as exc:  # pragma: no cover - exercised only when unavailable
-                errors.append(f"{name}: {exc.__class__.__name__}({exc})")
-
-        raise RuntimeError(
-            "CyRSoXS bindings are unavailable. "
-            f"Import attempts failed: {'; '.join(errors)}"
-        )
+        try:
+            self._module = importlib.import_module("CyRSoXS")
+            return self._module
+        except Exception as exc:  # pragma: no cover - exercised only when unavailable
+            raise RuntimeError(
+                "CyRSoXS bindings are unavailable. "
+                f"Import failed for 'CyRSoXS': {exc.__class__.__name__}({exc})"
+            ) from exc
 
     def __getattr__(self, name):
         return getattr(self._load(), name)
