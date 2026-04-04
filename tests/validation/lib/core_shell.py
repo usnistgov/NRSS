@@ -67,6 +67,12 @@ SIM_THRESHOLDS = {
     "a_vs_q_285p2": {"max_abs_diff": 0.0080, "rmse": 0.003},
 }
 
+Z_COLLAPSE_SIM_THRESHOLDS = {
+    "a_vs_energy": {"max_abs_diff": 0.0030, "rmse": 0.0012},
+    "a_vs_q_284p7": {"max_abs_diff": 0.0160, "rmse": 0.0040},
+    "a_vs_q_285p2": {"max_abs_diff": 0.0420, "rmse": 0.0090},
+}
+
 
 @dataclass(frozen=True)
 class CoreShellScenario:
@@ -556,6 +562,7 @@ def plot_core_shell_validation_panel(
     scenario: CoreShellScenario,
     reference_label: str,
     reference_citation: str,
+    model_label: str = "Pybind + WPIntegrator",
 ) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig, axes = plt.subplots(2, 2, figsize=(12.0, 8.5), constrained_layout=True)
@@ -574,7 +581,7 @@ def plot_core_shell_validation_panel(
         color="#d62728",
         linewidth=1.8,
         linestyle="--",
-        label="Pybind + WPIntegrator",
+        label=model_label,
     )
     ax.set_xlabel("Energy [eV]")
     ax.set_ylabel("A(E)")
@@ -603,7 +610,7 @@ def plot_core_shell_validation_panel(
         color="black",
         linewidth=1.8,
         linestyle="--",
-        label="284.7 eV pybind",
+        label=f"284.7 eV {model_label}",
     )
     ax.plot(
         comparison["a_vs_q_285p2"].coords["q"].values,
@@ -611,7 +618,7 @@ def plot_core_shell_validation_panel(
         color="#1f77b4",
         linewidth=1.8,
         linestyle="--",
-        label="285.2 eV pybind",
+        label=f"285.2 eV {model_label}",
     )
     ax.set_xlabel(r"q [nm$^{-1}$]")
     ax.set_ylabel("A(q)")

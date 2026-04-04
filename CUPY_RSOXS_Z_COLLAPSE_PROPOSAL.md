@@ -1,6 +1,7 @@
 # `cupy-rsoxs` `z_collapse_mode` Proposal
 
-Status: exploratory design, partially implemented
+Status: expert-only implementation is essentially complete; remaining cleanup is
+primarily the separate effective-`2D` detector simplification thread
 
 Date baseline: April 4, 2026
 
@@ -83,6 +84,33 @@ Implemented validation/results from this pass:
        `tensor_coeff`,
      - but it was still materially faster than the stored prior direct-path
        baseline by about `660s` (`~37.8%` faster).
+8. a CoreShell collapse graphical abstract dev harness now exists at:
+   - `tests/validation/dev/core_shell_backend_performance/run_core_shell_z_collapse_abstract.py`
+   - it compares the maintained CoreShell sim golden against the collapsed
+     `tensor_coeff` A-wedge output.
+9. maintained validation now also includes a relaxed CoreShell collapse
+   sim-regression lane:
+   - file: `tests/validation/test_core_shell_reference.py`
+   - scope:
+     - `cupy_tensor_coeff`
+     - `cupy_direct_polarization`
+   - reference truth:
+     - `tests/validation/data/core_shell/CS_sim_reference.h5`
+   - rationale:
+     - the collapse drift was found to be stable and visually unsurprising,
+       with the expected stronger deviation at higher `q`,
+     - so the maintained lane now treats that drift as an allowed
+       approximation envelope rather than as a parity failure.
+10. verification completed in `nrss-dev` on April 4, 2026 for the maintained
+    relaxed CoreShell collapse lane:
+   - `cupy_tensor_coeff`: `1 passed in 152.39s`
+   - `cupy_direct_polarization`: `1 passed in 584.88s`
+11. current interpretation:
+   - the approximation-specific maintained surface is now broader than the
+     original sphere-only lane,
+   - both maintained execution paths are covered,
+   - and the remaining work is no longer another major collapse-algorithm
+     pass but mostly the already-noted effective-`2D` detector cleanup path.
 
 Current exploratory summary from the dev runner:
 
@@ -404,9 +432,9 @@ The analytical references should answer:
 2. and whether any shift looks more like a detector/remeshing effect or a true
    collapse-induced deviation.
 
-## Recommended implementation order
+## Historical implementation order
 
-If resumed in a fresh context, use this order.
+The implementation was completed in roughly this order:
 
 1. Add option normalization and smoke tests.
 2. Refactor the internal shape-aware window/detector helpers.
@@ -418,10 +446,11 @@ If resumed in a fresh context, use this order.
    - flat analytical sphere
    - direct analytical sphere
 6. Inspect timing and error surfaces on the 70 nm and 128 nm sphere cases.
-7. Only after that decide whether:
-   - to keep the feature as dev-only,
-   - to add `direct_polarization`,
-   - or to promote some coverage into maintained validation.
+7. Extend collapse support to `direct_polarization`.
+8. Promote the analytical sphere lane into maintained validation.
+9. Add the CoreShell graphical-abstract dev harness.
+10. Promote a relaxed CoreShell collapse sim-regression lane into maintained
+    validation for both maintained cupy execution paths.
 
 ## Acceptance gates for the first pass
 
@@ -436,36 +465,41 @@ The first implementation should be considered successful only if:
    simplification thread.
 
 Do not treat the approximation as a user-facing recommended workflow or as an
-exactness claim. A narrow maintained validation surface now exists for the
-cupy-only analytical sphere collapse lane, but broader support claims should
-still wait on future evidence.
+exactness claim. The maintained validation surface now includes both the
+cupy-only analytical sphere collapse lane and a relaxed CoreShell
+sim-regression lane, but the feature should still remain expert-only and
+support claims should stay narrower than the normal full-`3D` paths.
 
 ## Explicit non-goals for the first pass
 
 1. No new public claim of exactness.
-2. No detector simplification work.
-3. No `direct_polarization` implementation yet.
-4. No attempt to change maintained analytical-sphere thresholds.
-5. No attempt to make this the default execution path.
+2. No detector simplification work inside the collapse implementation pass.
+3. No attempt to combine `mixed_precision_mode` with `z_collapse_mode` yet.
+4. No attempt to make this the default execution path.
+5. No attempt to promote this from expert-only to generally recommended.
 
 ## Resume note
 
 If a fresh context resumes this work, the shortest correct summary is:
 
 1. add `z_collapse_mode="mean"` as a normalized `cupy-rsoxs` option,
-2. keep the current implementation only in `tensor_coeff`,
+2. both maintained execution paths now implement the collapse strategy,
 3. the current `tensor_coeff` path already collapses during `Nt` construction
    and uses effective `z=1` FFT/detector semantics,
-4. preserve current effective-`z=1` detector semantics,
-5. do not mutate the public morphology shape,
-6. keep `mixed_precision_mode` incompatible with `z_collapse_mode` until the
+4. the current `direct_polarization` path collapses angle-specific direct
+   fields during construction and likewise reuses the effective `z=1`
+   downstream path,
+5. preserve current effective-`z=1` detector semantics,
+6. do not mutate the public morphology shape,
+7. keep `mixed_precision_mode` incompatible with `z_collapse_mode` until the
    half-input path is intentionally redesigned,
-7. both maintained execution paths now implement the in-construction collapse
-   strategy,
 8. maintained validation now includes the cupy-only analytical sphere collapse
    check against direct analytical `I(q)`,
-9. the remaining decision is therefore not implementation completeness but
-   support posture:
-   - whether to keep the feature expert-only,
-   - whether to broaden maintained validation beyond the current sphere lane,
-   - and whether any future user-facing recommendation is warranted.
+9. maintained validation also includes a relaxed CoreShell collapse
+   sim-regression lane against the vendored sim golden,
+10. the remaining work is mostly the separate effective-`2D` detector cleanup
+    thread rather than another major collapse implementation step,
+11. the remaining decision space is therefore mostly support posture:
+   - keep the feature expert-only,
+   - decide how much more maintained validation breadth is worth the runtime,
+   - and decide whether any future user-facing recommendation is warranted.

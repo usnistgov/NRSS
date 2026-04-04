@@ -515,6 +515,23 @@ As of April 4, 2026:
      `I(q)`,
    - not against the analytical flat-detector sphere surface,
    - and the maintained thresholds are tuned separately for the collapsed lane.
+8. maintained validation now also includes a relaxed CoreShell collapse
+   sim-regression lane in `tests/validation/test_core_shell_reference.py`:
+   - scope:
+     - `cupy_tensor_coeff`
+     - `cupy_direct_polarization`
+   - reference truth:
+     - the vendored sim-derived CoreShell regression golden
+       `tests/validation/data/core_shell/CS_sim_reference.h5`
+   - posture:
+     - this lane is intentionally relaxed relative to the full-`3D`
+       CoreShell sim-regression thresholds,
+     - and it explicitly tolerates the observed high-`q` deepening of the
+       collapse deviation.
+9. the expert-only effective-`2D` implementation is therefore essentially
+   complete from a maintained-validation standpoint; the main remaining
+   implementation cleanup is the separate effective-`2D` detector
+   simplification thread described below.
 
 For the detailed implementation history, exploratory validation results, and
 the recommended next-step plan, see `CUPY_RSOXS_Z_COLLAPSE_PROPOSAL.md`.
@@ -612,10 +629,13 @@ Current planned evaluation order:
    unchanged,
 3. maintained cupy-only analytical sphere collapse validation now exists
    against direct analytical `I(q)`,
-4. the current exploratory comparison surface is still the full-`3D` versus
-   collapsed-`3D` sphere `I(q)` dev harness plus generated plots,
-5. and broader support claims or broader maintained-test promotion should
-   still be revisited cautiously rather than assumed complete.
+4. maintained relaxed CoreShell collapse sim-regression coverage now exists
+   for both maintained cupy execution paths,
+5. the current exploratory comparison surface still includes the full-`3D`
+   versus collapsed-`3D` sphere `I(q)` dev harness plus generated plots for
+   direct visual inspection,
+6. broader user-facing support claims should still be revisited cautiously,
+   but the implementation itself is now close to complete.
 
 ### Separate optimization thread: effective-`2D` detector simplification
 
@@ -631,6 +651,12 @@ That detector simplification should be treated as a distinct project because:
 
 For current planning, treat this as low priority relative to the maintained
 validation/test-first work and the more central backend upgrade items.
+
+For the current `z_collapse_mode` work, this is also the main remaining
+backend-specific cleanup item. In other words: the approximate effective-`2D`
+path is substantially implemented, and what remains is mostly cleanup and
+possible speed work in the detector logic rather than another major collapse
+algorithm pass.
 
 Implementation order:
 

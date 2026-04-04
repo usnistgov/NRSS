@@ -15,6 +15,7 @@ from tests.validation.lib.core_shell import (
     SIM_REFERENCE_LABEL,
     SIM_REFERENCE_PATH,
     SIM_THRESHOLDS,
+    Z_COLLAPSE_SIM_THRESHOLDS,
     awedge_comparison_slices,
     compute_awedge_metrics,
     has_visible_gpu,
@@ -40,10 +41,31 @@ def _baseline_awedge(
     path_id: str,
 ):
     nrss_path = get_computation_path(path_id)
+    backend_options = dict(nrss_path.backend_options)
     scattering, _ = run_core_shell_backend(
         scenario="baseline",
         backend=nrss_path.backend,
-        backend_options=nrss_path.backend_options,
+        backend_options=backend_options,
+        resident_mode=nrss_path.resident_mode,
+        input_policy="strict" if nrss_path.category == "cupy" else "coerce",
+        ownership_policy=nrss_path.ownership_policy,
+        field_namespace=nrss_path.field_namespace,
+    )
+    return scattering_to_awedge(scattering).copy(deep=True)
+
+
+@lru_cache(maxsize=8)
+def _zcollapse_awedge(
+    path_id: str,
+    z_collapse_mode: str,
+):
+    nrss_path = get_computation_path(path_id)
+    backend_options = dict(nrss_path.backend_options)
+    backend_options["z_collapse_mode"] = z_collapse_mode
+    scattering, _ = run_core_shell_backend(
+        scenario="baseline",
+        backend=nrss_path.backend,
+        backend_options=backend_options,
         resident_mode=nrss_path.resident_mode,
         input_policy="strict" if nrss_path.category == "cupy" else "coerce",
         ownership_policy=nrss_path.ownership_policy,
@@ -124,6 +146,47 @@ def test_core_shell_sim_regression_pybind(nrss_path: ComputationPath):
                 "CoreShell scenario. This artifact guards implementation stability, "
                 "not experimental truth."
             ),
+        )
+
+    if not passed:
+        raise AssertionError("; ".join(failures))
+
+
+@pytest.mark.path_subset("cupy_tensor_coeff", "cupy_direct_polarization")
+@pytest.mark.gpu
+@pytest.mark.slow
+@pytest.mark.physics_validation
+@pytest.mark.toolchain_validation
+def test_core_shell_sim_regression_cupy_z_collapse_relaxed(nrss_path: ComputationPath):
+    """
+    Compare the maintained cupy-rsoxs CoreShell A-wedge with
+    `z_collapse_mode="mean"` to the local sim-derived regression golden using
+    relaxed collapse-specific thresholds.
+    """
+    if not has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for CoreShell z-collapse validation.")
+    if not SIM_REFERENCE_PATH.exists():
+        pytest.skip(f"CoreShell sim reference not found: {SIM_REFERENCE_PATH}")
+
+    awedge = _zcollapse_awedge(nrss_path.id, "mean")
+    reference = load_sim_reference_awedge()
+    comparison = awedge_comparison_slices(awedge=awedge, reference=reference)
+    metrics = compute_awedge_metrics(comparison)
+    passed, failures = metrics_within_thresholds(metrics, Z_COLLAPSE_SIM_THRESHOLDS)
+
+    if WRITE_VALIDATION_PLOTS:
+        plot_core_shell_validation_panel(
+            comparison=comparison,
+            metrics=metrics,
+            out_path=PLOT_DIR / f"{nrss_path.id}__core_shell_zcollapse_mean_vs_sim_reference.png",
+            scenario=BASELINE_SCENARIO,
+            reference_label=SIM_REFERENCE_LABEL,
+            reference_citation=(
+                "Sim-derived regression golden generated from the maintained baseline "
+                "CoreShell scenario. Relaxed z-collapse thresholds intentionally allow "
+                "high-q deviation relative to the full 3D baseline."
+            ),
+            model_label=f"{nrss_path.id} z-collapse",
         )
 
     if not passed:

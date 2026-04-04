@@ -130,3 +130,43 @@ mamba run -n nrss-dev python \
   tests/validation/dev/core_shell_backend_performance/run_core_shell_mixed_precision_abstract.py \
   --label mixed_precision_core_shell
 ```
+
+Z-collapse sim-regression comparison:
+
+- `run_core_shell_z_collapse_abstract.py`
+  - dev-only CoreShell sim-regression comparison focused on the maintained
+    vendored sim golden at `tests/validation/data/core_shell/CS_sim_reference.h5`,
+  - runs one subprocess-isolated `cupy-rsoxs` case:
+    - `tensor_coeff` with `z_collapse_mode="mean"`,
+  - keeps the maintained CoreShell morphology, full energy panel, and A-wedge
+    reduction path from `tests/validation/lib/core_shell.py`,
+  - writes a cached A-wedge artifact, a JSON summary, and a graphical abstract
+    with:
+    - sim golden overlays,
+    - collapsed-path overlays,
+    - residuals and timing/metric summaries,
+  - supports `--plot-only` to restyle from a saved summary without rerunning
+    the simulation.
+  - this dev harness directly informed the relaxed maintained CoreShell
+    collapse regression lane now recorded in
+    `tests/validation/test_core_shell_reference.py`,
+  - and its role is now primarily figure generation / threshold inspection
+    rather than proving implementation existence.
+
+Recommended workflow:
+
+```bash
+mamba run -n nrss-dev python \
+  tests/validation/dev/core_shell_backend_performance/run_core_shell_z_collapse_abstract.py \
+  --label z_collapse_core_shell
+```
+
+Current status note:
+
+- the effective-`2D` collapse implementation is now basically complete from a
+  maintained-validation standpoint,
+- both maintained cupy execution paths have relaxed CoreShell collapse
+  sim-regression coverage,
+- the main remaining backend-specific work is the separate effective-`2D`
+  detector cleanup / simplification thread already tracked in the backend
+  spec and proposal docs.
