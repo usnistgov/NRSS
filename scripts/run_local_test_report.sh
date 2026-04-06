@@ -79,6 +79,10 @@ NRSS_BACKEND_NAME="${NRSS_TEST_BACKEND:-${NRSS_BACKEND:-}}"
 NRSS_PATH_NAME="${NRSS_TEST_PATH:-${NRSS_PATH:-}}"
 PEER_PATH_IDS=("legacy_cyrsoxs" "cupy_tensor_coeff" "cupy_direct_polarization")
 declare -a TEST_CMDS=()
+ORIG_ARGS=("$@")
+declare -a VISIBLE_GPU_IDS=()
+PARALLEL_LANE_MODE="serial"
+PRIMARY_GPU_ID="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -154,8 +158,20 @@ if [[ -n "$NRSS_PATH_NAME" ]]; then
   esac
 fi
 
-if ! command -v conda >/dev/null 2>&1; then
-  echo "conda is required but not found in PATH." >&2
+if command -v mamba >/dev/null 2>&1; then
+  ENV_TOOL="mamba"
+elif [[ -x "${HOME}/mambaforge/bin/mamba" ]]; then
+  ENV_TOOL="${HOME}/mambaforge/bin/mamba"
+elif [[ -x "${HOME}/miniforge3/bin/mamba" ]]; then
+  ENV_TOOL="${HOME}/miniforge3/bin/mamba"
+elif command -v conda >/dev/null 2>&1; then
+  ENV_TOOL="conda"
+elif [[ -x "${HOME}/mambaforge/bin/conda" ]]; then
+  ENV_TOOL="${HOME}/mambaforge/bin/conda"
+elif [[ -x "${HOME}/miniforge3/bin/conda" ]]; then
+  ENV_TOOL="${HOME}/miniforge3/bin/conda"
+else
+  echo "mamba or conda is required but neither was found in PATH." >&2
   exit 2
 fi
 
@@ -166,6 +182,17 @@ fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT" || exit 2
+
+if [[ "${NRSS_LOCAL_TEST_REPORT_IN_ENV:-0}" != "1" ]]; then
+  SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  REEXEC_ARGS=""
+  if [[ ${#ORIG_ARGS[@]} -gt 0 ]]; then
+    printf -v REEXEC_ARGS ' %q' "${ORIG_ARGS[@]}"
+  fi
+  printf -v ESCAPED_REPO_ROOT '%q' "$REPO_ROOT"
+  printf -v ESCAPED_SCRIPT_PATH '%q' "$SCRIPT_PATH"
+  exec "$ENV_TOOL" run -n "$ENV_NAME" bash -lc "export NRSS_LOCAL_TEST_REPORT_IN_ENV=1; cd $ESCAPED_REPO_ROOT; $ESCAPED_SCRIPT_PATH$REEXEC_ARGS"
+fi
 
 TIMESTAMP_UTC="$(date -u +%Y%m%dT%H%M%SZ)"
 REPORT_DIR="${REPORT_ROOT%/}/${TIMESTAMP_UTC}"
@@ -182,9 +209,11 @@ CYRSOXS_RESOLUTION_TSV="$REPORT_DIR/cyrsoxs_resolution.tsv"
 VALIDATION_REFERENCE_MANIFEST_TSV="$REPORT_DIR/validation_reference_manifest.tsv"
 GRAPHICAL_ABSTRACTS_DIR="$REPORT_DIR/graphical-abstracts"
 GRAPHICAL_ABSTRACTS_ZIP="$REPORT_DIR/graphical-abstracts.zip"
+PATH_LANE_STATE_DIR="$REPORT_DIR/path-lanes"
 
 : > "$RUN_LOG"
 : > "$STEPS_TSV"
+mkdir -p "$PATH_LANE_STATE_DIR"
 
 log() {
   local msg="$1"
@@ -193,6 +222,42 @@ log() {
 
 slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '_' | sed 's/^_//;s/_$//'
+}
+
+trim_whitespace() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+gpu_csv_from_array() {
+  local IFS=","
+  printf '%s' "$*"
+}
+
+discover_visible_gpu_ids() {
+  local raw_visible="${CUDA_VISIBLE_DEVICES:-}"
+  local token
+  local -a discovered_ids=()
+
+  if [[ -n "$raw_visible" ]]; then
+    IFS=',' read -r -a discovered_ids <<< "$raw_visible"
+  elif command -v nvidia-smi >/dev/null 2>&1; then
+    mapfile -t discovered_ids < <(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null || true)
+  fi
+
+  VISIBLE_GPU_IDS=()
+  for token in "${discovered_ids[@]}"; do
+    token="$(trim_whitespace "$token")"
+    if [[ -n "$token" ]]; then
+      VISIBLE_GPU_IDS+=("$token")
+    fi
+  done
+
+  if [[ ${#VISIBLE_GPU_IDS[@]} -eq 0 ]]; then
+    VISIBLE_GPU_IDS=("0")
+  fi
 }
 
 build_inner_cmd() {
@@ -217,7 +282,7 @@ build_inner_cmd() {
 }
 
 write_metadata() {
-  local git_sha git_branch git_dirty visible_gpus
+  local git_sha git_branch git_dirty visible_gpus detected_gpus default_paths
   git_sha="$(git rev-parse HEAD)"
   git_branch="$(git rev-parse --abbrev-ref HEAD)"
   if git diff --quiet && git diff --cached --quiet; then
@@ -225,7 +290,10 @@ write_metadata() {
   else
     git_dirty="dirty"
   fi
-  visible_gpus="${CUDA_VISIBLE_DEVICES:-0}"
+  visible_gpus="${CUDA_VISIBLE_DEVICES:-${PRIMARY_GPU_ID}}"
+  detected_gpus="$(gpu_csv_from_array "${VISIBLE_GPU_IDS[@]}")"
+  default_paths="$(printf '%s,' "${DEFAULT_RUN_PATHS[@]}")"
+  default_paths="${default_paths%,}"
 
   {
     echo "timestamp_utc=$TIMESTAMP_UTC"
@@ -235,6 +303,9 @@ write_metadata() {
     echo "git_worktree=$git_dirty"
     echo "conda_env=$ENV_NAME"
     echo "cuda_visible_devices=$visible_gpus"
+    echo "detected_visible_gpu_ids=$detected_gpus"
+    echo "path_lane_execution_mode=$PARALLEL_LANE_MODE"
+    echo "default_run_paths=$default_paths"
     echo "skip_defaults=$SKIP_DEFAULTS"
     echo "custom_repeat_count=$CUSTOM_REPEAT_COUNT"
     echo "write_physics_plots=$WRITE_PHYSICS_PLOTS"
@@ -262,7 +333,7 @@ capture_nrss_resolution() {
   probe_cmd=$'python - <<\'PY\'\nimport importlib\nimport subprocess\nfrom pathlib import Path\n\n\ndef safe(value):\n    if value is None:\n        return \"\"\n    return str(value).replace(\"\\t\", \" \").replace(\"\\n\", \" \").strip()\n\n\ndef git_provenance(path_str):\n    if not path_str:\n        return \"\", \"\"\n    try:\n        path = Path(path_str).resolve()\n    except Exception:\n        return \"\", \"\"\n\n    start = path if path.is_dir() else path.parent\n    for candidate in (start, *start.parents):\n        root = subprocess.run(\n            [\"git\", \"-C\", str(candidate), \"rev-parse\", \"--show-toplevel\"],\n            check=False,\n            stdout=subprocess.PIPE,\n            stderr=subprocess.PIPE,\n            text=True,\n            timeout=2,\n        )\n        if root.returncode != 0:\n            continue\n        root_path = root.stdout.strip()\n        branch = subprocess.run(\n            [\"git\", \"-C\", root_path, \"rev-parse\", \"--abbrev-ref\", \"HEAD\"],\n            check=False,\n            stdout=subprocess.PIPE,\n            stderr=subprocess.PIPE,\n            text=True,\n            timeout=2,\n        )\n        sha = subprocess.run(\n            [\"git\", \"-C\", root_path, \"rev-parse\", \"HEAD\"],\n            check=False,\n            stdout=subprocess.PIPE,\n            stderr=subprocess.PIPE,\n            text=True,\n            timeout=2,\n        )\n        return branch.stdout.strip(), sha.stdout.strip()\n    return \"\", \"\"\n\n\nprint(\"resolved_name\\tresolved_path\\tversion\\tgit_branch\\tgit_sha\\tstatus\")\ntry:\n    mod = importlib.import_module(\"NRSS\")\nexcept Exception as exc:\n    print(f\"NRSS\\t\\t\\t\\t\\tIMPORT_FAILED:{exc.__class__.__name__}\")\nelse:\n    path = safe(getattr(mod, \"__file__\", \"\"))\n    version = safe(getattr(mod, \"__version__\", \"\"))\n    branch, sha = git_provenance(path)\n    print(\"\\t\".join([\"NRSS\", path, version, branch, sha, \"OK\"]))\nPY'
   inner_cmd="$(build_inner_cmd "$probe_cmd")"
 
-  if ! conda run -n "$ENV_NAME" bash -lc "$inner_cmd" > "$NRSS_RESOLUTION_TSV" 2>> "$RUN_LOG"; then
+  if ! bash -lc "$inner_cmd" > "$NRSS_RESOLUTION_TSV" 2>> "$RUN_LOG"; then
     cat > "$NRSS_RESOLUTION_TSV" <<'EOF'
 resolved_name	resolved_path	version	git_branch	git_sha	status
 NRSS					PROBE_FAILED
@@ -277,7 +348,7 @@ capture_cyrsoxs_resolution() {
   probe_cmd=$'python - <<\'PY\'\nimport contextlib\nimport importlib\nimport io\nimport re\nimport shutil\nimport subprocess\nfrom pathlib import Path\n\n\ndef safe(value):\n    if value is None:\n        return \"\"\n    return str(value).replace(\"\\t\", \" \").replace(\"\\n\", \" \").strip()\n\n\ndef git_provenance(path_str):\n    if not path_str:\n        return \"\", \"\", \"\"\n    try:\n        path = Path(path_str).resolve()\n    except Exception:\n        return \"\", \"\", \"\"\n\n    start = path if path.is_dir() else path.parent\n    for candidate in (start, *start.parents):\n        try:\n            root = subprocess.run(\n                [\"git\", \"-C\", str(candidate), \"rev-parse\", \"--show-toplevel\"],\n                check=False,\n                stdout=subprocess.PIPE,\n                stderr=subprocess.PIPE,\n                text=True,\n                timeout=2,\n            )\n        except Exception:\n            continue\n        if root.returncode != 0:\n            continue\n        root_path = root.stdout.strip()\n        branch = subprocess.run(\n            [\"git\", \"-C\", root_path, \"rev-parse\", \"--abbrev-ref\", \"HEAD\"],\n            check=False,\n            stdout=subprocess.PIPE,\n            stderr=subprocess.PIPE,\n            text=True,\n            timeout=2,\n        )\n        sha = subprocess.run(\n            [\"git\", \"-C\", root_path, \"rev-parse\", \"HEAD\"],\n            check=False,\n            stdout=subprocess.PIPE,\n            stderr=subprocess.PIPE,\n            text=True,\n            timeout=2,\n        )\n        return root_path, branch.stdout.strip(), sha.stdout.strip()\n    return \"\", \"\", \"\"\n\n\ndef version_from_repo_root(root_path):\n    if not root_path:\n        return \"\"\n    cmake_path = Path(root_path) / \"CMakeLists.txt\"\n    if not cmake_path.exists():\n        return \"\"\n    try:\n        text = cmake_path.read_text(encoding=\"utf-8\", errors=\"replace\")\n    except Exception:\n        return \"\"\n    match = re.search(r\"project\\s*\\(\\s*CyRSoXS\\s+VERSION\\s+([0-9.]+)\", text, re.IGNORECASE)\n    return match.group(1) if match else \"\"\n\n\ndef version_from_banner(text):\n    for line in text.splitlines():\n        match = re.search(r\"Version\\s*:\\s*([0-9\\s.]+)\", line)\n        if match:\n            return re.sub(r\"\\s+\", \"\", match.group(1))\n    return \"\"\n\n\ndef cli_record():\n    path = safe(shutil.which(\"CyRSoXS\") or \"\")\n    if not path:\n        return (\"cli\", \"CyRSoXS\", \"\", \"\", \"\", \"\", \"NOT_FOUND\")\n\n    version = \"\"\n    try:\n        proc = subprocess.run(\n            [path, \"--version\"],\n            check=False,\n            stdout=subprocess.PIPE,\n            stderr=subprocess.PIPE,\n            text=True,\n            timeout=5,\n        )\n    except Exception:\n        proc = None\n    if proc is not None:\n        version = version_from_banner((proc.stdout or \"\") + \"\\n\" + (proc.stderr or \"\"))\n\n    root_path, branch, sha = git_provenance(path)\n    if not version:\n        version = version_from_repo_root(root_path)\n    return (\"cli\", \"CyRSoXS\", path, version, branch, sha, \"OK\")\n\n\ndef pybind_record():\n    import_name = \"CyRSoXS\"\n    try:\n        buf_out = io.StringIO()\n        buf_err = io.StringIO()\n        with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):\n            mod = importlib.import_module(import_name)\n    except Exception as exc:\n        status = f\"{import_name}:{exc.__class__.__name__}\"\n        return (\"pybind\", import_name, \"\", \"\", \"\", \"\", status)\n    path = safe(getattr(mod, \"__file__\", \"\"))\n    banner_text = buf_out.getvalue() + \"\\n\" + buf_err.getvalue()\n    version = safe(getattr(mod, \"__version__\", \"\")) or version_from_banner(banner_text)\n    root_path, branch, sha = git_provenance(path)\n    if not version:\n        version = version_from_repo_root(root_path)\n    return (\"pybind\", import_name, path, version, branch, sha, \"OK\")\n\n\nprint(\"component\\tresolved_name\\tresolved_path\\tversion\\tgit_branch\\tgit_sha\\tstatus\")\nfor row in (cli_record(), pybind_record()):\n    print(\"\\t\".join(safe(value) for value in row))\nPY'
   inner_cmd="$(build_inner_cmd "$probe_cmd")"
 
-  if ! CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" conda run -n "$ENV_NAME" bash -lc "$inner_cmd" > "$CYRSOXS_RESOLUTION_TSV" 2>> "$RUN_LOG"; then
+  if ! CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-$PRIMARY_GPU_ID}" bash -lc "$inner_cmd" > "$CYRSOXS_RESOLUTION_TSV" 2>> "$RUN_LOG"; then
     cat > "$CYRSOXS_RESOLUTION_TSV" <<'EOF'
 component	resolved_name	resolved_path	version	git_branch	git_sha	status
 cli	CyRSoXS					PROBE_FAILED
@@ -396,6 +467,8 @@ run_conda_step() {
   local step_name="$1"
   local cmd="$2"
   local step_index="$3"
+  local steps_file="${4:-$STEPS_TSV}"
+  local visible_gpu="${5:-${CUDA_VISIBLE_DEVICES:-$PRIMARY_GPU_ID}}"
   local slug log_file case_file start_ts end_ts duration status rc result_line cmd_oneline inner_cmd
 
   slug="$(slugify "$step_name")"
@@ -408,7 +481,7 @@ run_conda_step() {
   start_ts="$(date +%s)"
 
   inner_cmd="$(build_inner_cmd "$cmd")"
-  CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" conda run -n "$ENV_NAME" bash -lc "$inner_cmd" > "$log_file" 2>&1
+  CUDA_VISIBLE_DEVICES="$visible_gpu" bash -lc "$inner_cmd" > "$log_file" 2>&1
   rc=$?
 
   end_ts="$(date +%s)"
@@ -451,13 +524,56 @@ with case_path.open("w", encoding="utf-8") as f:
 PY
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$step_index" "$step_name" "$status" "$duration" "$log_file" "$cmd_oneline" "$result_line" "$case_file" >> "$STEPS_TSV"
+    "$step_index" "$step_name" "$status" "$duration" "$log_file" "$cmd_oneline" "$result_line" "$case_file" >> "$steps_file"
 
   log "    Status: $status (exit=$rc, ${duration}s)"
   log "    Log: $log_file"
   if [[ -n "$result_line" ]]; then
     log "    Result: $result_line"
   fi
+
+  return "$rc"
+}
+
+append_sorted_step_files() {
+  local merged_file="$PATH_LANE_STATE_DIR/merged-steps.tsv"
+  cat "$@" | sort -t $'\t' -k1,1n > "$merged_file"
+  cat "$merged_file" >> "$STEPS_TSV"
+}
+
+run_path_lane() {
+  local path_id="$1"
+  local gpu_id="$2"
+  local smoke_step="$3"
+  local physics_step="$4"
+  local steps_file="$5"
+  local harvest_root_for_path zip_path_for_path physics_cmd rc
+
+  rc=0
+  harvest_root_for_path="$GRAPHICAL_ABSTRACTS_DIR/$path_id"
+  zip_path_for_path="$REPORT_DIR/graphical-abstracts-${path_id}.zip"
+  physics_cmd="python scripts/run_physics_validation_suite.py --repo-root \"$REPO_ROOT\" --catalog \"$PHYSICS_CATALOG_TSV\" --harvest-root \"$harvest_root_for_path\" --zip-path \"$zip_path_for_path\" --nrss-path \"$path_id\""
+  if [[ $WRITE_PHYSICS_PLOTS -eq 0 ]]; then
+    physics_cmd="$physics_cmd --no-plots"
+  fi
+
+  run_conda_step \
+    "Smoke Tests (GPU) [$path_id]" \
+    "python -m pytest tests/smoke -m gpu -v --nrss-path \"$path_id\"" \
+    "$smoke_step" \
+    "$steps_file" \
+    "$gpu_id" || rc=1
+
+  if [[ $rc -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
+    return "$rc"
+  fi
+
+  run_conda_step \
+    "Physics Validation Tests [$path_id]" \
+    "$physics_cmd" \
+    "$physics_step" \
+    "$steps_file" \
+    "$gpu_id" || rc=1
 
   return "$rc"
 }
@@ -632,6 +748,7 @@ def format_markers(markers):
 
 cpu_cases = {}
 gpu_cases = {}
+path_order = ["legacy_cyrsoxs", "cupy_tensor_coeff", "cupy_direct_polarization"]
 for line in steps_path.read_text(encoding="utf-8", errors="replace").splitlines():
     parts = line.split("\t")
     if len(parts) < 8:
@@ -640,8 +757,9 @@ for line in steps_path.read_text(encoding="utf-8", errors="replace").splitlines(
     case_file = pathlib.Path(parts[7])
     if step_name == "Smoke Tests (CPU Fast)":
         cpu_cases = load_cases(case_file)
-    elif step_name == "Smoke Tests (GPU)":
-        gpu_cases = load_cases(case_file)
+    elif step_name.startswith("Smoke Tests (GPU) [") and step_name.endswith("]"):
+        path_id = step_name.rsplit("[", 1)[1][:-1]
+        gpu_cases[path_id] = load_cases(case_file)
 
 print("")
 print("### Smoke Tests")
@@ -654,9 +772,17 @@ for row in catalog_path.read_text(encoding="utf-8", errors="replace").splitlines
     markers = parts[1] if len(parts) > 1 and parts[1] else "-"
     summary = parts[2] if len(parts) > 2 and parts[2] else "-"
     cpu = cpu_cases.get(name, "DESELECTED")
-    gpu = gpu_cases.get(name, "DESELECTED")
+    gpu_statuses = []
+    for path_id in path_order:
+        statuses = gpu_cases.get(path_id)
+        if statuses is not None:
+            gpu_statuses.append(f"{path_id} <code>{statuses.get(name, 'DESELECTED')}</code>")
+    for path_id in sorted(gpu_cases):
+        if path_id not in path_order:
+            gpu_statuses.append(f"{path_id} <code>{gpu_cases[path_id].get(name, 'DESELECTED')}</code>")
+    gpu = "; ".join(gpu_statuses) if gpu_statuses else "<code>DESELECTED</code>"
     print(f"- <code>{soft_break_code(name)}</code>")
-    print(f"  Status: CPU <code>{cpu}</code>; GPU <code>{gpu}</code>")
+    print(f"  Status: CPU <code>{cpu}</code>; GPU {gpu}")
     print(f"  Markers: {format_markers(markers)}")
     print(f"  Summary: {summary}")
     print("")
@@ -696,17 +822,15 @@ def format_markers(markers):
     return ", ".join(f"<code>{soft_break_code(marker)}</code>" for marker in marker_list)
 
 physics_cases = {}
+path_order = ["legacy_cyrsoxs", "cupy_tensor_coeff", "cupy_direct_polarization"]
 for line in steps_path.read_text(encoding="utf-8", errors="replace").splitlines():
     parts = line.split("\t")
     if len(parts) < 8:
         continue
     step_name = parts[1]
-    step_cmd = parts[5] if len(parts) > 5 else ""
-    if step_name == "Physics Validation Tests" or (
-        "tests/validation" in step_cmd and "physics_validation" in step_cmd
-    ):
-        physics_cases = load_cases(pathlib.Path(parts[7]))
-        break
+    if step_name.startswith("Physics Validation Tests [") and step_name.endswith("]"):
+        path_id = step_name.rsplit("[", 1)[1][:-1]
+        physics_cases[path_id] = load_cases(pathlib.Path(parts[7]))
 
 print("")
 print("### Physics Tests")
@@ -719,9 +843,17 @@ for row in catalog_path.read_text(encoding="utf-8", errors="replace").splitlines
     name = parts[1]
     markers = parts[2] if len(parts) > 2 and parts[2] else "-"
     summary = parts[3] if len(parts) > 3 and parts[3] else "-"
-    status = physics_cases.get(name, "DESELECTED")
+    statuses = []
+    for path_id in path_order:
+        path_statuses = physics_cases.get(path_id)
+        if path_statuses is not None:
+            statuses.append(f"{path_id} <code>{path_statuses.get(name, 'DESELECTED')}</code>")
+    for path_id in sorted(physics_cases):
+        if path_id not in path_order:
+            statuses.append(f"{path_id} <code>{physics_cases[path_id].get(name, 'DESELECTED')}</code>")
+    status = "; ".join(statuses) if statuses else "<code>DESELECTED</code>"
     print(f"- <code>{soft_break_code(name)}</code>")
-    print(f"  Status: <code>{status}</code>")
+    print(f"  Status: {status}")
     print(f"  File: <code>{soft_break_code(test_file)}</code>")
     print(f"  Markers: {format_markers(markers)}")
     print(f"  Description: {summary}")
@@ -729,13 +861,6 @@ for row in catalog_path.read_text(encoding="utf-8", errors="replace").splitlines
 PY
   fi
 }
-
-write_metadata
-capture_nrss_resolution
-capture_cyrsoxs_resolution
-build_validation_reference_manifest
-build_smoke_catalog
-build_physics_catalog
 
 log "NRSS test report run started: $TIMESTAMP_UTC"
 log "Repository: $REPO_ROOT"
@@ -764,6 +889,19 @@ else
   DEFAULT_RUN_PATHS=("${PEER_PATH_IDS[@]}")
 fi
 
+discover_visible_gpu_ids
+PRIMARY_GPU_ID="${VISIBLE_GPU_IDS[0]}"
+if [[ ${#DEFAULT_RUN_PATHS[@]} -eq 3 && ${#VISIBLE_GPU_IDS[@]} -ge 3 ]]; then
+  PARALLEL_LANE_MODE="parallel"
+fi
+
+write_metadata
+capture_nrss_resolution
+capture_cyrsoxs_resolution
+build_validation_reference_manifest
+build_smoke_catalog
+build_physics_catalog
+
 ENV_SNAPSHOT_CMD=$'python - <<\'PY\'\nimport importlib\nimport platform\nimport sys\n\nmodules = [\n    "NRSS", "pytest", "numpy", "scipy", "pandas", "h5py", "xarray", "cupy", "CyRSoXS"\n]\n\nprint("python:", sys.version.replace("\\n", " "))\nprint("platform:", platform.platform())\nfor name in modules:\n    try:\n        mod = importlib.import_module(name)\n        ver = getattr(mod, "__version__", "unknown")\n        print(f"{name}: {ver}")\n    except Exception as exc:\n        print(f"{name}: NOT_AVAILABLE ({exc.__class__.__name__})")\nPY'
 
 if [[ $SKIP_DEFAULTS -eq 0 ]]; then
@@ -783,32 +921,48 @@ if [[ $SKIP_DEFAULTS -eq 0 ]]; then
   fi
   STEP=$((STEP + 1))
 
-  for path_id in "${DEFAULT_RUN_PATHS[@]}"; do
-    run_conda_step \
-      "Smoke Tests (GPU) [$path_id]" \
-      "python -m pytest tests/smoke -m gpu -v --nrss-path \"$path_id\"" \
-      "$STEP" || ANY_FAIL=1
-    if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
-      generate_summary
-      cat "$SUMMARY_MD"
-      exit 1
-    fi
-    STEP=$((STEP + 1))
+  if [[ "$PARALLEL_LANE_MODE" == "parallel" ]]; then
+    declare -a lane_pids=()
+    declare -a lane_steps_files=()
+    for lane_index in "${!DEFAULT_RUN_PATHS[@]}"; do
+      path_id="${DEFAULT_RUN_PATHS[$lane_index]}"
+      gpu_id="${VISIBLE_GPU_IDS[$lane_index]}"
+      lane_steps_file="$PATH_LANE_STATE_DIR/${path_id}.steps.tsv"
+      : > "$lane_steps_file"
+      lane_steps_files+=("$lane_steps_file")
+      run_path_lane "$path_id" "$gpu_id" "$STEP" "$((STEP + 1))" "$lane_steps_file" &
+      lane_pids+=("$!")
+      STEP=$((STEP + 2))
+    done
 
-    harvest_root_for_path="$GRAPHICAL_ABSTRACTS_DIR/$path_id"
-    zip_path_for_path="$REPORT_DIR/graphical-abstracts-${path_id}.zip"
-    PHYSICS_CMD="python scripts/run_physics_validation_suite.py --repo-root \"$REPO_ROOT\" --catalog \"$PHYSICS_CATALOG_TSV\" --harvest-root \"$harvest_root_for_path\" --zip-path \"$zip_path_for_path\" --nrss-path \"$path_id\""
-    if [[ $WRITE_PHYSICS_PLOTS -eq 0 ]]; then
-      PHYSICS_CMD="$PHYSICS_CMD --no-plots"
-    fi
-    run_conda_step "Physics Validation Tests [$path_id]" "$PHYSICS_CMD" "$STEP" || ANY_FAIL=1
+    for lane_pid in "${lane_pids[@]}"; do
+      if ! wait "$lane_pid"; then
+        ANY_FAIL=1
+      fi
+    done
+    append_sorted_step_files "${lane_steps_files[@]}"
     if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
       generate_summary
       cat "$SUMMARY_MD"
       exit 1
     fi
-    STEP=$((STEP + 1))
-  done
+  else
+    for path_id in "${DEFAULT_RUN_PATHS[@]}"; do
+      run_path_lane "$path_id" "$PRIMARY_GPU_ID" "$STEP" "$((STEP + 1))" "$STEPS_TSV" || ANY_FAIL=1
+      STEP=$((STEP + 2))
+      if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
+        generate_summary
+        cat "$SUMMARY_MD"
+        exit 1
+      fi
+    done
+  fi
+
+  if [[ $ANY_FAIL -ne 0 && $STOP_ON_FAIL -eq 1 ]]; then
+    generate_summary
+    cat "$SUMMARY_MD"
+    exit 1
+  fi
 fi
 
 STEP_NAME_INDEX=1

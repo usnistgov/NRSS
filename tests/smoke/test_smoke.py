@@ -848,6 +848,27 @@ def test_cupy_backend_rejects_legacy_dtype_option_with_migration_error():
             create_cy_object=False,
         )
 
+def _expected_cupy_backend_options(
+    *,
+    execution_path: str = "tensor_coeff",
+    mixed_precision_mode: str | None = None,
+    z_collapse_mode: str | None = None,
+) -> dict[str, str | None]:
+    kernel_preload_stage = "off"
+    igor_shift_backend = "nvrtc"
+    if execution_path == "direct_polarization":
+        kernel_preload_stage = "a1"
+        igor_shift_backend = "nvcc"
+
+    return {
+        "execution_path": execution_path,
+        "mixed_precision_mode": mixed_precision_mode,
+        "z_collapse_mode": z_collapse_mode,
+        "kernel_preload_stage": kernel_preload_stage,
+        "igor_shift_backend": igor_shift_backend,
+        "direct_polarization_backend": "nvrtc",
+    }
+
 
 @pytest.mark.backend_specific
 @pytest.mark.cpu
@@ -859,11 +880,9 @@ def test_cupy_backend_accepts_mixed_precision_backend_option():
         backend_options={"mixed_precision_mode": "reduced_morphology_bit_depth"},
         create_cy_object=False,
     )
-    assert morph.backend_options == {
-        "execution_path": "tensor_coeff",
-        "mixed_precision_mode": "reduced_morphology_bit_depth",
-        "z_collapse_mode": None,
-    }
+    assert morph.backend_options == _expected_cupy_backend_options(
+        mixed_precision_mode="reduced_morphology_bit_depth",
+    )
     assert morph.backend_array_contract["dtype"] == "float16"
     assert morph.runtime_compute_contract["dtype"] == "float16"
     assert morph.runtime_compute_contract["runtime_compute_dtype"] == "float32"
@@ -892,11 +911,9 @@ def test_cupy_backend_accepts_execution_path_backend_option():
         backend_options={"execution_path": "direct"},
         create_cy_object=False,
     )
-    assert morph.backend_options == {
-        "execution_path": "direct_polarization",
-        "mixed_precision_mode": None,
-        "z_collapse_mode": None,
-    }
+    assert morph.backend_options == _expected_cupy_backend_options(
+        execution_path="direct_polarization",
+    )
 
 
 @pytest.mark.backend_specific
@@ -930,11 +947,9 @@ def test_cupy_backend_accepts_z_collapse_backend_option():
         backend_options={"z_collapse_mode": "mean"},
         create_cy_object=False,
     )
-    assert morph.backend_options == {
-        "execution_path": "tensor_coeff",
-        "mixed_precision_mode": None,
-        "z_collapse_mode": "mean",
-    }
+    assert morph.backend_options == _expected_cupy_backend_options(
+        z_collapse_mode="mean",
+    )
     assert morph.z_collapse_mode == "mean"
 
 
@@ -951,11 +966,9 @@ def test_cupy_backend_accepts_z_collapse_aliases_and_orthogonal_options():
         },
         create_cy_object=False,
     )
-    assert morph.backend_options == {
-        "execution_path": "direct_polarization",
-        "mixed_precision_mode": None,
-        "z_collapse_mode": None,
-    }
+    assert morph.backend_options == _expected_cupy_backend_options(
+        execution_path="direct_polarization",
+    )
 
 
 @pytest.mark.backend_specific
@@ -1062,11 +1075,7 @@ def test_morphology_normalizes_material_arrays_eagerly_for_selected_backend_defa
     expected_dtype = morph.backend_dtype
     expected_backend_options = {}
     if nrss_backend == "cupy-rsoxs":
-        expected_backend_options = {
-            "execution_path": "tensor_coeff",
-            "mixed_precision_mode": None,
-            "z_collapse_mode": None,
-        }
+        expected_backend_options = _expected_cupy_backend_options()
     else:
         expected_backend_options = {"dtype": expected_dtype}
     assert morph.resident_mode == get_backend_info(nrss_backend).default_resident_mode
