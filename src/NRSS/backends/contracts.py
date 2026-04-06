@@ -65,10 +65,26 @@ _BACKEND_ARRAY_CONTRACTS = {
             None,
             "mean",
         ),
+        "default_kernel_preload_stage": "off",
+        "supported_kernel_preload_stages": (
+            "off",
+            "a1",
+            "a2",
+        ),
+        "default_igor_shift_backend": "nvrtc",
+        "default_direct_polarization_backend": "nvrtc",
+        "supported_rawkernel_backends": (
+            "auto",
+            "nvcc",
+            "nvrtc",
+        ),
         "supported_backend_options": (
             "execution_path",
             "mixed_precision_mode",
             "z_collapse_mode",
+            "kernel_preload_stage",
+            "igor_shift_backend",
+            "direct_polarization_backend",
         ),
         "runtime_compute_dtype": "float32",
         "runtime_complex_dtype": "complex64",
@@ -119,6 +135,34 @@ def normalize_z_collapse_mode_name(mode: Any) -> str | None:
         "none": None,
         "off": None,
         "default": None,
+    }
+    return aliases.get(cleaned, cleaned)
+
+
+def normalize_kernel_preload_stage_name(stage: Any) -> str:
+    if stage is None:
+        return "off"
+
+    cleaned = str(stage).strip().lower()
+    aliases = {
+        "": "off",
+        "none": "off",
+        "default": "off",
+        "constructor": "a1",
+        "prepare": "a1",
+        "staging": "a2",
+    }
+    return aliases.get(cleaned, cleaned)
+
+
+def normalize_rawkernel_backend_name(backend: Any) -> str:
+    if backend is None:
+        return "nvrtc"
+
+    cleaned = str(backend).strip().lower()
+    aliases = {
+        "": "nvrtc",
+        "default": "nvrtc",
     }
     return aliases.get(cleaned, cleaned)
 
@@ -233,6 +277,41 @@ def normalize_backend_options(
             "Backend 'cupy-rsoxs' does not yet support combining z_collapse_mode "
             "with mixed_precision_mode. Disable one of those expert options."
         )
+
+    if "kernel_preload_stage" in spec["supported_backend_options"]:
+        default_kernel_preload_stage = spec.get("default_kernel_preload_stage", "off")
+        if backend_name == "cupy-rsoxs" and normalized_options.get("execution_path") == "direct_polarization":
+            default_kernel_preload_stage = "a1"
+        kernel_preload_stage = normalize_kernel_preload_stage_name(
+            options.get("kernel_preload_stage", default_kernel_preload_stage)
+        )
+        if kernel_preload_stage not in spec.get("supported_kernel_preload_stages", ("off",)):
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support kernel_preload_stage "
+                f"{kernel_preload_stage!r}. Supported stages: "
+                f"{', '.join(spec.get('supported_kernel_preload_stages', ('off',)))}."
+            )
+        normalized_options["kernel_preload_stage"] = kernel_preload_stage
+
+    for option_name in ("igor_shift_backend", "direct_polarization_backend"):
+        if option_name not in spec["supported_backend_options"]:
+            continue
+        default_backend = spec.get(f"default_{option_name}", "nvrtc")
+        if backend_name == "cupy-rsoxs":
+            execution_path = normalized_options.get("execution_path")
+            if option_name == "igor_shift_backend" and execution_path == "direct_polarization":
+                default_backend = "nvcc"
+            if option_name == "direct_polarization_backend" and execution_path == "direct_polarization":
+                default_backend = "nvrtc"
+        normalized_backend = normalize_rawkernel_backend_name(
+            options.get(option_name, default_backend)
+        )
+        if normalized_backend not in spec.get("supported_rawkernel_backends", ("nvrtc",)):
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support {option_name}={normalized_backend!r}. "
+                f"Supported values: {', '.join(spec.get('supported_rawkernel_backends', ('nvrtc',)))}."
+            )
+        normalized_options[option_name] = normalized_backend
 
     return normalized_options
 

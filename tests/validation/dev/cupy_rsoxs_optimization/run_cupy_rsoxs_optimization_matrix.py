@@ -953,6 +953,8 @@ def _run_case_once(
         morphology = _construct_morphology_for_timing_case(case, prepared_inputs)
         run_result: dict[str, Any] = {
             "resolved_backend_options": dict(morphology.backend_options),
+            "kernel_backend_report": dict(getattr(morphology, "last_kernel_backend_report", {})),
+            "kernel_preload_report": dict(getattr(morphology, "last_kernel_preload_report", {})),
         }
         if collect_timing:
             segment_seconds: dict[str, float] = {}
@@ -979,6 +981,12 @@ def _run_case_once(
                 backend_timing_details=backend_timings,
             )
         run_result["panel_shape"] = list(backend_result.to_backend_array().shape)
+        run_result["kernel_backend_report"] = dict(
+            getattr(morphology, "last_kernel_backend_report", {})
+        )
+        run_result["kernel_preload_report"] = dict(
+            getattr(morphology, "last_kernel_preload_report", {})
+        )
         return run_result
     finally:
         if morphology is not None:

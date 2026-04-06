@@ -193,6 +193,8 @@ class Morphology:
         self.construction_backend_coercion_report = []
         self.last_backend_coercion_report = []
         self.last_runtime_staging_report = []
+        self.last_kernel_backend_report = {}
+        self.last_kernel_preload_report = {}
         self.inputData = None
         self.OpticalConstants = None
         self.voxelData = None

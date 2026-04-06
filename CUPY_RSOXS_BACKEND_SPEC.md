@@ -860,7 +860,12 @@ Current prep/implementation status to preserve:
    - no backend `dtype` knob,
    - `execution_path` for `cupy-rsoxs`,
    - a named `mixed_precision_mode` for the approved reduced-precision
-     morphology plan in `cupy-rsoxs`.
+     morphology plan in `cupy-rsoxs`,
+   - `z_collapse_mode` for the accepted effective-`2D` approximation,
+   - `kernel_preload_stage` for the maintained custom-kernel preload policy,
+   - `igor_shift_backend` for the maintained Igor-shift RawKernel family,
+   - `direct_polarization_backend` for the maintained default
+     `direct_polarization` Segment `B` RawKernel family.
 4. Current contract table:
    - `cyrsoxs`: authoritative/runtime namespace `numpy`, device `cpu`, default
      dtype `float32`
@@ -870,6 +875,19 @@ Current prep/implementation status to preserve:
      morphology precision `float32`, parity-sensitive runtime compute
      `float32/complex64`, and an expert-only mixed-precision mode that requires
      authoritative `float16` inputs in the correct namespace
+5. Current path-specific custom-kernel defaults:
+   - `execution_path='tensor_coeff'`:
+     - `kernel_preload_stage='off'`
+     - `igor_shift_backend='nvrtc'`
+   - `execution_path='direct_polarization'`:
+     - `kernel_preload_stage='a1'`
+     - `igor_shift_backend='nvcc'`
+     - `direct_polarization_backend='nvrtc'`
+     - direct detector-projection kernels prefer `nvcc` when discoverable and
+       otherwise fall back to `nvrtc`
+6. These backend-family settings were chosen from the April 6, 2026 hot-lane
+   speed plus whole-worker peak-memory matrix rather than from a
+   one-backend-fits-all assumption.
 
 Implementation-phase direction:
 

@@ -1368,6 +1368,16 @@ Scope to test later:
    because generic ufunc / elementwise JIT is harder to pre-stage
    deterministically and would blur the result.
 
+Recorded follow-up priority:
+
+1. after the detector-projection `nvcc` win, explicitly examine the other
+   maintained direct-path custom kernels to see whether they also behave better
+   under `nvcc` than under `nvrtc`,
+2. rank that work below the currently accepted detector-projection `nvcc`
+   change, but above broad speculative kernel-JIT cleanup,
+3. do not assume the answer generalizes from one kernel family to another;
+   record speed and whole-worker peak-memory results per kernel family.
+
 Recommended experiment matrix for a future pass:
 
 1. baseline:
@@ -1407,6 +1417,102 @@ Decision rule if resumed:
    back too much primary-time improvement,
 3. do not assume success just because compile-time allocations are expected to
    return to the CuPy pool.
+
+### April 6 2026 preload plus per-kernel-backend follow-up
+
+The deferred preload question and the per-kernel-family `nvcc` versus `nvrtc`
+question were both resumed on April 6, 2026.
+
+Artifact root:
+
+- `test-reports/core-shell-backend-performance-dev/kernel_preload_backend_matrix_20260406/`
+
+Measured matrix:
+
+1. maintained hot authority lane:
+   - small CoreShell
+   - `resident_mode='device'`
+   - single energy
+   - `EAngleRotation=[0, 5, 165]`
+   - `--worker-warmup-runs 1`
+2. explicit preload-stage variants:
+   - `off`
+   - `A2`
+   - `A1`
+3. direct-path kernel-family backend variants:
+   - `igor_shift`: `nvrtc` or `nvcc`
+   - `direct_polarization_generic`: `nvrtc` or `nvcc`
+4. detector projection kernels were not reopened as a backend-choice question:
+   - they remained on the already accepted `nvcc`-preferred path with
+     `nvrtc` fallback
+5. separate external whole-worker peak GPU memory pass was run on the same
+   matrix
+6. a subprocess-isolated hot no-rotation companion was also captured for the
+   shortlisted winner
+
+Current direct-path ranking outcome from that matrix:
+
+1. absolute fastest hot `0:5:165` row:
+   - `A1 / igor nvcc / direct nvcc`
+   - `primary 0.27088 s`
+   - peak GPU memory about `679 MiB`
+2. accepted maintained winner:
+   - `A1 / igor nvcc / direct nvrtc`
+   - `primary 0.27103 s`
+   - peak GPU memory about `623 MiB`
+3. old direct-path baseline for comparison:
+   - `off / igor nvrtc / direct nvrtc`
+   - `primary 0.27215 s`
+   - peak GPU memory about `677 MiB`
+
+Interpretation:
+
+1. constructor-time preload is now justified for the maintained direct path
+   because it preserved hot-lane speed while lowering whole-worker peak memory
+2. `igor_shift` behaves better for the direct path under `nvcc` than under
+   `nvrtc`
+3. the default `float32` `direct_polarization_generic` kernel should stay on
+   `nvrtc`
+4. the detector-projection kernels should remain on the already accepted
+   `nvcc`-preferred path
+5. this is a path-specific mixed backend-family result rather than evidence
+   that every maintained custom kernel should move to `nvcc`
+
+Accepted implementation defaults after this pass:
+
+1. plain `backend_options={'execution_path': 'direct_polarization'}` now
+   resolves to:
+   - `kernel_preload_stage='a1'`
+   - `igor_shift_backend='nvcc'`
+   - `direct_polarization_backend='nvrtc'`
+2. if `nvcc` is unavailable, the maintained custom-kernel factories fall back
+   to `nvrtc`
+3. the direct detector-projection kernels still prefer `nvcc` when it is
+   discoverable and otherwise fall back to `nvrtc`
+
+No-rotation companion result:
+
+1. old direct-path baseline:
+   - `primary 0.01224 s`
+2. accepted winner:
+   - `primary 0.01058 s`
+
+Validation completed for the accepted winner:
+
+1. `PYTHONPATH=/homes/deand/dev/NRSS mamba run -n nrss-dev python -m pytest tests/smoke/test_smoke.py -k 'test_cupy_direct_polarization_matches_tensor_coeff_on_anisotropic_sphere or test_cupy_direct_polarization_host_and_device_residency_parity or test_cupy_tensor_coeff_host_and_device_residency_parity' -v`
+   - passed
+2. `PYTHONPATH=/homes/deand/dev/NRSS mamba run -n nrss-dev python -m pytest tests/validation/test_core_shell_reference.py -k 'test_core_shell_sim_regression_pybind' --nrss-backend cupy-rsoxs -v`
+   - passed for both `cupy_tensor_coeff` and `cupy_direct_polarization`
+
+Current disposition after this follow-up:
+
+1. accept the constructor-time preload plus mixed backend-family default for
+   `direct_polarization`
+2. close the earlier deferred preload experiment as an open default-choice
+   question for the current direct path
+3. do not generalize the result blindly to `tensor_coeff`
+4. if preload work is revisited again, the next credible reason would be a new
+   kernel family or a materially different memory authority surface
 
 ### Acceptance rule for the next pass
 

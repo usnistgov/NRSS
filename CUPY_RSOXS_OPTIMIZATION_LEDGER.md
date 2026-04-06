@@ -1708,3 +1708,47 @@ Backend-wide summary:
    - test whether a precompile step for maintained custom kernels before heavy
      `A2-D` work can lower whole-worker cold peak memory without giving back
      too much speed to synchronize / pool-release overhead
+6. additional recorded direct-path priority in the companion note:
+   - check whether other maintained direct-path custom kernels should also
+     prefer `nvcc` over `nvrtc`, and record speed plus whole-worker memory per
+     kernel family rather than assuming the detector-kernel result generalizes
+7. April 6, 2026 follow-up result from the preload plus per-kernel-backend
+   matrix:
+   - artifact root:
+     `test-reports/core-shell-backend-performance-dev/kernel_preload_backend_matrix_20260406/`
+   - measured lane:
+     - small CoreShell,
+     - `resident_mode='device'`,
+     - single energy,
+     - `EAngleRotation=[0, 5, 165]`,
+     - `--worker-warmup-runs 1`,
+     - separate external whole-worker peak GPU memory pass
+   - accepted `tensor_coeff` disposition:
+     - keep `kernel_preload_stage='off'`
+     - keep `igor_shift_backend='nvrtc'`
+     - measured best row:
+       - `primary 0.04425 s`
+       - peak GPU memory about `933 MiB`
+     - interpretation:
+       - constructor-time or `A2` preload did not help this path,
+       - `igor_shift='nvcc'` was not worth adopting for `tensor_coeff`,
+       - and one cold whole-worker tensor row with `igor_shift='nvcc'` rose as
+         high as about `1423 MiB`
+   - accepted `direct_polarization` disposition:
+     - default `kernel_preload_stage='a1'`
+     - default `igor_shift_backend='nvcc'`
+     - default `direct_polarization_backend='nvrtc'`
+     - keep the already-accepted detector-projection kernels on the
+       `nvcc`-preferred path with `nvrtc` fallback
+     - accepted versus the old direct-path baseline
+       `off / igor nvrtc / direct nvrtc`:
+       - hot `0:5:165` primary:
+         `0.27215 s -> 0.27103 s`
+       - external whole-worker peak GPU memory:
+         about `677 MiB -> 623 MiB`
+       - subprocess-isolated hot no-rotation companion:
+         `0.01224 s -> 0.01058 s`
+   - current implementation interpretation:
+     - path-aware preload is now part of the maintained direct-path strategy,
+     - but only the direct path benefits from the constructor-time preload plus
+       mixed backend-family default

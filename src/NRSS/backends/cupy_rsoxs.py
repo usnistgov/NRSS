@@ -16,6 +16,7 @@ from .registry import BackendUnavailableError
 from .runtime import BackendRuntime
 
 _CUPY_KERNEL_CACHE: dict[str, Any] = {}
+_CUPY_KERNEL_BACKEND_REPORT: dict[str, str] = {}
 _CUPY_PRIVATE_TIMING_SEGMENTS_KEY = "_private_backend_timing_segments"
 _CUPY_TIMED_SEGMENTS = ("A2", "B", "C", "D", "E", "F")
 _CUPY_SEGMENT_MEASUREMENTS = {
@@ -54,6 +55,10 @@ __device__ inline float nrss_half_bits_to_float(const unsigned short h) {
     return __uint_as_float(bits);
 }
 """
+_RAWKERNEL_BACKEND_OPTION_NAMES = {
+    "igor_shift": "igor_shift_backend",
+    "direct_polarization_generic": "direct_polarization_backend",
+}
 
 
 @dataclass(frozen=True)
@@ -238,6 +243,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
     def prepare(self, morphology) -> None:
         self._validate_supported_config(morphology)
         morphology._backend_runtime_state.setdefault("prepared", True)
+        if self._kernel_preload_stage(morphology) == "a1" and morphology.NumZYX is not None:
+            cp, _ = require_cupy_modules()
+            self._preload_active_rawkernels(morphology, cp, stage="a1")
 
     def run(
         self,
@@ -260,12 +268,18 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         self.prepare(morphology)
         recorder = self._segment_recorder(morphology, cp)
         morphology._backend_timings = {}
+        self._update_kernel_reports(morphology)
 
         energies = tuple(float(energy) for energy in morphology.Energies)
         runtime_materials = recorder.measure("A2", lambda: self._runtime_material_views(morphology, cp))
         projections = []
         window = None
         try:
+            if self._kernel_preload_stage(morphology) == "a2":
+                recorder.measure(
+                    "A2",
+                    lambda: self._preload_active_rawkernels(morphology, cp, stage="a2"),
+                )
             window = recorder.measure(
                 "C",
                 lambda: self._window_tensor(
@@ -302,6 +316,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
         morphology._backend_result = result
         morphology.scatteringPattern = result
+        self._update_kernel_reports(morphology)
         segment_seconds, segment_measurements, measurement = recorder.finalize()
         if recorder.selected_segments:
             morphology._backend_timings = {
@@ -351,6 +366,188 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             return ()
         unique_segments = tuple(dict.fromkeys(str(segment) for segment in requested))
         return tuple(segment for segment in unique_segments if segment in _CUPY_TIMED_SEGMENTS)
+
+    def _kernel_preload_stage(self, morphology) -> str:
+        return str(morphology.backend_options.get("kernel_preload_stage", "off"))
+
+    def _rawkernel_backend_option(self, morphology, family: str) -> str:
+        option_name = _RAWKERNEL_BACKEND_OPTION_NAMES.get(family)
+        if option_name is None:
+            return "nvrtc"
+        return str(morphology.backend_options.get(option_name, "nvrtc"))
+
+    def _nvcc_path(self, cp) -> str | None:
+        del cp
+        nvcc_path = os.environ.get("NVCC")
+        if nvcc_path:
+            return nvcc_path
+
+        nvcc_path = shutil.which("nvcc")
+        if nvcc_path is None and os.path.exists("/usr/local/cuda/bin/nvcc"):
+            nvcc_path = "/usr/local/cuda/bin/nvcc"
+        if nvcc_path is None:
+            return None
+        return nvcc_path
+
+    def _configure_cupy_nvcc_path(self, cp, nvcc_path: str) -> None:
+        os.environ["NVCC"] = nvcc_path
+        from cupy import _environment as cupy_environment
+
+        cupy_environment._nvcc_path = nvcc_path
+
+    def _resolve_requested_rawkernel_backend(
+        self,
+        cp,
+        *,
+        requested_backend: str,
+        prefer_auto_nvcc: bool,
+    ) -> str:
+        if requested_backend == "nvrtc":
+            return "nvrtc"
+
+        nvcc_path = self._nvcc_path(cp)
+        if requested_backend == "nvcc":
+            if nvcc_path is None:
+                return "nvrtc"
+            self._configure_cupy_nvcc_path(cp, nvcc_path)
+            return "nvcc"
+
+        if requested_backend == "auto" and prefer_auto_nvcc and nvcc_path is not None:
+            self._configure_cupy_nvcc_path(cp, nvcc_path)
+            return "nvcc"
+
+        return "nvrtc"
+
+    def _record_kernel_backend(self, family: str, backend: str) -> None:
+        _CUPY_KERNEL_BACKEND_REPORT[family] = backend
+
+    def _build_rawkernel_with_fallback(
+        self,
+        cp,
+        *,
+        family: str,
+        cache_key_base: str,
+        source: str,
+        kernel_name: str,
+        requested_backend: str,
+        prefer_auto_nvcc: bool = False,
+    ):
+        backend = self._resolve_requested_rawkernel_backend(
+            cp,
+            requested_backend=requested_backend,
+            prefer_auto_nvcc=prefer_auto_nvcc,
+        )
+        primary_cache_key = f"{cache_key_base}::{backend}"
+        kernel = _CUPY_KERNEL_CACHE.get(primary_cache_key)
+        if kernel is not None:
+            self._record_kernel_backend(family, backend)
+            return kernel
+
+        backends_to_try = (backend,)
+        if backend == "nvcc":
+            backends_to_try = ("nvcc", "nvrtc")
+
+        last_exc = None
+        for backend_name in backends_to_try:
+            cache_key = f"{cache_key_base}::{backend_name}"
+            cached = _CUPY_KERNEL_CACHE.get(cache_key)
+            if cached is not None:
+                self._record_kernel_backend(family, backend_name)
+                return cached
+            try:
+                kernel = cp.RawKernel(
+                    source,
+                    kernel_name,
+                    backend=backend_name,
+                )
+                kernel.compile()
+            except Exception as exc:  # noqa: BLE001 - fallback path is intentional
+                last_exc = exc
+                if backend_name != "nvcc":
+                    raise
+                continue
+            _CUPY_KERNEL_CACHE[cache_key] = kernel
+            self._record_kernel_backend(family, backend_name)
+            return kernel
+
+        assert last_exc is not None
+        raise last_exc
+
+    def _active_rawkernel_manifest(self, morphology) -> tuple[str, ...]:
+        families = ["igor_shift"]
+        if self._execution_path(morphology) == "direct_polarization":
+            families.append("direct_polarization_generic")
+            shape_override = self._segment_c_shape_override(morphology)
+            z_count = self._shape_tuple(morphology, shape_override=shape_override)[0]
+            families.append(
+                "direct_detector_projection_single_slice"
+                if int(z_count) == 1
+                else "direct_detector_projection_interpolated"
+            )
+        return tuple(families)
+
+    def _kernel_preload_signature(self, morphology) -> tuple[Any, ...]:
+        families = self._active_rawkernel_manifest(morphology)
+        family_backends = tuple(
+            (
+                family,
+                (
+                    "nvcc_preferred"
+                    if family.startswith("direct_detector_projection")
+                    else self._rawkernel_backend_option(morphology, family)
+                ),
+            )
+            for family in families
+        )
+        return (
+            self._kernel_preload_stage(morphology),
+            self._execution_path(morphology),
+            tuple(int(v) for v in self._shape_tuple(morphology, self._segment_c_shape_override(morphology))),
+            family_backends,
+        )
+
+    def _update_kernel_reports(self, morphology, *, preload_stage: str | None = None) -> None:
+        families = self._active_rawkernel_manifest(morphology)
+        last_stage = (
+            preload_stage
+            if preload_stage is not None
+            else morphology._backend_runtime_state.get("_kernel_last_preload_stage")
+        )
+        morphology.last_kernel_backend_report = {
+            family: _CUPY_KERNEL_BACKEND_REPORT.get(
+                "direct_detector_projection" if family.startswith("direct_detector_projection") else family,
+                "not_loaded",
+            )
+            for family in families
+        }
+        morphology.last_kernel_preload_report = {
+            "configured_stage": self._kernel_preload_stage(morphology),
+            "last_preload_stage": last_stage,
+            "families": list(families),
+            "kernel_backends": dict(morphology.last_kernel_backend_report),
+        }
+
+    def _preload_active_rawkernels(self, morphology, cp, *, stage: str) -> None:
+        signature = self._kernel_preload_signature(morphology)
+        state_key = "_kernel_preload_signature"
+        if morphology._backend_runtime_state.get(state_key) == signature:
+            self._update_kernel_reports(morphology, preload_stage=stage)
+            return
+
+        runtime_dtype = str(morphology._runtime_compute_contract.get("runtime_dtype", "float32"))
+        for family in self._active_rawkernel_manifest(morphology):
+            if family == "igor_shift":
+                self._igor_shift_kernel(morphology, cp)
+            elif family == "direct_polarization_generic":
+                self._direct_polarization_kernel(morphology, cp, runtime_dtype)
+            elif family == "direct_detector_projection_single_slice":
+                self._direct_detector_projection_single_slice_kernel(cp)
+            elif family == "direct_detector_projection_interpolated":
+                self._direct_detector_projection_interpolated_kernel(cp)
+
+        morphology._backend_runtime_state[state_key] = signature
+        morphology._backend_runtime_state["_kernel_last_preload_stage"] = stage
+        self._update_kernel_reports(morphology, preload_stage=stage)
 
     def _validate_supported_config(self, morphology) -> None:
         if morphology.MorphologyType != 0:
@@ -485,6 +682,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             "C",
             lambda: self._compute_fft_nt_components(
                 nt=nt,
+                morphology=morphology,
                 cp=cp,
                 window=window,
                 component_indices=angle_family_plan.required_nt_components,
@@ -1062,7 +1260,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         _CUPY_KERNEL_CACHE["nt_accumulate_anisotropic_half_input"] = kernel
         return kernel
 
-    def _compute_fft_nt_components(self, nt, cp, window, component_indices=None):
+    def _compute_fft_nt_components(self, nt, morphology, cp, window, component_indices=None):
         component_indices = tuple(range(nt.shape[0])) if component_indices is None else tuple(component_indices)
         for idx in component_indices:
             component = nt[idx]
@@ -1070,7 +1268,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 cp.multiply(component, window, out=component)
             fft_component = cp.fft.fftn(component)
             self._replace_dc_component(fft_component)
-            self._igor_shift(fft_component, cp, out=nt[idx])
+            self._igor_shift(fft_component, morphology, cp, out=nt[idx])
             del component, fft_component
         return nt
 
@@ -1364,6 +1562,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             fft_x, fft_y, fft_z = recorder.measure(
                 "C",
                 lambda p_x=p_x, p_y=p_y, p_z=p_z: self._fft_polarization_fields(
+                    morphology=morphology,
                     cp=cp,
                     p_x=p_x,
                     p_y=p_y,
@@ -1430,7 +1629,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         p_z = cp.zeros(shape, dtype=cp.complex64)
         mx = angle_plan.mx
         my = angle_plan.my
-        kernel = self._direct_polarization_kernel(cp, runtime_materials[0].Vfrac.dtype)
+        kernel = self._direct_polarization_kernel(morphology, cp, runtime_materials[0].Vfrac.dtype)
         if isotropic_base_field is not None:
             cp.multiply(isotropic_base_field, np.float32(mx), out=p_x)
             cp.multiply(isotropic_base_field, np.float32(my), out=p_y)
@@ -1581,24 +1780,23 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         p_z *= self._one_by_four_pi
         return p_x, p_y, p_z
 
-    def _direct_polarization_kernel(self, cp, morphology_dtype):
+    def _direct_polarization_kernel(self, morphology, cp, morphology_dtype):
         dtype_name = cp.dtype(morphology_dtype).name
         if dtype_name == "float16":
             return self._direct_generic_kernel_float16(cp)
         if dtype_name == "float32":
-            return self._direct_generic_kernel_float32(cp)
+            return self._direct_generic_kernel_float32(morphology, cp)
         raise TypeError(
             "cupy-rsoxs direct_polarization received unsupported runtime morphology "
             f"dtype {dtype_name!r}."
         )
 
-    def _direct_generic_kernel_float32(self, cp):
-        kernel = _CUPY_KERNEL_CACHE.get("direct_polarization_generic_complex64")
-        if kernel is not None:
-            return kernel
-
-        kernel = cp.RawKernel(
-            r"""
+    def _direct_generic_kernel_float32(self, morphology, cp):
+        return self._build_rawkernel_with_fallback(
+            cp,
+            family="direct_polarization_generic",
+            cache_key_base="direct_polarization_generic_complex64",
+            source=r"""
             extern "C" __global__
             void direct_polarization_generic_complex64(
                 const float* vfrac,
@@ -1638,10 +1836,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 p_z[idx].y += phi * (anisotropic_delta.y * sz * field_projection);
             }
             """,
-            "direct_polarization_generic_complex64",
+            kernel_name="direct_polarization_generic_complex64",
+            requested_backend=self._rawkernel_backend_option(morphology, "direct_polarization_generic"),
         )
-        _CUPY_KERNEL_CACHE["direct_polarization_generic_complex64"] = kernel
-        return kernel
 
     def _direct_generic_kernel_float16(self, cp):
         kernel = _CUPY_KERNEL_CACHE.get("direct_polarization_generic_complex64_half_input")
@@ -1807,6 +2004,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         shape_override=None,
     ):
         fft_x, fft_y, fft_z = self._fft_polarization_fields(
+            morphology=morphology,
             cp=cp,
             p_x=p_x,
             p_y=p_y,
@@ -1825,7 +2023,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         del fft_x, fft_y, fft_z
         return projection
 
-    def _fft_polarization_fields(self, cp, p_x, p_y, p_z, window):
+    def _fft_polarization_fields(self, morphology, cp, p_x, p_y, p_z, window):
         if window is not None:
             cp.multiply(p_x, window, out=p_x)
             cp.multiply(p_y, window, out=p_y)
@@ -1837,9 +2035,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         self._replace_dc_component(fft_x)
         self._replace_dc_component(fft_y)
         self._replace_dc_component(fft_z)
-        fft_x = self._igor_shift(fft_x, cp)
-        fft_y = self._igor_shift(fft_y, cp)
-        fft_z = self._igor_shift(fft_z, cp)
+        fft_x = self._igor_shift(fft_x, morphology, cp)
+        fft_y = self._igor_shift(fft_y, morphology, cp)
+        fft_z = self._igor_shift(fft_z, morphology, cp)
         return fft_x, fft_y, fft_z
 
     def _accumulate_rotated_projection(
@@ -1988,11 +2186,12 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             neighbors.extend([arr[1, 0, 0], arr[z - 1, 0, 0]])
         arr[0, 0, 0] = sum(neighbors) / np.float32(len(neighbors))
 
-    def _igor_shift_kernel(self, cp):
-        kernel = _CUPY_KERNEL_CACHE.get("igor_shift_complex64")
-        if kernel is None:
-            kernel = cp.RawKernel(
-                r"""
+    def _igor_shift_kernel(self, morphology, cp):
+        return self._build_rawkernel_with_fallback(
+            cp,
+            family="igor_shift",
+            cache_key_base="igor_shift_complex64",
+            source=r"""
                 extern "C" __global__
                 void igor_shift_complex64(
                     const float2* input,
@@ -2028,10 +2227,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     output[idx] = input[input_idx];
                 }
                 """,
-                "igor_shift_complex64",
-            )
-            _CUPY_KERNEL_CACHE["igor_shift_complex64"] = kernel
-        return kernel
+            kernel_name="igor_shift_complex64",
+            requested_backend=self._rawkernel_backend_option(morphology, "igor_shift"),
+        )
 
     def _igor_axis_orders(self, shape, cp):
         cache = getattr(self, "_igor_order_cache", None)
@@ -2054,14 +2252,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         right = cp.arange(n - 1, mid, -1, dtype=cp.int32)
         return cp.concatenate((left, right))
 
-    def _igor_shift(self, arr, cp, out=None):
+    def _igor_shift(self, arr, morphology, cp, out=None):
         if out is None:
             out = cp.empty_like(arr)
         z_order, y_order, x_order = self._igor_axis_orders(arr.shape, cp)
         total = int(arr.size)
         threads = 256
         blocks = (total + threads - 1) // threads
-        self._igor_shift_kernel(cp)(
+        self._igor_shift_kernel(morphology, cp)(
             (blocks,),
             (threads,),
             (
@@ -2081,35 +2279,20 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
     def _direct_projection_rawkernel_backend(self):
         # For the direct detector kernels, nvcc avoids the large cold peak we
         # saw from the nvrtc compile/load path on the maintained issue lane.
-        nvcc_path = os.environ.get("NVCC")
-        if nvcc_path:
-            from cupy import _environment as cupy_environment
+        import cupy as cp
 
-            cupy_environment._nvcc_path = nvcc_path
-            return "nvcc"
-
-        nvcc_path = shutil.which("nvcc")
-        if nvcc_path is None and os.path.exists("/usr/local/cuda/bin/nvcc"):
-            nvcc_path = "/usr/local/cuda/bin/nvcc"
-        if nvcc_path is None:
-            return "nvrtc"
-
-        os.environ["NVCC"] = nvcc_path
-        from cupy import _environment as cupy_environment
-
-        cupy_environment._nvcc_path = nvcc_path
-        return "nvcc"
+        return self._resolve_requested_rawkernel_backend(
+            cp,
+            requested_backend="auto",
+            prefer_auto_nvcc=True,
+        )
 
     def _direct_detector_projection_single_slice_kernel(self, cp):
-        backend = self._direct_projection_rawkernel_backend()
-        kernel = _CUPY_KERNEL_CACHE.get(
-            f"direct_detector_projection_single_slice_float32::{backend}"
-        )
-        if kernel is not None:
-            return kernel
-
-        kernel = cp.RawKernel(
-            r"""
+        return self._build_rawkernel_with_fallback(
+            cp,
+            family="direct_detector_projection",
+            cache_key_base="direct_detector_projection_single_slice_float32",
+            source=r"""
             __device__ inline float nrss_direct_projection_intensity(
                 const float a,
                 const float b,
@@ -2176,22 +2359,17 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 );
             }
             """,
-            "direct_detector_projection_single_slice_float32",
-            backend=backend,
+            kernel_name="direct_detector_projection_single_slice_float32",
+            requested_backend="auto",
+            prefer_auto_nvcc=True,
         )
-        _CUPY_KERNEL_CACHE[f"direct_detector_projection_single_slice_float32::{backend}"] = kernel
-        return kernel
 
     def _direct_detector_projection_interpolated_kernel(self, cp):
-        backend = self._direct_projection_rawkernel_backend()
-        kernel = _CUPY_KERNEL_CACHE.get(
-            f"direct_detector_projection_interpolated_float32::{backend}"
-        )
-        if kernel is not None:
-            return kernel
-
-        kernel = cp.RawKernel(
-            r"""
+        return self._build_rawkernel_with_fallback(
+            cp,
+            family="direct_detector_projection",
+            cache_key_base="direct_detector_projection_interpolated_float32",
+            source=r"""
             __device__ inline float nrss_direct_projection_intensity_interp(
                 const float a,
                 const float b,
@@ -2286,11 +2464,10 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 output[idx] = keep_i * proj0 + frac_i * proj1;
             }
             """,
-            "direct_detector_projection_interpolated_float32",
-            backend=backend,
+            kernel_name="direct_detector_projection_interpolated_float32",
+            requested_backend="auto",
+            prefer_auto_nvcc=True,
         )
-        _CUPY_KERNEL_CACHE[f"direct_detector_projection_interpolated_float32::{backend}"] = kernel
-        return kernel
 
     def _compute_scatter3d(self, morphology, energy, cp, p_x, p_y, p_z, shape_override=None):
         detector_geometry = self._detector_geometry(
