@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import gc
 import math
+import os
+import shutil
 import time
 from typing import Any
 
@@ -527,6 +529,16 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
     ):
         angle_family_plan = self._angle_family_plan(morphology)
         shape_override = self._segment_c_shape_override(morphology)
+        isotropic_base_field = None
+        if (
+            self._z_collapse_mode(morphology) != "mean"
+            and cp.dtype(runtime_materials[0].Vfrac.dtype).name != "float16"
+        ):
+            isotropic_base_field = self._compute_direct_isotropic_base_field(
+                runtime_materials,
+                energy,
+                cp,
+            )
         return self._project_from_direct_polarization(
             morphology=morphology,
             runtime_materials=runtime_materials,
@@ -535,6 +547,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             ndimage=ndimage,
             window=window,
             angle_family_plan=angle_family_plan,
+            isotropic_base_field=isotropic_base_field,
             shape_override=shape_override,
             recorder=recorder,
         )
@@ -703,6 +716,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         sz = cp.cos(material.theta, dtype=cp.float32)
         del sin_theta
         return sx, sy, sz
+
+    def _compute_direct_isotropic_base_field(self, runtime_materials, energy, cp):
+        shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
+        isotropic_base = cp.zeros(shape, dtype=cp.complex64)
+        for material in runtime_materials:
+            isotropic_diag, _, _ = self._material_optical_scalars(material, energy)
+            isotropic_base += material.Vfrac * isotropic_diag
+        return isotropic_base
 
     def _compute_nt_components(self, runtime_materials, energy, cp, required_components=None):
         if cp.dtype(runtime_materials[0].Vfrac.dtype).name == "float16":
@@ -1316,6 +1337,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         ndimage,
         window,
         angle_family_plan,
+        isotropic_base_field=None,
         shape_override=None,
         recorder=None,
     ):
@@ -1330,11 +1352,12 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         ):
             p_x, p_y, p_z = recorder.measure(
                 "B",
-                lambda angle_plan=angle_plan: self._compute_direct_polarization(
+                lambda angle_plan=angle_plan, isotropic_base_field=isotropic_base_field: self._compute_direct_polarization(
                     morphology=morphology,
                     runtime_materials=runtime_materials,
                     energy=energy,
                     angle_plan=angle_plan,
+                    isotropic_base_field=isotropic_base_field,
                     cp=cp,
                 ),
             )
@@ -1378,7 +1401,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             del fft_x, fft_y, fft_z, projection
         return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
 
-    def _compute_direct_polarization(self, morphology, runtime_materials, energy, angle_plan, cp):
+    def _compute_direct_polarization(
+        self,
+        morphology,
+        runtime_materials,
+        energy,
+        angle_plan,
+        cp,
+        isotropic_base_field=None,
+    ):
         if self._z_collapse_mode(morphology) == "mean":
             return self._compute_direct_polarization_collapsed_mean(
                 runtime_materials,
@@ -1393,7 +1424,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 angle_plan,
                 cp,
             )
-
         shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
         p_x = cp.zeros(shape, dtype=cp.complex64)
         p_y = cp.zeros(shape, dtype=cp.complex64)
@@ -1401,6 +1431,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         mx = angle_plan.mx
         my = angle_plan.my
         kernel = self._direct_polarization_kernel(cp, runtime_materials[0].Vfrac.dtype)
+        if isotropic_base_field is not None:
+            cp.multiply(isotropic_base_field, np.float32(mx), out=p_x)
+            cp.multiply(isotropic_base_field, np.float32(my), out=p_y)
 
         for material in runtime_materials:
             isotropic_diag, aligned_base, anisotropic_delta = self._material_optical_scalars(
@@ -1408,11 +1441,13 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 energy,
             )
             vfrac = material.Vfrac
-            isotropic_term = vfrac * isotropic_diag
-            p_x += isotropic_term * mx
-            p_y += isotropic_term * my
+            if isotropic_base_field is None:
+                isotropic_term = vfrac * isotropic_diag
+                p_x += isotropic_term * mx
+                p_y += isotropic_term * my
             if material.is_full_isotropic:
-                del isotropic_term
+                if isotropic_base_field is None:
+                    del isotropic_term
                 continue
 
             kernel(
@@ -1433,7 +1468,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     np.uint64(vfrac.size),
                 ),
             )
-            del isotropic_term
+            if isotropic_base_field is None:
+                del isotropic_term
 
         p_x *= self._one_by_four_pi
         p_y *= self._one_by_four_pi
@@ -1852,23 +1888,97 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         fft_z,
         shape_override=None,
     ):
-        scatter3d = self._compute_scatter3d(
+        return self._project_fft_polarization_direct_kernel(
             morphology=morphology,
             energy=energy,
             cp=cp,
-            p_x=fft_x,
-            p_y=fft_y,
-            p_z=fft_z,
+            fft_x=fft_x,
+            fft_y=fft_y,
+            fft_z=fft_z,
             shape_override=shape_override,
         )
-        projection = self._project_scatter3d(
-            morphology,
-            energy,
-            cp,
-            scatter3d,
+
+    def _project_fft_polarization_direct_kernel(
+        self,
+        morphology,
+        energy,
+        cp,
+        fft_x,
+        fft_y,
+        fft_z,
+        shape_override=None,
+    ):
+        detector_geometry = self._detector_geometry(
+            morphology=morphology,
+            cp=cp,
             shape_override=shape_override,
         )
-        del scatter3d
+        projection_geometry = self._detector_projection_geometry(
+            morphology=morphology,
+            energy=energy,
+            cp=cp,
+            detector_geometry=detector_geometry,
+            shape_override=shape_override,
+        )
+
+        projection = cp.empty(
+            (detector_geometry.y_count, detector_geometry.x_count),
+            dtype=cp.float32,
+        )
+        total = int(detector_geometry.y_count * detector_geometry.x_count)
+        threads = 256
+        blocks = (total + threads - 1) // threads
+        k = np.float32(2.0 * math.pi / (1239.84197 / float(energy)))
+        d = np.float32(k * k)
+        nan_value = np.float32(np.nan)
+
+        if detector_geometry.z_count == 1:
+            self._direct_detector_projection_single_slice_kernel(cp)(
+                (blocks,),
+                (threads,),
+                (
+                    projection_geometry.valid,
+                    detector_geometry.qx,
+                    detector_geometry.qy,
+                    detector_geometry.qz,
+                    np.float32(k),
+                    d,
+                    fft_x,
+                    fft_y,
+                    fft_z,
+                    projection,
+                    np.int32(detector_geometry.y_count),
+                    np.int32(detector_geometry.x_count),
+                    nan_value,
+                    np.uint64(total),
+                ),
+            )
+            return projection
+
+        self._direct_detector_projection_interpolated_kernel(cp)(
+            (blocks,),
+            (threads,),
+            (
+                projection_geometry.valid,
+                projection_geometry.safe_z0,
+                projection_geometry.safe_z1,
+                projection_geometry.frac,
+                detector_geometry.qx,
+                detector_geometry.qy,
+                detector_geometry.qz,
+                np.float32(k),
+                d,
+                fft_x,
+                fft_y,
+                fft_z,
+                projection,
+                np.int32(detector_geometry.z_count),
+                np.int32(detector_geometry.y_count),
+                np.int32(detector_geometry.x_count),
+                nan_value,
+                np.uint64(total),
+            ),
+        )
         return projection
 
     def _replace_dc_component(self, arr):
@@ -1967,6 +2077,220 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             ),
         )
         return out
+
+    def _direct_projection_rawkernel_backend(self):
+        # For the direct detector kernels, nvcc avoids the large cold peak we
+        # saw from the nvrtc compile/load path on the maintained issue lane.
+        nvcc_path = os.environ.get("NVCC")
+        if nvcc_path:
+            from cupy import _environment as cupy_environment
+
+            cupy_environment._nvcc_path = nvcc_path
+            return "nvcc"
+
+        nvcc_path = shutil.which("nvcc")
+        if nvcc_path is None and os.path.exists("/usr/local/cuda/bin/nvcc"):
+            nvcc_path = "/usr/local/cuda/bin/nvcc"
+        if nvcc_path is None:
+            return "nvrtc"
+
+        os.environ["NVCC"] = nvcc_path
+        from cupy import _environment as cupy_environment
+
+        cupy_environment._nvcc_path = nvcc_path
+        return "nvcc"
+
+    def _direct_detector_projection_single_slice_kernel(self, cp):
+        backend = self._direct_projection_rawkernel_backend()
+        kernel = _CUPY_KERNEL_CACHE.get(
+            f"direct_detector_projection_single_slice_float32::{backend}"
+        )
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            r"""
+            __device__ inline float nrss_direct_projection_intensity(
+                const float a,
+                const float b,
+                const float c,
+                const float d,
+                const float2 p1,
+                const float2 p2,
+                const float2 p3
+            ) {
+                const float term1r = (-a * a + d) * p1.x - a * (b * p2.x + c * p3.x);
+                const float term1i = (-a * a + d) * p1.y - a * (b * p2.y + c * p3.y);
+                const float term2r = -(a * b) * p1.x + (-b * b + d) * p2.x - b * c * p3.x;
+                const float term2i = -(a * b) * p1.y + (-b * b + d) * p2.y - b * c * p3.y;
+                const float term3r = -(a * c) * p1.x - b * c * p2.x + (-c * c + d) * p3.x;
+                const float term3i = -(a * c) * p1.y - b * c * p2.y + (-c * c + d) * p3.y;
+                return
+                    term1r * term1r + term1i * term1i
+                    + term2r * term2r + term2i * term2i
+                    + term3r * term3r + term3i * term3i;
+            }
+
+            extern "C" __global__
+            void direct_detector_projection_single_slice_float32(
+                const bool* valid,
+                const float* qx,
+                const float* qy,
+                const float* qz,
+                const float k,
+                const float d,
+                const float2* fft_x,
+                const float2* fft_y,
+                const float2* fft_z,
+                float* output,
+                const int ydim,
+                const int xdim,
+                const float nan_value,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+                if (!valid[idx]) {
+                    output[idx] = nan_value;
+                    return;
+                }
+
+                const int x = (int)(idx % (unsigned long long)xdim);
+                const int y = (int)(idx / (unsigned long long)xdim);
+                const float a = qx[x];
+                const float b = qy[y];
+                const float c = k + qz[0];
+
+                output[idx] = nrss_direct_projection_intensity(
+                    a,
+                    b,
+                    c,
+                    d,
+                    fft_x[idx],
+                    fft_y[idx],
+                    fft_z[idx]
+                );
+            }
+            """,
+            "direct_detector_projection_single_slice_float32",
+            backend=backend,
+        )
+        _CUPY_KERNEL_CACHE[f"direct_detector_projection_single_slice_float32::{backend}"] = kernel
+        return kernel
+
+    def _direct_detector_projection_interpolated_kernel(self, cp):
+        backend = self._direct_projection_rawkernel_backend()
+        kernel = _CUPY_KERNEL_CACHE.get(
+            f"direct_detector_projection_interpolated_float32::{backend}"
+        )
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            r"""
+            __device__ inline float nrss_direct_projection_intensity_interp(
+                const float a,
+                const float b,
+                const float c,
+                const float d,
+                const float2 p1,
+                const float2 p2,
+                const float2 p3
+            ) {
+                const float term1r = (-a * a + d) * p1.x - a * (b * p2.x + c * p3.x);
+                const float term1i = (-a * a + d) * p1.y - a * (b * p2.y + c * p3.y);
+                const float term2r = -(a * b) * p1.x + (-b * b + d) * p2.x - b * c * p3.x;
+                const float term2i = -(a * b) * p1.y + (-b * b + d) * p2.y - b * c * p3.y;
+                const float term3r = -(a * c) * p1.x - b * c * p2.x + (-c * c + d) * p3.x;
+                const float term3i = -(a * c) * p1.y - b * c * p2.y + (-c * c + d) * p3.y;
+                return
+                    term1r * term1r + term1i * term1i
+                    + term2r * term2r + term2i * term2i
+                    + term3r * term3r + term3i * term3i;
+            }
+
+            extern "C" __global__
+            void direct_detector_projection_interpolated_float32(
+                const bool* valid,
+                const int* z0,
+                const int* z1,
+                const float* frac,
+                const float* qx,
+                const float* qy,
+                const float* qz,
+                const float k,
+                const float d,
+                const float2* fft_x,
+                const float2* fft_y,
+                const float2* fft_z,
+                float* output,
+                const int zdim,
+                const int ydim,
+                const int xdim,
+                const float nan_value,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+                if (!valid[idx]) {
+                    output[idx] = nan_value;
+                    return;
+                }
+
+                const int x = (int)(idx % (unsigned long long)xdim);
+                const int y = (int)(idx / (unsigned long long)xdim);
+                const int z0_i = z0[idx];
+                const int z1_i = z1[idx];
+                const float frac_i = frac[idx];
+                const float keep_i = 1.0f - frac_i;
+                const float a = qx[x];
+                const float b = qy[y];
+                const float c0 = k + qz[z0_i];
+                const float c1 = k + qz[z1_i];
+
+                const unsigned long long base0 =
+                    ((unsigned long long)z0_i * (unsigned long long)ydim
+                     + (unsigned long long)y) * (unsigned long long)xdim
+                    + (unsigned long long)x;
+                const unsigned long long base1 =
+                    ((unsigned long long)z1_i * (unsigned long long)ydim
+                     + (unsigned long long)y) * (unsigned long long)xdim
+                    + (unsigned long long)x;
+
+                const float proj0 = nrss_direct_projection_intensity_interp(
+                    a,
+                    b,
+                    c0,
+                    d,
+                    fft_x[base0],
+                    fft_y[base0],
+                    fft_z[base0]
+                );
+                const float proj1 = nrss_direct_projection_intensity_interp(
+                    a,
+                    b,
+                    c1,
+                    d,
+                    fft_x[base1],
+                    fft_y[base1],
+                    fft_z[base1]
+                );
+                output[idx] = keep_i * proj0 + frac_i * proj1;
+            }
+            """,
+            "direct_detector_projection_interpolated_float32",
+            backend=backend,
+        )
+        _CUPY_KERNEL_CACHE[f"direct_detector_projection_interpolated_float32::{backend}"] = kernel
+        return kernel
 
     def _compute_scatter3d(self, morphology, energy, cp, p_x, p_y, p_z, shape_override=None):
         detector_geometry = self._detector_geometry(

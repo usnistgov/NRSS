@@ -33,15 +33,18 @@ recover:
       March 24 campaign,
      - and the current ranked direct-path speed priorities.
 4. Latest backend-wide direct-path cross-reference:
-   - April 3, 2026 accepted a fused custom-kernel Segment `B` rewrite for
+   - April 6, 2026 accepted the current direct-path follow-up state for
      `execution_path='direct_polarization'`
    - accepted lane:
-     - small host-prewarmed `EAngleRotation=[0, 5, 165]`
+     - small device-hot `EAngleRotation=[0, 5, 165]`
    - accepted evidence lives in:
      - `CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md`
    - interpretation:
-     - this materially improves the maintained multi-angle direct-path timing
-       surface while preserving the low-memory identity of that path,
+     - the maintained direct path now retains both the per-energy isotropic
+       base-field cache and the fused detector-plane direct projection path,
+     - on the maintained `nrss-dev` environment, the detector-projection
+       kernels can use `nvcc` and keep the worker-lifetime peak near or below
+       the accepted opportunity-`3` baseline,
      - but it does not replace `tensor_coeff` as the maintained default
        execution path
 
@@ -1665,3 +1668,43 @@ Precision and option-surface notes for this campaign:
      include the collapsed `tensor_coeff` lane,
    - treat the legacy full-energy backend-comparison harness as optional
      historical context rather than a required step in the default loop.
+
+## April 4-6 2026 direct-path follow-up
+
+Path-specific details and artifacts live in
+`CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md`.
+
+Backend-wide summary:
+
+1. accepted:
+   - direct-path fresh opportunity `3`
+   - cache one angle-independent isotropic base field per energy and reuse it
+     across the direct-path angle loop
+   - measured on the small device-hot `0:5:165` lane:
+     - `primary 0.6530 s -> 0.6203 s`
+     - peak GPU memory about `945 MiB -> 879 MiB`
+2. rejected historical implementation:
+   - direct-path fresh opportunity `5`
+   - first detector-grid-helper-style projection attempt from
+     `(fft_x, fft_y, fft_z)` on the detector plane
+   - although it produced a very large `D` and primary-time win on the same
+     `0:5:165` lane, peak GPU memory rose to about `1071 MiB`, which exceeded
+     the current `+5%` acceptance ceiling
+3. accepted final implementation:
+   - direct-path fresh opportunity `5`
+   - fused direct detector projection from `(fft_x, fft_y, fft_z)` with
+     detector RawKernels that prefer `nvcc` when `nvcc` is discoverable and
+     otherwise fall back to `nvrtc`
+   - measured on the small device-hot `0:5:165` lane versus accepted
+     opportunity `3`:
+     - `primary 0.6203 s -> 0.2686 s`
+     - `D 0.3517 s -> 0.00145 s`
+   - external whole-worker memory probe on the first `nvcc`-backed run:
+     - about `871 MiB -> 868 MiB`
+4. current maintained direct-path state after this pass:
+   - retain opportunity `3`
+   - retain opportunity `5`
+5. deferred direct-path follow-up already recorded in the companion note:
+   - test whether a precompile step for maintained custom kernels before heavy
+     `A2-D` work can lower whole-worker cold peak memory without giving back
+     too much speed to synchronize / pool-release overhead

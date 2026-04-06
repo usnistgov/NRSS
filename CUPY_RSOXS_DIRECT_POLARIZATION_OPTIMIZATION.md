@@ -928,7 +928,12 @@ Use the following sequence for the next retry campaign.
 #### Phase 2. Capture fresh baselines
 
 After the runtime is repaired, capture fresh `direct_polarization` baselines on
-the maintained small host-prewarmed lanes with all timing segments enabled.
+both:
+
+1. the maintained small host-prewarmed lanes, for continuity with the earlier
+   path note,
+2. and the maintained small device-hot lane, which is now the acceptance
+   authority for new direct-path code paths.
 
 Required baseline command:
 
@@ -962,6 +967,45 @@ CUDA_VISIBLE_DEVICES=0 /home/deand/mambaforge/envs/nrss-dev/bin/python \
   --rotation-specs '0:5:165' \
   --timing-segments all
 ```
+
+Required device-hot acceptance baseline:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 /home/deand/mambaforge/envs/nrss-dev/bin/python \
+  tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
+  --label dp_device_hot_acceptance_baseline \
+  --size-labels small \
+  --resident-modes device \
+  --execution-paths direct_polarization \
+  --rotation-specs '0:5:165' \
+  --timing-segments all \
+  --worker-warmup-runs 1
+```
+
+Recommended no-rotation device-hot companion:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 /home/deand/mambaforge/envs/nrss-dev/bin/python \
+  tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py \
+  --label dp_device_hot_acceptance_baseline_no_rotation \
+  --size-labels small \
+  --resident-modes device \
+  --execution-paths direct_polarization \
+  --rotation-specs '0:0:0' \
+  --timing-segments all \
+  --worker-warmup-runs 1
+```
+
+Required memory baseline methodology:
+
+1. record peak memory on the same small device-hot `0:5:165` surface in a
+   separate pass using the external GPU-polling method already implemented in
+   `tests/validation/dev/core_shell_backend_performance/run_comprehensive_backend_comparison.py`
+2. use the `device hot` direct-path row from that report as the acceptance
+   memory baseline for any candidate direct-path code change
+3. compare candidate peak GPU memory against the current maintained
+   `direct_polarization` device-hot row, not against legacy `cyrsoxs` and not
+   against `tensor_coeff`
 
 #### Phase 3. Add missing parity coverage before accepting wins
 
@@ -1007,29 +1051,400 @@ Defer unless the above disappoint:
 2. item `3`
 3. item `4`
 
+## Fresh Optimization Opportunities From The April 4 Code Comparison
+
+This section supersedes the older retry ranking above when resuming from a new
+context.
+
+The list below was derived from a direct comparison of:
+
+1. the maintained NRSS `direct_polarization` path in
+   `src/NRSS/backends/cupy_rsoxs.py`,
+2. the maintained NRSS `tensor_coeff` path in the same file,
+3. and the legacy CyRSoXS C++ / CUDA direct and low-memory tensor routes in
+   `src/cudaMain.cu` and `include/uniaxial.h`.
+
+The implementation references below are the specific code anchors that
+motivated each opportunity.
+
+### 1. Complete the remaining float32 Segment `B` fusion
+
+- current NRSS state:
+  - the accepted generic fused direct-path kernel only fuses the anisotropic
+    contribution for the float32 path
+  - the float32 path still materializes `isotropic_term = vfrac *
+    isotropic_diag` and still updates `p_x` / `p_y` from the outer Python
+    material loop
+  - current anchors:
+    - `src/NRSS/backends/cupy_rsoxs.py::_compute_direct_polarization(...)`
+    - `src/NRSS/backends/cupy_rsoxs.py::_direct_generic_kernel_float32(...)`
+- inspiration:
+  - the existing half-input direct kernels already split isotropic and
+    anisotropic work into dedicated kernels:
+    - `src/NRSS/backends/cupy_rsoxs.py::_direct_isotropic_kernel_float16(...)`
+    - `src/NRSS/backends/cupy_rsoxs.py::_direct_anisotropic_kernel_float16(...)`
+- resume guidance:
+  - add float32 isotropic-only and float32 isotropic-plus-anisotropic kernels
+  - the first target is to eliminate the float32 `isotropic_term` full-volume
+    temporary without changing the current low-memory default character
+  - this is the lowest-risk remaining Segment `B` cleanup because it requires
+    no persistent cache
+
+### 2. Fuse across materials per voxel in the direct path, CyRSoXS-style
+
+- current NRSS state:
+  - `_compute_direct_polarization(...)` loops over materials from Python and
+    repeatedly updates the same full-volume `p_x`, `p_y`, and `p_z` arrays
+- inspiration from CyRSoXS:
+  - `include/uniaxial.h::computePolarizationEulerAngles(...)` loops over
+    `NUM_MATERIAL` inside the device computation for one voxel
+  - the kernel accumulates in registers and writes one final polarization
+    vector per voxel
+  - execution path entry:
+    - `src/cudaMain.cu::computePolarization(...)`
+- resume guidance:
+  - prototype a direct-path kernel that owns the material loop internally
+  - stage per-energy optical constants into compact device arrays and have one
+    voxel thread accumulate all material contributions before one write-back
+  - this is the closest structural emulation of the default CyRSoXS direct
+    path and is the most important missing compute strategy not yet mirrored in
+    NRSS
+  - acceptance should treat this as a direct-path low-memory candidate unless
+    it requires explicit cached intermediates
+
+### 3. Add a per-energy isotropic base-field cache
+
+- current NRSS state:
+  - isotropic work is recomputed inside every angle loop even though the only
+    angle dependence is the final multiplication by `mx` / `my`
+  - current anchor:
+    - `src/NRSS/backends/cupy_rsoxs.py::_compute_direct_polarization(...)`
+- inspiration:
+  - `tensor_coeff` already invests in building angle-independent fields once
+    per energy before the angle-family projection and rotation steps:
+    - `src/NRSS/backends/cupy_rsoxs.py::_run_single_energy_tensor_coeff(...)`
+    - `src/NRSS/backends/cupy_rsoxs.py::_compute_nt_components(...)`
+- resume guidance:
+  - cache one angle-independent complex64 isotropic field per energy:
+    - `p_iso(r) = sum_m Vfrac_m(r) * isotropic_diag_m(E)`
+  - then each direct-path angle can apply:
+    - `p_x += mx * p_iso`
+    - `p_y += my * p_iso`
+  - this is smaller than caching orientation fields and specifically targets
+    direct-path work that the current float32 fused kernel still leaves on the
+    hot path
+  - expected memory impact is one extra complex64 `3D` field per energy while
+    the angle loop is active
+
+### 4. Fuse windowing into direct polarization generation
+
+- current NRSS state:
+  - the direct path applies the FFT window in `_fft_polarization_fields(...)`
+    as three separate full-volume multiplies over `p_x`, `p_y`, and `p_z`
+- inspiration from CyRSoXS:
+  - `src/cudaMain.cu::computePolarization(...)` applies the Hanning weights
+    inside the polarization kernel before the FFT
+- resume guidance:
+  - keep the current no-window fast path untouched
+  - when windowing is active, either:
+    - multiply the final voxel contributions by the precomputed scalar window
+      inside the direct kernel,
+    - or emit a dedicated windowed direct kernel variant
+  - the goal is to remove one extra read/write pass over all three
+    polarization volumes
+  - this should be treated as a low-memory opportunity because it swaps a
+    separate pass for fused arithmetic rather than adding a cache
+
+### 5. Revisit detector-plane direct projection only with a materially different formulation
+
+- current NRSS state:
+  - the maintained direct path still does:
+    - `_projection_from_fft_polarization(...)`
+    - `_compute_scatter3d(...)`
+    - `_project_scatter3d(...)`
+  - the April 3 detector-plane direct-projection attempt regressed and was
+    rejected
+- inspiration from CyRSoXS:
+  - the `ScatterApproach::PARTIAL` route projects directly from FFT
+    polarization on the detector grid and never materializes a separate
+    `scatter3D` volume
+  - anchors:
+    - `src/cudaMain.cu` branch that calls
+      `peformEwaldProjectionGPU(d_projection, d_polarizationX, d_polarizationY, d_polarizationZ, ...)`
+    - `include/uniaxial.h::computeEwaldProjectionGPU(...)` overload taking
+      polarization arrays
+- additional inspiration from `tensor_coeff`:
+  - the accepted detector-grid helper path:
+    - `src/NRSS/backends/cupy_rsoxs.py::_projection_coefficients_from_fft_nt(...)`
+    - `src/NRSS/backends/cupy_rsoxs.py::_projection_coefficients_from_fft_pair(...)`
+- resume guidance:
+  - do not retry the earlier rejected direct-projection idea as another broad
+    CuPy algebra rewrite
+  - if retried, either:
+    - port the CyRSoXS partial-projection kernel structure more literally,
+    - or adapt the accepted `tensor_coeff` detector-grid helper style to the
+      direct polarization basis
+  - this opportunity remains valid because it is a real CyRSoXS compute
+    strategy, but only a materially different implementation should be tested
+
+### 6. Add angle tiling so one morphology pass serves multiple angles
+
+- current NRSS state:
+  - `_project_from_direct_polarization(...)` rebuilds polarization, FFTs, and
+    projects one angle at a time
+  - the direct-path note already shows poor scaling on dense angle sweeps
+- inspiration:
+  - `tensor_coeff` wins multi-angle work by reusing angle-independent fields
+    and only recombining angle families later
+  - CyRSoXS still loops per angle, but its direct voxel kernel already owns the
+    material accumulation, which makes tiling more plausible there than in the
+    current NRSS outer-Python material loop
+- resume guidance:
+  - test a tiled direct kernel that computes a small fixed set of angles per
+    voxel pass, for example `2-8` angles per launch
+  - the goal is to amortize:
+    - `Vfrac/S/theta/psi` reads
+    - trigonometric decode
+    - per-material optical arithmetic
+  - keep the tile size small enough to limit register pressure and avoid
+    exploding resident memory
+  - this is a fresh multi-angle throughput idea distinct from the previously
+    recorded persistent morphology caches
+
+### 7. If a higher-memory mode is allowed, prefer `phi_a` cache before full orientation cache
+
+- current NRSS state:
+  - the direct path recomputes `phi_a = Vfrac * S` inside each anisotropic
+    angle pass
+  - the note already identified this as a promising deferred cache candidate
+- inspiration:
+  - the current code makes it clear `phi_a` is angle-independent within an
+    energy:
+    - `src/NRSS/backends/cupy_rsoxs.py::_compute_direct_polarization(...)`
+    - `src/NRSS/backends/cupy_rsoxs.py::_compute_direct_polarization_collapsed_mean(...)`
+  - `tensor_coeff` similarly benefits from building angle-independent fields
+    before the angle-family path
+- resume guidance:
+  - keep this as a staged cache ladder:
+    1. cache `phi_a` only
+    2. only if needed, expand to the narrower orientation cache in item `8`
+    3. only after that, consider fuller multi-angle caches
+  - this should be treated as an explicit higher-memory candidate, not as the
+    default low-memory direct path
+  - for any accepted version, record peak GPU memory against the maintained
+    direct baseline on the same device-hot lane
+
+### 8. Add an orientation cache mode before any fuller multi-angle cache
+
+- current NRSS state:
+  - `_orientation_components(...)` recomputes `sin(theta)`, `cos(theta)`,
+    `cos(psi)`, and `sin(psi)` for every anisotropic material on every angle
+- inspiration:
+  - the note already recognized the value of caching `sx`, `sy`, and `sz`
+  - `tensor_coeff` effectively cashes in on the same idea by forming
+    angle-independent tensor ingredients once and reusing them across all angle
+    families
+- resume guidance:
+  - start with the narrowest useful cache:
+    - `sx`, `sy`, `sz`
+  - only if that is still too expensive, consider caching the even more direct
+    basis products used by both direct and tensor routes:
+    - `sx*sx`
+    - `sx*sy`
+    - `sx*sz`
+    - `sy*sy`
+    - `sy*sz`
+  - this mode should remain opt-in because its memory cost is real even though
+    it is smaller than caching full per-angle polarization or full multi-angle
+    intermediates
+
+### 9. Treat kernel warm-up and Segment `C` buffer reuse as first-class direct-path opportunities
+
+- current NRSS state:
+  - direct-path kernel-heavy experiments are confounded by first-use
+    compile/load cost on the cold subprocess surface
+  - the direct path also still allocates fresh FFT outputs and shifted arrays
+    in `_fft_polarization_fields(...)`
+- inspiration:
+  - the note already shows aligned and generic direct kernels become much more
+    attractive on the fully-hot surface
+  - `tensor_coeff` already reuses storage more aggressively in
+    `_compute_fft_nt_components(...)` by shifting into `nt[idx]`
+- resume guidance:
+  - always rank custom-kernel direct-path candidates on the fully-hot device
+    surface with `--worker-warmup-runs 1`
+  - separately, test whether direct-path Segment `C` can reuse one or more
+    existing polarization or FFT buffers the same way `tensor_coeff` reuses the
+    `nt` storage
+  - do not count warm-up alone as a math optimization, but do treat:
+    - eager kernel initialization,
+    - pre-JIT of maintained kernels,
+    - and direct-path FFT/shift buffer reuse
+    as real implementation opportunities when deciding which direct-path code
+    path should be maintained
+
+### Recommended experiment order for the nine fresh opportunities
+
+Use the following order for the next direct-path pass unless a new benchmark or
+correctness result clearly changes the ranking:
+
+1. item `1`
+   - complete the remaining float32 isotropic fusion
+2. item `2`
+   - CyRSoXS-style all-material fused voxel kernel
+3. item `3`
+   - per-energy isotropic base-field cache
+4. item `4`
+   - fuse windowing into Segment `B`
+5. item `6`
+   - angle tiling for multi-angle throughput
+6. item `7`
+   - `phi_a` cache mode
+7. item `8`
+   - orientation cache mode
+8. item `5`
+   - materially different direct detector-plane projection retry
+9. item `9`
+   - direct-path kernel warm-up / eager-init plus Segment `C` buffer reuse
+
+Interpretation notes:
+
+1. items `1`, `2`, `4`, and the buffer-reuse part of item `9` are the best
+   low-memory default-path candidates
+2. items `3`, `7`, and `8` are memory-tradeoff candidates and should be
+   treated as explicit opt-in modes unless they clear the memory gate below
+   comfortably enough to justify default adoption
+3. item `5` should be retried only if the implementation is recognizably
+   closer to either:
+   - the CyRSoXS partial-projection kernel shape,
+   - or the accepted `tensor_coeff` detector-grid helper style
+4. item `6` is the main fresh idea for `0:5:165` throughput that does not rely
+   on a persistent morphology cache
+
+### Deferred experiment: precompile maintained kernels before `A2`
+
+This is a recorded deferred hypothesis, not an accepted change.
+
+Question to test later:
+
+1. can whole-worker peak GPU memory be reduced further by forcing
+   compilation/loading of known compilable kernels before the heavy direct-path
+   `A2` through `D` work begins,
+2. while preserving or improving the maintained device-hot `0:5:165` primary
+   timing lane?
+
+Current motivation:
+
+1. the April 5-6 detector-projection work strongly suggested that some of the
+   earlier cold-process peak came from first-use compile/load activity rather
+   than from steady-state direct-path working set,
+2. CuPy pool reuse alone does not prove the worker-lifetime peak will fall,
+   because a whole-worker external probe still records the maximum point across
+   the process lifetime,
+3. therefore an early precompile step is only promising if it reduces overlap
+   between compile-time transients and the later large `B-D` allocations, or if
+   the compile-time transient can be made to subside before those later
+   allocations begin.
+
+Important caveat:
+
+1. an explicit `cp.cuda.Stream.null.synchronize()` before the heavy path may be
+   needed to establish a clean boundary, but synchronization latency is itself
+   a real speed risk and must be measured rather than assumed away,
+2. similarly, freeing pool blocks after precompile may help the external peak,
+   but it can also perturb latency enough that it should be treated as a test
+   dimension, not as an assumed default,
+3. without such a boundary, a precompile step may merely move the compile spike
+   earlier in the worker lifetime rather than lower the measured peak.
+
+Scope to test later:
+
+1. start with maintained custom-kernel paths that are explicitly compilable and
+   already known to matter on the direct path:
+   - direct detector projection kernels,
+   - direct polarization fused kernels,
+   - Igor shift kernel,
+2. do not initially broaden the experiment to every possible CuPy JIT path,
+   because generic ufunc / elementwise JIT is harder to pre-stage
+   deterministically and would blur the result.
+
+Recommended experiment matrix for a future pass:
+
+1. baseline:
+   - current maintained worker behavior
+2. variant `P1`:
+   - startup precompile of the maintained direct-path custom kernels before the
+     timed run
+   - no explicit synchronize
+   - no pool release
+3. variant `P2`:
+   - same precompile step
+   - explicit synchronize before entering the heavy path
+4. variant `P3`:
+   - same as `P2`
+   - then free CuPy default and pinned pools before entering the heavy path
+
+Acceptance evidence to capture if this is resumed:
+
+1. maintained device-hot acceptance lane:
+   - small CoreShell
+   - `resident_mode='device'`
+   - `execution_path='direct_polarization'`
+   - `EAngleRotation=[0, 5, 165]`
+   - `--worker-warmup-runs 1`
+2. device-hot no-rotation companion
+3. external whole-worker peak GPU memory on the same `0:5:165` lane
+4. if speed and memory disagree, also capture a warmed repeated-run probe in
+   one long-lived subprocess to separate:
+   - whole-worker cold peak,
+   - from warmed steady-state working set
+
+Decision rule if resumed:
+
+1. keep it only if the measured whole-worker peak GPU memory actually falls on
+   the maintained `0:5:165` lane,
+2. and do not keep it if any required synchronize / pool-release boundary gives
+   back too much primary-time improvement,
+3. do not assume success just because compile-time allocations are expected to
+   return to the CuPy pool.
+
 ### Acceptance rule for the next pass
 
-Keep a change only if both conditions hold:
+Keep a new direct-path code path only if all conditions below hold:
 
 1. speed:
-   - achieve about `5%` or better improvement in either
-     - the maintained no-rotation lane
-     - or the maintained `0:5:165` lane
+   - achieve at least about `5%` improvement on the maintained device-hot
+     direct-path acceptance lane:
+     - `resident_mode='device'`
+     - `execution_path='direct_polarization'`
+     - small CoreShell
+     - `EAngleRotation=[0, 5, 165]`
+     - `--worker-warmup-runs 1`
 2. physics:
    - pass the parity gates above
+3. memory:
+   - compare peak GPU memory against the current maintained
+     `direct_polarization` baseline on the same small device-hot `0:5:165`
+     surface using the existing external polling methodology
+   - accept only if the candidate:
+     - decreases peak GPU memory,
+     - or increases peak GPU memory by no more than about `5%`
 
 Additional interpretation rules:
 
-1. A win on either lane is sufficient for acceptance if parity holds.
-2. The other lane should still be reported, but a flat result there is not an
-   automatic rejection.
+1. Report the device-hot no-rotation companion as a regression guard, but that
+   companion is not the primary acceptance authority.
+2. Report the maintained host-prewarmed lanes for continuity with the earlier
+   direct-path note, but host-prewarmed wins alone are no longer sufficient for
+   acceptance.
 3. Suspicious segment collapses, especially implausible `E` changes, should be
    treated as recheck triggers rather than accepted evidence.
-4. If a candidate only wins on the fully-hot kernel surface but loses on the
-   current cold subprocess authority surface, document both results explicitly
-   and decide whether that candidate belongs in:
-   - the default maintained path
-   - or an explicit higher-performance opt-in mode
+4. If a candidate only clears the speed gate by taking a larger memory hit than
+   the `+5%` ceiling, reject it as an accepted code path and keep it only as an
+   unaccepted research note.
+5. If a candidate wins on the device-hot acceptance lane but is intended to be
+   a higher-memory expert mode, still require the same parity and memory gates;
+   explicit mode status does not waive them.
 
 ### Resume checklist for a fresh context
 
@@ -1037,17 +1452,346 @@ A fresh context should resume in this order:
 
 1. read this file first
 2. confirm the runtime toolchain is fixed
-3. rerun the fresh baselines in Phase 2
-4. implement the parity scaffolding in Phase 3 if it does not already exist
-5. start with the Phase 4 experiment order exactly as listed
-6. update this file after every attempted step with:
+3. rerun the fresh host-prewarmed and device-hot speed baselines in Phase 2
+4. refresh the device-hot peak-memory baseline using the existing external
+   polling methodology
+5. implement the parity scaffolding in Phase 3 if it does not already exist
+6. use the nine fresh opportunities as the active experiment list unless a new
+   benchmark result clearly changes the order
+   - deferred add-on to consider only if memory remains a cold-process issue:
+     - the precompile-before-`A2` experiment described above
+7. update this file after every attempted step with:
    - artifact paths
+   - measured device-hot `0:5:165` delta
+   - measured device-hot no-rotation delta
    - measured no-rotation delta
    - measured `0:5:165` delta
+   - measured peak-memory delta
    - parity outcome
    - keep/reject decision
-7. if a change affects the backend-wide story, add a brief cross-reference in
+8. if a change affects the backend-wide story, add a brief cross-reference in
    `CUPY_RSOXS_OPTIMIZATION_LEDGER.md`
+
+## April 4 2026 execution results for fresh opportunities `1-5`
+
+The user explicitly asked that this pass be judged on the `0:5:165` rotation
+surface because that lane emphasizes the current direct-path issues.
+
+Treat the following as the current recorded result set for the first five fresh
+opportunities listed above.
+
+Acceptance surface used in this pass:
+
+1. speed authority:
+   - small CoreShell
+   - `resident_mode='device'`
+   - `execution_path='direct_polarization'`
+   - `EAngleRotation=[0, 5, 165]`
+   - `--worker-warmup-runs 1`
+   - baseline artifact:
+     - `test-reports/cupy-rsoxs-optimization-dev/dp_apr4_baseline_gpu2_hot_rot/summary.json`
+2. explicit parity gate used in this pass:
+   - `PYTHONPATH=/homes/deand/dev/NRSS mamba run -n nrss-dev python -m pytest tests/smoke/test_smoke.py -k 'test_cupy_direct_polarization_matches_tensor_coeff_on_anisotropic_sphere' -v`
+3. additional parity gate used for idea `5` because it rewired the direct-path
+   detector projection:
+   - `PYTHONPATH=/homes/deand/dev/NRSS mamba run -n nrss-dev python -m pytest tests/smoke/test_smoke.py -k 'test_cupy_direct_polarization_host_and_device_residency_parity' -v`
+4. peak-memory baseline used in this pass:
+   - external GPU polling on `CUDA_VISIBLE_DEVICES=2` over the same small
+     device-hot `0:5:165` command
+   - maintained baseline peak observed:
+     - about `945 MiB`
+
+### Opportunity `1`: complete the remaining float32 Segment `B` fusion
+
+- implementation shape:
+  - split the float32 direct path into dedicated isotropic and anisotropic
+    kernels so the float32 path no longer materializes `isotropic_term`
+    separately in Python
+- artifacts:
+  - timing artifact:
+    - `test-reports/cupy-rsoxs-optimization-dev/dp_apr4_idea1_gpu2_hot_rot_rerun/summary.json`
+- measured outcome versus the maintained baseline:
+  - device-hot no-rotation:
+    - `primary 0.0221 s -> 0.0235 s`
+    - regression of about `+6.4%`
+  - device-hot `0:5:165`:
+    - `primary 0.6530 s -> 0.6310 s`
+    - improvement of about `-3.4%`
+  - device-hot `B` on `0:5:165`:
+    - `0.2757 s -> 0.1346 s`
+  - device-hot `D` on `0:5:165`:
+    - `0.2593 s -> 0.3789 s`
+- parity:
+  - not pursued for acceptance after the speed gate failed
+- disposition:
+  - rejected
+- reason:
+  - the `0:5:165` primary lane did not clear the `5%` speed gate, and the
+    no-rotation companion regressed
+
+### Opportunity `2`: fuse across materials per voxel in the direct path
+
+- implementation shape:
+  - prototype a float32 direct-path kernel that owned the material loop per
+    voxel and read compact device arrays of per-material scalars plus raw field
+    pointers
+- artifacts:
+  - timing artifact:
+    - `test-reports/cupy-rsoxs-optimization-dev/dp_apr4_idea2_gpu2_hot_rot_rerun/summary.json`
+- measured outcome versus the maintained baseline:
+  - device-hot no-rotation:
+    - `primary 0.0221 s -> 0.0239 s`
+    - regression of about `+8.6%`
+  - device-hot `0:5:165`:
+    - `primary 0.6530 s -> 0.6271 s`
+    - improvement of about `-4.0%`
+  - device-hot `B` on `0:5:165`:
+    - `0.2757 s -> 0.0742 s`
+  - device-hot `D` on `0:5:165`:
+    - `0.2593 s -> 0.4352 s`
+- parity:
+  - not pursued for acceptance after the speed gate failed
+- disposition:
+  - rejected
+- reason:
+  - this again shifted time out of `B` and into later work without clearing
+    the `0:5:165` primary acceptance threshold
+
+### Opportunity `3`: add a per-energy isotropic base-field cache
+
+- implementation shape:
+  - build one angle-independent `complex64` isotropic base field per energy
+    and reuse it across the direct-path angle loop
+  - keep anisotropic work on the existing low-memory path
+- artifacts:
+  - timing artifact:
+    - `test-reports/cupy-rsoxs-optimization-dev/dp_apr4_idea3_gpu2_hot_rot/summary.json`
+- measured outcome versus the maintained baseline:
+  - device-hot no-rotation:
+    - `primary 0.0221 s -> 0.0235 s`
+    - regression of about `+6.5%`
+  - device-hot `0:5:165`:
+    - `primary 0.6530 s -> 0.6203 s`
+    - improvement of about `-5.0%`
+  - device-hot `B` on `0:5:165`:
+    - `0.2757 s -> 0.1504 s`
+  - device-hot `D` on `0:5:165`:
+    - `0.2593 s -> 0.3517 s`
+  - peak GPU memory on the same surface:
+    - about `945 MiB -> 879 MiB`
+    - improvement of about `-7.0%`
+- parity:
+  - explicit anisotropic execution-path smoke passed
+- disposition:
+  - accepted
+- reason:
+  - this was the first candidate to clear the `0:5:165` speed gate while also
+    improving measured peak GPU memory
+- implementation status:
+  - retained in `src/NRSS/backends/cupy_rsoxs.py`
+
+### Opportunity `4`: fuse windowing into direct polarization generation
+
+- status in this pass:
+  - skipped by explicit user direction
+- reason:
+  - the user required this pass to be evaluated on the maintained
+    `0:5:165` issue-emphasizing surface, and the maintained CoreShell
+    acceptance morphology on that lane uses `WindowingType = 0`
+  - therefore opportunity `4` is not meaningfully exercised on that authority
+    surface
+- disposition:
+  - skipped / not evaluated in this pass
+
+### Opportunity `5`: materially different direct detector-plane projection retry
+
+- implementation shape:
+  - adapt the accepted `tensor_coeff` detector-grid-helper style to the direct
+    polarization basis
+  - project directly from `(fft_x, fft_y, fft_z)` on the detector grid and
+    bypass full `scatter3d` materialization
+- artifacts:
+  - timing artifact:
+    - `test-reports/cupy-rsoxs-optimization-dev/dp_apr4_idea5_gpu2_hot_rot_rerun/summary.json`
+- measured outcome versus accepted opportunity `3`:
+  - device-hot no-rotation:
+    - `primary 0.0235 s -> 0.0109 s`
+    - improvement of about `-53.6%`
+  - device-hot `0:5:165`:
+    - `primary 0.6203 s -> 0.2898 s`
+    - improvement of about `-53.3%`
+  - device-hot `D` on `0:5:165`:
+    - `0.3517 s -> 0.0220 s`
+  - peak GPU memory on the same surface:
+    - about `945 MiB -> 1071 MiB` versus the maintained baseline
+    - increase of about `+13.3%`
+- parity:
+  - explicit anisotropic execution-path smoke passed
+  - direct-path host/device residency parity smoke passed
+- disposition:
+  - rejected
+- reason:
+  - despite the large `0:5:165` speed win, it failed the memory gate by a wide
+    margin
+- implementation status:
+  - historical April 4 status only:
+    - reverted at the end of that day
+    - see the April 5-6 follow-up below for the current maintained state
+
+### April 5-6 2026 follow-up on opportunity `5`
+
+The April 4 rejection above was based on coarse external peak-memory polling of
+the first kernelized detector-plane attempt across the entire worker lifetime.
+
+That was enough to reject the change under the earlier strict memory rule, but
+it did not distinguish:
+
+1. first-use kernel compile/load/startup overhead,
+2. from warmed steady-state detector execution working set.
+
+Current follow-up implementation:
+
+1. keep accepted opportunity `3`,
+2. replace the earlier temporary-heavy detector-grid helper attempt with a
+   fused direct detector-projection RawKernel path,
+3. and measure both:
+   - full worker-lifetime peak memory,
+   - and warmed steady-state memory after one untimed warm-up run inside a
+     long-lived subprocess.
+
+Current speed artifact:
+
+1. `test-reports/cupy-rsoxs-optimization-dev/dp_apr5_idea5_kernel_gpu2_hot_rot/summary.json`
+
+Measured speed versus accepted opportunity `3`:
+
+1. device-hot no-rotation:
+   - `primary 0.0235 s -> 0.0100 s`
+2. device-hot `0:5:165`:
+   - `primary 0.6203 s -> 0.2686 s`
+   - improvement of about `-56.7%`
+3. device-hot `D` on `0:5:165`:
+   - `0.3517 s -> 0.00145 s`
+
+Parity on the fused-kernel version:
+
+1. explicit anisotropic execution-path smoke passed
+2. direct-path host/device residency parity smoke passed
+
+Peak-memory interpretation from the follow-up:
+
+1. tighter external whole-worker peak polling still shows a cold/startup peak
+   increase:
+   - maintained accepted-`3` baseline on the same method:
+     - about `871 MiB`
+   - fused-kernel opportunity `5` on the same method:
+     - about `1135 MiB`
+2. however, a warmed steady-state probe in one long-lived subprocess showed:
+   - one untimed warm-up run first,
+   - then five consecutive timed `0:5:165` runs,
+   - warmed baseline at the start of the timed series:
+     - about `879 MiB`
+   - warmed peak during the five timed runs:
+     - still about `879 MiB`
+   - no additional timed-run peak above the warmed baseline was observed
+3. interpretation:
+   - the large extra peak appears to be first-use kernel compile/load/startup
+     overhead rather than steady-state detector-execution working set
+
+Disposition after the April 5 follow-up (historical interim state):
+
+1. retain opportunity `5` in the maintained backend code
+2. current caveat:
+   - cold worker-lifetime peak memory is still materially higher
+3. current interpretation:
+   - if the relevant workflow is a long-lived warmed subprocess, this path
+     captures the detector-plane speed win without a warmed steady-state memory
+     increase
+4. user direction for this pass:
+   - if the remaining memory increase proved to be real even after deeper
+     investigation, keep opportunity `5` anyway because the speed win is too
+     large to ignore
+
+### April 6 2026 compile-backend mitigation on opportunity `5`
+
+After the April 5 result narrowed the memory issue to first-use
+compile/load/startup overhead, the remaining credible mitigation was to keep
+the fused detector kernel but switch only the detector projection RawKernels
+to the `nvcc` compile path when an `nvcc` binary is available.
+
+Current April 6 implementation shape:
+
+1. keep accepted opportunity `3`
+2. keep the fused detector-projection RawKernel path from April 5
+3. prefer `backend='nvcc'` for the detector projection RawKernels when `nvcc`
+   is discoverable, and fall back to `nvrtc` otherwise
+4. refresh CuPy's cached `nvcc` lookup when automatic detection succeeds so
+   the worker does not require a manually exported `NVCC` environment variable
+
+April 6 artifacts:
+
+1. explicit-`NVCC` speed confirmation:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_apr6_idea5_kernel_nvcc_env_gpu2_hot_rot/summary.json`
+2. final self-configuring speed confirmation:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_apr6_idea5_kernel_auto_nvcc_cachefix_gpu2_hot_rot/summary.json`
+3. explicit-`NVCC` external whole-worker memory probe paired with the same
+   command:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_apr6_idea5_kernel_nvcc_env_gpu2_hot_rot_memprobe/summary.json`
+   - observed peak:
+     - about `868 MiB`
+4. final self-configuring external whole-worker memory probe paired with the
+   same command:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_apr6_idea5_kernel_auto_nvcc_cachefix_gpu2_hot_rot_memprobe/summary.json`
+   - observed peak on the recheck:
+     - about `674 MiB`
+
+Measured April 6 speed versus accepted opportunity `3`:
+
+1. explicit-`NVCC` speed confirmation:
+   - device-hot no-rotation:
+     - `primary 0.0235 s -> 0.010 s`
+   - device-hot `0:5:165`:
+     - `primary 0.6203 s -> 0.269 s`
+2. final self-configuring code:
+   - device-hot no-rotation:
+     - `primary 0.0235 s -> 0.010 s`
+   - device-hot `0:5:165`:
+     - `primary 0.6203 s -> 0.269 s`
+   - device-hot `D` on `0:5:165`:
+     - `0.3517 s -> 0.001 s`
+
+April 6 parity on the final self-configuring code:
+
+1. `PYTHONPATH=/homes/deand/dev/NRSS mamba run -n nrss-dev python -m pytest tests/smoke/test_smoke.py -k 'test_cupy_direct_polarization_matches_tensor_coeff_on_anisotropic_sphere' -v`
+   - passed
+2. `PYTHONPATH=/homes/deand/dev/NRSS mamba run -n nrss-dev python -m pytest tests/smoke/test_smoke.py -k 'test_cupy_direct_polarization_host_and_device_residency_parity' -v`
+   - passed
+
+April 6 peak-memory interpretation:
+
+1. first `nvcc`-backed whole-worker probe on the same external method:
+   - accepted-`3` baseline reference:
+     - about `871 MiB`
+   - `nvcc`-backed opportunity `5`:
+     - about `868 MiB`
+2. repeated recheck after the `nvcc`-backed detector kernel cache was
+   populated:
+   - observed whole-worker peak:
+     - about `674 MiB`
+3. interpretation:
+   - on the current development environment, switching the detector
+     projection RawKernels to `nvcc` eliminates the earlier cold-process
+     peak regression while preserving the April 5 speed win
+   - if a target environment cannot discover `nvcc`, the code falls back to
+     `nvrtc`, so the earlier cold-peak caveat may still apply there
+
+Final disposition after the April 6 follow-up:
+
+1. accept opportunity `5`
+2. retain it in the maintained backend code alongside accepted opportunity `3`
+3. current accepted interpretation:
+   - on the maintained `nrss-dev` environment, idea `5` now captures the
+     detector-plane speed win without the earlier large memory penalty
 
 ## Update Rule
 
