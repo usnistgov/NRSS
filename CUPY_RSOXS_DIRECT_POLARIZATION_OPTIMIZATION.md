@@ -1899,6 +1899,353 @@ Final disposition after the April 6 follow-up:
    - on the maintained `nrss-dev` environment, idea `5` now captures the
      detector-plane speed win without the earlier large memory penalty
 
+## April 6 2026 direct-path memory-lifetime cleanup pass
+
+This pass evaluated six concrete memory-lifetime cleanup items on top of the
+current maintained direct-path state.
+
+Acceptance rule used for this pass:
+
+1. keep a candidate if:
+   - direct-hot small CoreShell `0:5:165` primary time does not regress by
+     `>= 5%`,
+   - the simple direct-vs-tensor anisotropic parity smoke passes,
+   - and peak GPU memory on the matching direct-hot memory probe does not rise
+     by `>= 5%`
+2. reject otherwise
+
+Authority surfaces used in this pass:
+
+1. direct-hot timing baseline:
+   - artifact:
+     - `test-reports/cupy-rsoxs-optimization-dev/dp_memcleanup_baseline_speed_20260406/summary.json`
+   - measured baseline:
+     - no rotation:
+       - `primary 0.01045 s`
+     - `0:5:165`:
+       - `primary 0.27320 s`
+2. parity gate:
+   - `PYTHONPATH=/homes/deand/dev/NRSS mamba run -n nrss-dev python -m pytest tests/smoke/test_smoke.py -k 'test_cupy_direct_polarization_matches_tensor_coeff_on_anisotropic_sphere' -v`
+3. direct-hot memory baseline:
+   - same external polling method from
+     `tests/validation/dev/core_shell_backend_performance/run_comprehensive_backend_comparison.py`
+   - narrowed to the single `device / hot / direct_polarization / 0:5:165`
+     worker case through the harness's own `_cupy_case(...)` plus
+     `_run_case_subprocess(...)` path
+   - baseline artifact:
+     - `test-reports/core-shell-backend-performance-dev/dp_memcleanup_item1_baseline_singlecase_20260406/single_case_memory_summary.json`
+   - measured baseline:
+     - peak GPU memory:
+       - `679 MiB`
+
+### Item `1`: delete FFT polarization volumes immediately after Segment `D`
+
+Implementation shape:
+
+1. move `del fft_x, fft_y, fft_z` from after Segment `E` to immediately after
+   `_projection_from_fft_polarization(...)` returns
+
+Artifacts:
+
+1. timing:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_memcleanup_item1_speed_20260406/summary.json`
+2. memory:
+   - `test-reports/core-shell-backend-performance-dev/dp_memcleanup_item1_memprobe_20260406/single_case_memory_summary.json`
+
+Measured outcome versus the maintained baseline:
+
+1. direct-hot `0:5:165`:
+   - `primary 0.27320 s -> 0.27243 s`
+2. peak GPU memory:
+   - `679 MiB -> 743 MiB`
+
+Parity:
+
+1. passed
+
+Disposition:
+
+1. rejected
+2. reverted in code
+
+Reason:
+
+1. the direct-hot peak-memory probe rose by about `+9.4%`
+
+### Item `2`: preallocate result storage and stop retaining a projection list
+
+Implementation shape:
+
+1. replace `projections.append(...)` plus final `cp.stack(...)` with direct
+   writes into a preallocated result tensor
+
+Artifacts:
+
+1. timing:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_memcleanup_item2_speed_20260406/summary.json`
+2. memory:
+   - `test-reports/core-shell-backend-performance-dev/dp_memcleanup_item2_memprobe_20260406/single_case_memory_summary.json`
+
+Measured outcome versus the maintained baseline:
+
+1. direct-hot `0:5:165`:
+   - `primary 0.27320 s -> 0.27131 s`
+2. peak GPU memory:
+   - `679 MiB -> 871 MiB`
+
+Parity:
+
+1. passed
+
+Disposition:
+
+1. rejected
+2. reverted in code
+
+Reason:
+
+1. the direct-hot peak-memory probe rose by about `+28.3%`
+
+### Item `3`: reuse dead polarization buffers as Segment `C` IGOR-shift outputs
+
+Implementation shape:
+
+1. FFT one polarization volume at a time and reuse `p_x`, `p_y`, and `p_z` as
+   the shifted outputs instead of allocating fresh shifted arrays
+
+Artifacts:
+
+1. timing:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_memcleanup_item3_speed_20260406/summary.json`
+2. memory:
+   - `test-reports/core-shell-backend-performance-dev/dp_memcleanup_item3_memprobe_20260406/single_case_memory_summary.json`
+
+Measured outcome versus the maintained baseline:
+
+1. direct-hot `0:5:165`:
+   - `primary 0.27320 s -> 0.27070 s`
+2. peak GPU memory:
+   - `679 MiB -> 871 MiB`
+
+Parity:
+
+1. passed
+
+Disposition:
+
+1. rejected
+2. reverted in code
+
+Reason:
+
+1. the direct-hot peak-memory probe rose by about `+28.3%`
+
+### Item `4`: evict detector projection geometry after each completed energy
+
+Implementation shape:
+
+1. do **not** remove within-energy reuse
+2. instead, preserve angle-loop reuse and discard the cached
+   `detector_projection_geometry_current` entry in `_run_single_energy(...)`
+   after that energy finishes
+
+Artifacts:
+
+1. timing:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_memcleanup_item4_speed_20260406/summary.json`
+2. memory:
+   - `test-reports/core-shell-backend-performance-dev/dp_memcleanup_item4_memprobe_20260406/single_case_memory_summary.json`
+
+Measured outcome versus the maintained baseline:
+
+1. direct-hot `0:5:165`:
+   - `primary 0.27320 s -> 0.27173 s`
+2. peak GPU memory:
+   - `679 MiB -> 679 MiB`
+
+Parity:
+
+1. passed
+
+Disposition:
+
+1. accepted
+2. retained in code
+
+### Item `5`: tighten `z_collapse_mode='mean'` direct-path temporaries
+
+Implementation shape:
+
+1. reduce `contrib_x`, `contrib_y`, and `contrib_z` sequentially in
+   `_compute_direct_polarization_collapsed_mean(...)`
+2. delete `sx`, `sy`, and `sz` as soon as each becomes dead
+
+Artifacts:
+
+1. timing:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_memcleanup_item5_speed_20260406/summary.json`
+2. first memory probe:
+   - `test-reports/core-shell-backend-performance-dev/dp_memcleanup_item5_memprobe_20260406/single_case_memory_summary.json`
+3. recheck after the suspicious first probe:
+   - `test-reports/core-shell-backend-performance-dev/dp_memcleanup_item5_memprobe_rerun_20260406/single_case_memory_summary.json`
+
+Measured outcome versus the item-`4` retained state:
+
+1. direct-hot `0:5:165`:
+   - `primary 0.27173 s -> 0.27076 s`
+2. first peak-memory probe:
+   - `679 MiB -> 871 MiB`
+3. recheck peak-memory probe:
+   - `679 MiB -> 679 MiB`
+
+Parity:
+
+1. passed
+
+Disposition:
+
+1. accepted
+2. retained in code
+
+Interpretation:
+
+1. this item only touched the collapsed direct path, so the first `871 MiB`
+   reading was treated as a recheck trigger rather than as trustworthy
+   evidence
+2. the rerun returned to the `679 MiB` maintained baseline on the actual
+   direct-hot authority lane
+
+### Item `6`: in-place direct-path rotation accumulation and final averaging
+
+Implementation shape:
+
+1. accumulate `valid_counts` with `cp.add(..., out=...)`
+2. zero invalid rotated pixels in place with `cp.nan_to_num(..., copy=False)`
+3. accumulate `projection_average` with `cp.add(..., out=...)`
+4. finalize the average in place rather than building a new `cp.where(...)`
+   output
+
+Artifacts:
+
+1. timing:
+   - `test-reports/cupy-rsoxs-optimization-dev/dp_memcleanup_item6_speed_rerun_20260406/summary.json`
+2. memory:
+   - `test-reports/core-shell-backend-performance-dev/dp_memcleanup_item6_memprobe_20260406/single_case_memory_summary.json`
+
+Measured outcome versus the retained item-`4` plus item-`5` state:
+
+1. direct-hot `0:5:165`:
+   - `primary 0.27076 s -> 0.27191 s`
+2. peak GPU memory:
+   - `679 MiB -> 679 MiB`
+
+Parity:
+
+1. passed after fixing an initial CuPy `divide(..., where=...)` incompatibility
+   in the first attempt
+
+Disposition:
+
+1. accepted
+2. retained in code
+
+Current retained end state after this pass:
+
+1. keep item `4`
+2. keep item `5`
+3. keep item `6`
+4. item `1`, item `2`, and item `3` were informative but are not retained
+   because they failed the direct-hot peak-memory gate on this environment
+
+### April 6 2026 fast-delta CuPy observer recheck of rejected items `1-3`
+
+The user requested a direct recheck of the three earlier rejects above because
+the first-pass memory decisions relied on single coarse external probes and
+the observed deltas looked suspiciously stochastic.
+
+Recheck methodology:
+
+1. orchestrator:
+   - `tests/validation/dev/core_shell_backend_performance/run_direct_polarization_memcleanup_recheck.py`
+2. artifact:
+   - `test-reports/core-shell-backend-performance-dev/dp_memcleanup_fastdelta_recheck_20260406/direct_polarization_memcleanup_recheck_summary.json`
+3. authority surface:
+   - small CoreShell
+   - `resident_mode='device'`
+   - `startup_mode='hot'`
+   - `execution_path='direct_polarization'`
+   - speed repeats on:
+     - no rotation
+     - `0:5:165`
+   - memory repeats on:
+     - `0:5:165`
+4. repeated-run settings:
+   - `5` runs per variant
+   - same-GPU warmed CuPy observer
+   - `cupy.cuda.runtime.memGetInfo()` delta versus the stabilized observer
+     baseline
+   - observer sampling cadence:
+     - `0.001 s`
+5. interpretation rule used for this recheck:
+   - use the repeated median on the fast-delta method as the memory gate
+     authority for this retry rather than the earlier single coarse probe
+
+Repeated fast-delta baseline on the new method:
+
+1. no rotation median primary:
+   - `0.010579 s`
+2. `0:5:165` median primary:
+   - `0.278519 s`
+3. `0:5:165` median peak GPU delta:
+   - `1132 MiB`
+4. stability note:
+   - all five baseline memory repeats returned the same `1132 MiB` peak delta,
+     so this recheck did not show baseline-method stochasticity
+
+Repeated fast-delta outcomes:
+
+1. item `1`:
+   - no rotation median primary:
+     - `0.010507 s`
+   - `0:5:165` median primary:
+     - `0.276418 s`
+   - `0:5:165` median peak GPU delta:
+     - `1132 MiB`
+   - disposition:
+     - pass
+2. item `2`:
+   - no rotation median primary:
+     - `0.010923 s`
+   - `0:5:165` median primary:
+     - `0.272532 s`
+   - `0:5:165` median peak GPU delta:
+     - `1132 MiB`
+   - disposition:
+     - pass
+3. item `3`:
+   - no rotation median primary:
+     - `0.010782 s`
+   - `0:5:165` median primary:
+     - `0.275258 s`
+   - `0:5:165` median peak GPU delta:
+     - `940 MiB`
+   - disposition:
+     - pass
+
+Combined-state parity after retaining items `1-3`:
+
+1. `PYTHONPATH=/homes/deand/dev/NRSS mamba run -n nrss-dev python -m pytest tests/smoke/test_smoke.py -k 'test_cupy_direct_polarization_matches_tensor_coeff_on_anisotropic_sphere or test_cupy_direct_polarization_host_and_device_residency_parity' -v`
+   - passed
+
+Updated retained end state after the fast-delta recheck:
+
+1. keep item `1`
+2. keep item `2`
+3. keep item `3`
+4. keep item `4`
+5. keep item `5`
+6. keep item `6`
+
 ## Update Rule
 
 When `direct_polarization` work produces either:

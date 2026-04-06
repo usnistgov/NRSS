@@ -1752,3 +1752,68 @@ Backend-wide summary:
      - path-aware preload is now part of the maintained direct-path strategy,
      - but only the direct path benefits from the constructor-time preload plus
        mixed backend-family default
+
+## April 6 2026 direct-path memory-lifetime cleanup follow-up
+
+Path-specific details, per-item artifacts, and rerun notes live in
+`CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md`.
+
+Backend-wide summary:
+
+1. evaluated six direct-path memory-lifetime cleanup items on top of the
+   maintained direct-path state using:
+   - the usual small device-hot `0:5:165` timing lane,
+   - the simple direct-vs-tensor anisotropic parity smoke,
+   - and the same external memory-polling method from
+     `run_comprehensive_backend_comparison.py`, narrowed to the single
+     `device / hot / direct_polarization / 0:5:165` case through the harness's
+     own worker path
+2. first-pass outcome:
+   - initially rejected and reverted:
+     - earlier deletion of FFT polarization volumes after `D`,
+     - direct result preallocation in place of the projection-list plus stack,
+     - Segment `C` polarization-buffer reuse as IGOR-shift outputs
+   - those first rejections were based on single coarse external peak probes
+     that reported:
+     - about `679 MiB -> 743 MiB` for the earlier FFT deletion,
+     - about `679 MiB -> 871 MiB` for the result preallocation attempt,
+     - about `679 MiB -> 871 MiB` for the Segment `C` buffer-reuse attempt
+3. fast-delta recheck outcome:
+   - the repeated same-GPU CuPy observer recheck at `0.001 s` cadence on the
+     same small direct-hot surface overturned those three earlier rejections
+   - authoritative recheck artifact:
+     - `test-reports/core-shell-backend-performance-dev/dp_memcleanup_fastdelta_recheck_20260406/direct_polarization_memcleanup_recheck_summary.json`
+   - repeated median results on the new method:
+     - baseline peak GPU delta:
+       - `1132 MiB`
+     - earlier FFT deletion:
+       - `1132 MiB`
+     - result preallocation:
+       - `1132 MiB`
+     - Segment `C` buffer reuse:
+       - `940 MiB`
+   - all three also stayed within the repeated hot-lane speed gate and the
+     combined retained state passed the direct-path smoke parity checks
+4. accepted and retained after the recheck:
+   - earlier deletion of FFT polarization volumes after `D`
+   - direct result preallocation in place of the projection-list plus stack
+   - Segment `C` polarization-buffer reuse as IGOR-shift outputs
+   - evict per-energy detector projection geometry after each completed energy
+     while preserving within-energy angle-loop reuse
+   - tighten `z_collapse_mode='mean'` direct-path temporaries by reducing the
+     `x/y/z` collapsed contributions sequentially and dropping orientation
+     components earlier
+   - convert direct-path rotation accumulation and final averaging to in-place
+     updates
+5. measured retained-state interpretation:
+   - direct-hot primary time remained effectively flat relative to the current
+     maintained baseline:
+     - baseline `0.27320 s`
+     - final retained state `0.27191 s`
+   - direct-hot peak GPU memory also remained flat on the same single-case
+     memory probe:
+     - baseline `679 MiB`
+     - final retained state `679 MiB`
+6. current maintained direct-path state after this follow-up:
+   - keep previously accepted direct-path opportunities `3` and `5`
+   - additionally keep the accepted memory-lifetime cleanup trio above

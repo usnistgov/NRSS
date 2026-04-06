@@ -272,8 +272,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
         energies = tuple(float(energy) for energy in morphology.Energies)
         runtime_materials = recorder.measure("A2", lambda: self._runtime_material_views(morphology, cp))
-        projections = []
         window = None
+        result_data = None
         try:
             if self._kernel_preload_stage(morphology) == "a2":
                 recorder.measure(
@@ -289,7 +289,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 ),
             )
 
-            for energy in energies:
+            for energy_index, energy in enumerate(energies):
                 projection = self._run_single_energy(
                     morphology=morphology,
                     runtime_materials=runtime_materials,
@@ -299,11 +299,12 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     window=window,
                     recorder=recorder,
                 )
-                projections.append(projection)
-
-            result_data = recorder.measure("F", lambda: cp.stack(projections, axis=0))
+                if result_data is None:
+                    result_shape = (len(energies), *projection.shape)
+                    result_data = cp.empty(result_shape, dtype=projection.dtype)
+                result_data[energy_index] = projection
+                del projection
         finally:
-            projections.clear()
             if window is not None:
                 del window
             del runtime_materials
@@ -634,27 +635,34 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
     def _run_single_energy(self, morphology, runtime_materials, energy, cp, ndimage, window, recorder):
         execution_path = self._execution_path(morphology)
-        if execution_path == "tensor_coeff":
-            return self._run_single_energy_tensor_coeff(
-                morphology=morphology,
-                runtime_materials=runtime_materials,
-                energy=energy,
-                cp=cp,
-                ndimage=ndimage,
-                window=window,
-                recorder=recorder,
+        try:
+            if execution_path == "tensor_coeff":
+                return self._run_single_energy_tensor_coeff(
+                    morphology=morphology,
+                    runtime_materials=runtime_materials,
+                    energy=energy,
+                    cp=cp,
+                    ndimage=ndimage,
+                    window=window,
+                    recorder=recorder,
+                )
+            if execution_path == "direct_polarization":
+                return self._run_single_energy_direct_polarization(
+                    morphology=morphology,
+                    runtime_materials=runtime_materials,
+                    energy=energy,
+                    cp=cp,
+                    ndimage=ndimage,
+                    window=window,
+                    recorder=recorder,
+                )
+            raise AssertionError(f"Unsupported cupy-rsoxs execution_path {execution_path!r}.")
+        finally:
+            self._discard_detector_projection_geometry(
+                morphology,
+                energy,
+                shape_override=self._segment_c_shape_override(morphology),
             )
-        if execution_path == "direct_polarization":
-            return self._run_single_energy_direct_polarization(
-                morphology=morphology,
-                runtime_materials=runtime_materials,
-                energy=energy,
-                cp=cp,
-                ndimage=ndimage,
-                window=window,
-                recorder=recorder,
-            )
-        raise AssertionError(f"Unsupported cupy-rsoxs execution_path {execution_path!r}.")
 
     def _run_single_energy_tensor_coeff(
         self,
@@ -884,12 +892,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
     def _finalize_rotation_average(self, cp, projection_average, valid_counts, num_angles):
         if valid_counts is None:
-            return projection_average / np.float32(num_angles)
-        return cp.where(
-            valid_counts == 0,
-            np.float32(0.0),
-            projection_average / valid_counts.astype(cp.float32),
-        )
+            cp.divide(projection_average, np.float32(num_angles), out=projection_average)
+            return projection_average
+        nonzero = valid_counts != 0
+        denom = cp.maximum(valid_counts, 1)
+        cp.divide(projection_average, denom, out=projection_average, casting="unsafe")
+        cp.copyto(projection_average, np.float32(0.0), where=~nonzero)
+        del nonzero, denom
+        return projection_average
 
     def _material_optics(self, material, energy):
         d_para, b_para, d_perp, b_perp = material.opt_constants[energy]
@@ -1583,6 +1593,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     shape_override=shape_override,
                 ),
             )
+            del fft_x, fft_y, fft_z
             projection_average, valid_counts = recorder.measure(
                 "E",
                 lambda projection=projection, projection_average=projection_average, valid_counts=valid_counts, angle_plan=angle_plan: self._accumulate_rotated_projection(
@@ -1597,7 +1608,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     skip_rotation=angle_plan.is_identity_rotation,
                 ),
             )
-            del fft_x, fft_y, fft_z, projection
+            del projection
         return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
 
     def _compute_direct_polarization(
@@ -1708,14 +1719,18 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             field_projection = sx * mx + sy * my
 
             contrib_x = phi_a * (mx * aligned_base + anisotropic_delta * sx * field_projection)
-            contrib_y = phi_a * (my * aligned_base + anisotropic_delta * sy * field_projection)
-            contrib_z = phi_a * (anisotropic_delta * sz * field_projection)
-
             p_x += cp.sum(contrib_x, axis=0, dtype=cp.complex64, keepdims=True) / z_count
-            p_y += cp.sum(contrib_y, axis=0, dtype=cp.complex64, keepdims=True) / z_count
-            p_z += cp.sum(contrib_z, axis=0, dtype=cp.complex64, keepdims=True) / z_count
+            del contrib_x, sx
 
-            del phi_a, sx, sy, sz, field_projection, contrib_x, contrib_y, contrib_z
+            contrib_y = phi_a * (my * aligned_base + anisotropic_delta * sy * field_projection)
+            p_y += cp.sum(contrib_y, axis=0, dtype=cp.complex64, keepdims=True) / z_count
+            del contrib_y, sy
+
+            contrib_z = phi_a * (anisotropic_delta * sz * field_projection)
+            p_z += cp.sum(contrib_z, axis=0, dtype=cp.complex64, keepdims=True) / z_count
+            del contrib_z, sz
+
+            del phi_a, field_projection
 
         p_x *= self._one_by_four_pi
         p_y *= self._one_by_four_pi
@@ -2030,15 +2045,20 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             cp.multiply(p_z, window, out=p_z)
 
         fft_x = cp.fft.fftn(p_x)
-        fft_y = cp.fft.fftn(p_y)
-        fft_z = cp.fft.fftn(p_z)
         self._replace_dc_component(fft_x)
+        self._igor_shift(fft_x, morphology, cp, out=p_x)
+        del fft_x
+
+        fft_y = cp.fft.fftn(p_y)
         self._replace_dc_component(fft_y)
+        self._igor_shift(fft_y, morphology, cp, out=p_y)
+        del fft_y
+
+        fft_z = cp.fft.fftn(p_z)
         self._replace_dc_component(fft_z)
-        fft_x = self._igor_shift(fft_x, morphology, cp)
-        fft_y = self._igor_shift(fft_y, morphology, cp)
-        fft_z = self._igor_shift(fft_z, morphology, cp)
-        return fft_x, fft_y, fft_z
+        self._igor_shift(fft_z, morphology, cp, out=p_z)
+        del fft_z
+        return p_x, p_y, p_z
 
     def _accumulate_rotated_projection(
         self,
@@ -2065,14 +2085,18 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         )
         if use_rot_mask:
             valid = cp.isfinite(rotated)
-            valid_counts = (
-                valid.astype(cp.int32)
-                if valid_counts is None
-                else valid_counts + valid.astype(cp.int32)
-            )
-            rotated = cp.where(valid, rotated, np.float32(0.0))
+            valid_int = valid.astype(cp.int32)
+            if valid_counts is None:
+                valid_counts = valid_int
+            else:
+                cp.add(valid_counts, valid_int, out=valid_counts)
+                del valid_int
+            cp.nan_to_num(rotated, copy=False, nan=0.0)
             del valid
-        projection_average = rotated if projection_average is None else projection_average + rotated
+        if projection_average is None:
+            projection_average = rotated
+        else:
+            cp.add(projection_average, rotated, out=projection_average)
         del rotated
         return projection_average, valid_counts
 
@@ -2552,6 +2576,18 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
     def _q_axes(self, morphology, cp, shape_override=None):
         detector_geometry = self._detector_geometry(morphology, cp, shape_override=shape_override)
         return detector_geometry.qx, detector_geometry.qy, detector_geometry.qz
+
+    def _discard_detector_projection_geometry(self, morphology, energy, shape_override=None):
+        z, y, x = self._shape_tuple(morphology, shape_override=shape_override)
+        cache_key = (
+            "detector_projection_geometry_current",
+            z,
+            y,
+            x,
+            float(morphology.PhysSize),
+            float(energy),
+        )
+        morphology._backend_runtime_state.pop(cache_key, None)
 
     def _detector_geometry(self, morphology, cp, shape_override=None):
         z, y, x = self._shape_tuple(morphology, shape_override=shape_override)

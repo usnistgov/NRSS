@@ -46,6 +46,9 @@ SUMMARY_NAME = "comprehensive_backend_comparison_summary.json"
 SPEED_TABLE_NAME = "comprehensive_backend_comparison_speed.tsv"
 MEMORY_TABLE_NAME = "comprehensive_backend_comparison_memory.tsv"
 REPORT_NAME = "comprehensive_backend_comparison_report.md"
+GPU_OBSERVER_SCRIPT = (
+    REPO_ROOT / "tests" / "validation" / "dev" / "core_shell_backend_performance" / "cupy_gpu_mem_observer.py"
+)
 CYRSOXS_SCRIPT = (
     REPO_ROOT / "tests" / "validation" / "dev" / "cyrsoxs_timing" / "run_cyrsoxs_timing_matrix.py"
 )
@@ -63,6 +66,10 @@ ROTATION_SPECS = (
 )
 HOST_STARTUP_MODES = ("warm", "hot")
 DEVICE_STARTUP_MODES = ("steady", "hot")
+GPU_MEMORY_OBSERVER_STABILIZE_WINDOW = 5
+GPU_MEMORY_OBSERVER_STABILIZE_TOLERANCE_MIB = 8.0
+GPU_MEMORY_OBSERVER_STARTUP_TIMEOUT_S = 30.0
+GPU_MEMORY_OBSERVER_SHUTDOWN_TIMEOUT_S = 10.0
 
 
 @dataclass(frozen=True)
@@ -79,36 +86,6 @@ class ComparisonCase:
     eangle_rotation: tuple[float, float, float]
     script_path: Path
     worker_case: Any
-
-
-def _sample_gpu_memory_used_mib(gpu_index: int) -> float | None:
-    try:
-        completed = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.used",
-                "--format=csv,noheader,nounits",
-                "-i",
-                str(gpu_index),
-            ],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    except FileNotFoundError:
-        return None
-
-    if completed.returncode != 0:
-        return None
-
-    lines = completed.stdout.strip().splitlines()
-    if not lines:
-        return None
-    try:
-        return float(lines[0].strip())
-    except ValueError:
-        return None
 
 
 def _sample_process_rss_mib(pid: int) -> float | None:
@@ -135,33 +112,23 @@ def _sample_process_rss_mib(pid: int) -> float | None:
         return None
 
 
-def _poll_memory_until_exit(
+def _poll_process_rss_until_exit(
     proc: subprocess.Popen[str],
-    *,
-    gpu_index: int,
     poll_interval_s: float,
 ) -> dict[str, float]:
-    baseline_gpu = _sample_gpu_memory_used_mib(gpu_index)
     baseline_rss = _sample_process_rss_mib(proc.pid)
-    peak_gpu = baseline_gpu
     peak_rss = baseline_rss
     sample_count = 0
 
     while proc.poll() is None:
         time.sleep(poll_interval_s)
         sample_count += 1
-        gpu_sample = _sample_gpu_memory_used_mib(gpu_index)
         rss_sample = _sample_process_rss_mib(proc.pid)
-        if gpu_sample is not None:
-            peak_gpu = gpu_sample if peak_gpu is None else max(peak_gpu, gpu_sample)
         if rss_sample is not None:
             peak_rss = rss_sample if peak_rss is None else max(peak_rss, rss_sample)
 
-    final_gpu = _sample_gpu_memory_used_mib(gpu_index)
     final_rss = _sample_process_rss_mib(proc.pid)
     sample_count += 1
-    if final_gpu is not None:
-        peak_gpu = final_gpu if peak_gpu is None else max(peak_gpu, final_gpu)
     if final_rss is not None:
         peak_rss = final_rss if peak_rss is None else max(peak_rss, final_rss)
 
@@ -169,12 +136,6 @@ def _poll_memory_until_exit(
         "poll_interval_s": float(poll_interval_s),
         "sample_count": float(sample_count),
     }
-    if baseline_gpu is not None:
-        probe["baseline_gpu_used_mib"] = float(baseline_gpu)
-        probe["peak_gpu_used_mib"] = float(peak_gpu if peak_gpu is not None else baseline_gpu)
-        probe["peak_gpu_delta_mib"] = float(
-            max(0.0, (peak_gpu if peak_gpu is not None else baseline_gpu) - baseline_gpu)
-        )
     if baseline_rss is not None:
         probe["baseline_process_rss_mib"] = float(baseline_rss)
         probe["peak_process_rss_mib"] = float(peak_rss if peak_rss is not None else baseline_rss)
@@ -184,7 +145,164 @@ def _poll_memory_until_exit(
     return probe
 
 
-def _host_cyrsoxs_case(*, startup_mode: str, rotation_key: str, rotation_label: str, eangle_rotation):
+def _start_gpu_memory_observer(
+    *,
+    output_dir: Path,
+    case: ComparisonCase,
+    gpu_index: int,
+    poll_interval_s: float,
+) -> tuple[subprocess.Popen[str], Path, Path, Path]:
+    observer_ready_path = output_dir / f"{case.key}__gpu_mem_observer_ready.json"
+    observer_trace_path = output_dir / f"{case.key}__gpu_mem_observer.json"
+    observer_stop_path = output_dir / f"{case.key}__gpu_mem_observer.stop"
+    for path in (observer_ready_path, observer_trace_path, observer_stop_path):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+    cmd = [
+        sys.executable,
+        str(GPU_OBSERVER_SCRIPT),
+        "--ready-path",
+        str(observer_ready_path),
+        "--output-path",
+        str(observer_trace_path),
+        "--stop-path",
+        str(observer_stop_path),
+        "--device-index",
+        "0",
+        "--sample-interval-s",
+        str(poll_interval_s),
+        "--stabilize-window",
+        str(GPU_MEMORY_OBSERVER_STABILIZE_WINDOW),
+        "--stabilize-tolerance-mib",
+        str(GPU_MEMORY_OBSERVER_STABILIZE_TOLERANCE_MIB),
+        "--startup-timeout-s",
+        str(GPU_MEMORY_OBSERVER_STARTUP_TIMEOUT_S),
+    ]
+    env = os.environ.copy()
+    env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    env["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(REPO_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    return proc, observer_ready_path, observer_trace_path, observer_stop_path
+
+
+def _wait_for_gpu_memory_observer_ready(
+    proc: subprocess.Popen[str],
+    *,
+    ready_path: Path,
+    timeout_s: float,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if ready_path.exists():
+            payload = json.loads(ready_path.read_text())
+            if payload.get("status") == "ready":
+                return payload
+            raise RuntimeError(
+                "GPU memory observer failed before the worker started: "
+                f"{payload.get('error_type', 'UnknownError')}: {payload.get('error', 'unknown error')}"
+            )
+        if proc.poll() is not None:
+            stdout, stderr = proc.communicate()
+            raise RuntimeError(
+                "GPU memory observer exited before signaling readiness. "
+                f"stdout={stdout[-1000:]!r} stderr={stderr[-1000:]!r}"
+            )
+        time.sleep(0.01)
+    raise TimeoutError("GPU memory observer did not reach a stable baseline in time.")
+
+
+def _stop_gpu_memory_observer(
+    proc: subprocess.Popen[str],
+    *,
+    stop_path: Path,
+    output_path: Path,
+    timeout_s: float,
+) -> dict[str, Any]:
+    stop_path.write_text("stop\n", encoding="utf-8")
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if output_path.exists() and proc.poll() is not None:
+            payload = json.loads(output_path.read_text())
+            stdout, stderr = proc.communicate()
+            try:
+                stop_path.unlink()
+            except FileNotFoundError:
+                pass
+            if stdout.strip():
+                payload["observer_stdout"] = stdout[-4000:]
+            if stderr.strip():
+                payload["observer_stderr"] = stderr[-4000:]
+            return payload
+        time.sleep(0.01)
+
+    proc.terminate()
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout, stderr = proc.communicate()
+    if output_path.exists():
+        payload = json.loads(output_path.read_text())
+        try:
+            stop_path.unlink()
+        except FileNotFoundError:
+            pass
+        if stdout.strip():
+            payload["observer_stdout"] = stdout[-4000:]
+        if stderr.strip():
+            payload["observer_stderr"] = stderr[-4000:]
+        return payload
+    raise TimeoutError(
+        "GPU memory observer did not flush its summary before shutdown. "
+        f"stdout={stdout[-1000:]!r} stderr={stderr[-1000:]!r}"
+    )
+
+
+def _merge_memory_probes(
+    *,
+    gpu_probe: dict[str, Any],
+    rss_probe: dict[str, float],
+    trace_path: Path,
+    ready_probe: dict[str, Any],
+) -> dict[str, Any]:
+    probe = {
+        "probe_method": str(gpu_probe.get("probe_method", "cupy_memgetinfo_observer")),
+        "poll_interval_s": float(gpu_probe.get("sample_interval_s", rss_probe.get("poll_interval_s", 0.0))),
+        "sample_count": float(gpu_probe.get("sample_count", 0)),
+        "baseline_gpu_used_mib": float(gpu_probe["baseline_gpu_used_mib"]),
+        "peak_gpu_used_mib": float(gpu_probe["peak_gpu_used_mib"]),
+        "peak_gpu_delta_mib": float(gpu_probe["peak_gpu_delta_mib"]),
+        "gpu_observer_trace_path": str(trace_path),
+        "gpu_observer_startup_seconds": float(gpu_probe.get("observer_startup_seconds", 0.0)),
+        "gpu_observer_warmup_sample_count": float(gpu_probe.get("warmup_sample_count", 0)),
+        "gpu_observer_stable_window_mib": list(
+            ready_probe.get("stable_window_mib", gpu_probe.get("stable_window_mib", []))
+        ),
+    }
+    probe.update(rss_probe)
+    probe["rss_sample_count"] = probe.pop("sample_count")
+    probe["sample_count"] = float(gpu_probe.get("sample_count", 0))
+    return probe
+
+
+def _host_cyrsoxs_case(
+    *,
+    startup_mode: str,
+    rotation_key: str,
+    rotation_label: str,
+    eangle_rotation,
+    size_label: str,
+):
     worker_warmup_runs = 1 if startup_mode == "hot" else 0
     label = f"comprehensive__host__{startup_mode}__cyrsoxs__{rotation_key}"
     return ComparisonCase(
@@ -202,15 +320,15 @@ def _host_cyrsoxs_case(*, startup_mode: str, rotation_key: str, rotation_label: 
         worker_case=CyrsoxsBenchmarkCase(
             label=label,
             family="core_shell",
-            shape_label="small",
+            shape_label=size_label,
             energies_ev=CORE_SHELL_SINGLE_ENERGIES,
             eangle_rotation=eangle_rotation,
             isotropic_representation="legacy_zero_array",
             cuda_prewarm_mode="before_prepare_inputs",
             worker_warmup_runs=worker_warmup_runs,
             notes=(
-                "Comprehensive cross-backend host comparison lane for the small single-energy "
-                f"CoreShell benchmark under startup_mode={startup_mode}."
+                "Comprehensive cross-backend host comparison lane for the "
+                f"{size_label} single-energy CoreShell benchmark under startup_mode={startup_mode}."
             ),
         ),
     )
@@ -225,6 +343,7 @@ def _cupy_case(
     rotation_key: str,
     rotation_label: str,
     eangle_rotation,
+    size_label: str,
 ):
     path_variant = execution_path
     if z_collapse_mode is not None:
@@ -252,7 +371,7 @@ def _cupy_case(
             label=label,
             family="core_shell",
             backend="cupy-rsoxs",
-            shape_label="small",
+            shape_label=size_label,
             energies_ev=CORE_SHELL_SINGLE_ENERGIES,
             eangle_rotation=eangle_rotation,
             field_namespace=field_namespace,
@@ -265,7 +384,8 @@ def _cupy_case(
             timing_segments=TIMING_SEGMENTS,
             worker_warmup_runs=worker_warmup_runs,
             notes=(
-                "Comprehensive cross-backend comparison lane for the small single-energy "
+                "Comprehensive cross-backend comparison lane for the "
+                f"{size_label} single-energy "
                 f"CoreShell benchmark under residency={residency}, startup_mode={startup_mode}, "
                 f"execution_path={execution_path}, z_collapse_mode={z_collapse_mode!r}."
             ),
@@ -273,7 +393,7 @@ def _cupy_case(
     )
 
 
-def _build_cases(*, include_z_collapse: bool) -> list[ComparisonCase]:
+def _build_cases(*, include_z_collapse: bool, size_label: str) -> list[ComparisonCase]:
     cases: list[ComparisonCase] = []
     for rotation_key, eangle_rotation, rotation_label in ROTATION_SPECS:
         for startup_mode in HOST_STARTUP_MODES:
@@ -283,6 +403,7 @@ def _build_cases(*, include_z_collapse: bool) -> list[ComparisonCase]:
                     rotation_key=rotation_key,
                     rotation_label=rotation_label,
                     eangle_rotation=eangle_rotation,
+                    size_label=size_label,
                 )
             )
             for execution_path in ("tensor_coeff", "direct_polarization"):
@@ -295,6 +416,7 @@ def _build_cases(*, include_z_collapse: bool) -> list[ComparisonCase]:
                         rotation_key=rotation_key,
                         rotation_label=rotation_label,
                         eangle_rotation=eangle_rotation,
+                        size_label=size_label,
                     )
                 )
             if include_z_collapse:
@@ -307,6 +429,7 @@ def _build_cases(*, include_z_collapse: bool) -> list[ComparisonCase]:
                         rotation_key=rotation_key,
                         rotation_label=rotation_label,
                         eangle_rotation=eangle_rotation,
+                        size_label=size_label,
                     )
                 )
 
@@ -321,6 +444,7 @@ def _build_cases(*, include_z_collapse: bool) -> list[ComparisonCase]:
                         rotation_key=rotation_key,
                         rotation_label=rotation_label,
                         eangle_rotation=eangle_rotation,
+                        size_label=size_label,
                     )
                 )
             if include_z_collapse:
@@ -333,6 +457,7 @@ def _build_cases(*, include_z_collapse: bool) -> list[ComparisonCase]:
                         rotation_key=rotation_key,
                         rotation_label=rotation_label,
                         eangle_rotation=eangle_rotation,
+                        size_label=size_label,
                     )
                 )
     return cases
@@ -351,7 +476,10 @@ def _run_case_subprocess(
     result_path = output_dir / f"{case.key}.json"
     if skip_existing and result_path.exists():
         existing = json.loads(result_path.read_text())
-        if existing.get("status") == "ok" and (not monitor_memory or "memory_probe" in existing):
+        if existing.get("status") == "ok" and (
+            not monitor_memory
+            or existing.get("memory_probe", {}).get("probe_method") == "cupy_memgetinfo_observer"
+        ):
             existing["reused_existing"] = True
             return existing
 
@@ -375,6 +503,23 @@ def _run_case_subprocess(
         env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         env["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
 
+        observer_proc = None
+        observer_ready = None
+        observer_trace_path = None
+        observer_stop_path = None
+        if monitor_memory:
+            observer_proc, observer_ready_path, observer_trace_path, observer_stop_path = _start_gpu_memory_observer(
+                output_dir=output_dir,
+                case=case,
+                gpu_index=gpu_index,
+                poll_interval_s=poll_interval_s,
+            )
+            observer_ready = _wait_for_gpu_memory_observer_ready(
+                observer_proc,
+                ready_path=observer_ready_path,
+                timeout_s=GPU_MEMORY_OBSERVER_STARTUP_TIMEOUT_S,
+            )
+
         started = time.perf_counter()
         proc = subprocess.Popen(
             cmd,
@@ -385,12 +530,43 @@ def _run_case_subprocess(
             env=env,
         )
         memory_probe = None
-        if monitor_memory:
-            memory_probe = _poll_memory_until_exit(
-                proc,
-                gpu_index=gpu_index,
-                poll_interval_s=poll_interval_s,
-            )
+        try:
+            if monitor_memory:
+                rss_probe = _poll_process_rss_until_exit(
+                    proc,
+                    poll_interval_s=poll_interval_s,
+                )
+                assert observer_proc is not None
+                assert observer_trace_path is not None
+                assert observer_stop_path is not None
+                assert observer_ready is not None
+                gpu_probe = _stop_gpu_memory_observer(
+                    observer_proc,
+                    stop_path=observer_stop_path,
+                    output_path=observer_trace_path,
+                    timeout_s=GPU_MEMORY_OBSERVER_SHUTDOWN_TIMEOUT_S,
+                )
+                memory_probe = _merge_memory_probes(
+                    gpu_probe=gpu_probe,
+                    rss_probe=rss_probe,
+                    trace_path=observer_trace_path,
+                    ready_probe=observer_ready,
+                )
+        finally:
+            if monitor_memory and observer_proc is not None and observer_proc.poll() is None:
+                assert observer_stop_path is not None
+                observer_stop_path.write_text("stop\n", encoding="utf-8")
+                observer_proc.terminate()
+                try:
+                    observer_proc.communicate(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    observer_proc.kill()
+                    observer_proc.communicate()
+            if monitor_memory and observer_stop_path is not None:
+                try:
+                    observer_stop_path.unlink()
+                except FileNotFoundError:
+                    pass
         stdout, stderr = proc.communicate()
         elapsed = time.perf_counter() - started
 
@@ -565,9 +741,9 @@ def _build_memory_report_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]
         candidate_probe = row.get("memory_probe", {})
         baseline_probe = baseline.get("memory_probe", {}) if baseline is not None else {}
 
-        baseline_peak_gpu = baseline_probe.get("peak_gpu_used_mib")
+        baseline_peak_gpu = baseline_probe.get("peak_gpu_delta_mib")
         baseline_peak_rss = baseline_probe.get("peak_process_rss_mib")
-        candidate_peak_gpu = candidate_probe.get("peak_gpu_used_mib")
+        candidate_peak_gpu = candidate_probe.get("peak_gpu_delta_mib")
         candidate_peak_rss = candidate_probe.get("peak_process_rss_mib")
 
         report_rows.append(
@@ -578,8 +754,8 @@ def _build_memory_report_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]
                 "z collapse": row.get("comparison_z_collapse_mode") or "off",
                 "Rotation": row.get("comparison_rotation_label", ""),
                 "Legacy baseline": baseline_startup_mode,
-                "Legacy cyrsoxs peak GPU": baseline_peak_gpu,
-                "cupy-rsoxs peak GPU": candidate_peak_gpu,
+                "Legacy cyrsoxs peak GPU delta": baseline_peak_gpu,
+                "cupy-rsoxs peak GPU delta": candidate_peak_gpu,
                 "Peak GPU factor vs cyrsoxs": _memory_factor_vs_baseline(
                     baseline_peak_gpu,
                     candidate_peak_gpu,
@@ -638,8 +814,8 @@ def _ascii_table(rows: list[dict[str, Any]]) -> str:
             if "Speedup" in header or "factor vs cyrsoxs" in header:
                 rendered.append(_fmt_speedup(value))
             elif header in {
-                "Legacy cyrsoxs peak GPU",
-                "cupy-rsoxs peak GPU",
+                "Legacy cyrsoxs peak GPU delta",
+                "cupy-rsoxs peak GPU delta",
                 "Legacy cyrsoxs peak RSS",
                 "cupy-rsoxs peak RSS",
             }:
@@ -671,74 +847,106 @@ def _ascii_table(rows: list[dict[str, Any]]) -> str:
 def _write_table(path: Path, rows: list[dict[str, Any]], *, include_memory: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     enriched_rows = _enrich_results_with_legacy_speedups(rows)
-    fieldnames = [
-        "comparison_key",
-        "comparison_backend",
-        "comparison_residency",
-        "comparison_startup_mode",
-        "comparison_execution_path",
-        "comparison_path_variant",
-        "comparison_z_collapse_mode",
-        "comparison_rotation_label",
-        "comparison_cyrsoxs_baseline_startup_mode",
-        "comparison_cyrsoxs_baseline_key",
-        "status",
-        "comparison_cyrsoxs_primary_seconds",
-        "primary_seconds",
-        "comparison_speedup_vs_cyrsoxs",
-        "subprocess_seconds",
-    ]
     if include_memory:
-        fieldnames.extend(
-            [
-                "peak_gpu_used_mib",
-                "peak_gpu_delta_mib",
-                "peak_process_rss_mib",
-                "peak_process_rss_delta_mib",
-                "poll_interval_s",
-                "sample_count",
-            ]
-        )
+        fieldnames = [
+            "comparison_key",
+            "comparison_backend",
+            "comparison_residency",
+            "comparison_startup_mode",
+            "comparison_execution_path",
+            "comparison_path_variant",
+            "comparison_z_collapse_mode",
+            "comparison_rotation_label",
+            "comparison_cyrsoxs_baseline_startup_mode",
+            "comparison_cyrsoxs_baseline_key",
+            "status",
+            "probe_method",
+            "baseline_gpu_used_mib",
+            "peak_gpu_used_mib",
+            "peak_gpu_delta_mib",
+            "baseline_process_rss_mib",
+            "peak_process_rss_mib",
+            "peak_process_rss_delta_mib",
+            "poll_interval_s",
+            "sample_count",
+            "rss_sample_count",
+            "gpu_observer_trace_path",
+        ]
+    else:
+        fieldnames = [
+            "comparison_key",
+            "comparison_backend",
+            "comparison_residency",
+            "comparison_startup_mode",
+            "comparison_execution_path",
+            "comparison_path_variant",
+            "comparison_z_collapse_mode",
+            "comparison_rotation_label",
+            "comparison_cyrsoxs_baseline_startup_mode",
+            "comparison_cyrsoxs_baseline_key",
+            "status",
+            "comparison_cyrsoxs_primary_seconds",
+            "primary_seconds",
+            "comparison_speedup_vs_cyrsoxs",
+            "subprocess_seconds",
+        ]
 
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
         writer.writeheader()
         for row in sorted(enriched_rows, key=_case_sort_key):
             memory_probe = row.get("memory_probe", {})
-            record = {
-                "comparison_key": row.get("comparison_key", ""),
-                "comparison_backend": row.get("comparison_backend", ""),
-                "comparison_residency": row.get("comparison_residency", ""),
-                "comparison_startup_mode": row.get("comparison_startup_mode", ""),
-                "comparison_execution_path": row.get("comparison_execution_path", ""),
-                "comparison_path_variant": row.get("comparison_path_variant", ""),
-                "comparison_z_collapse_mode": row.get("comparison_z_collapse_mode", ""),
-                "comparison_rotation_label": row.get("comparison_rotation_label", ""),
-                "comparison_cyrsoxs_baseline_startup_mode": row.get(
-                    "comparison_cyrsoxs_baseline_startup_mode", ""
-                ),
-                "comparison_cyrsoxs_baseline_key": row.get("comparison_cyrsoxs_baseline_key", ""),
-                "status": row.get("status", ""),
-                "comparison_cyrsoxs_primary_seconds": row.get(
-                    "comparison_cyrsoxs_primary_seconds", ""
-                ),
-                "primary_seconds": row.get("primary_seconds", ""),
-                "comparison_speedup_vs_cyrsoxs": row.get("comparison_speedup_vs_cyrsoxs", ""),
-                "subprocess_seconds": row.get("subprocess_seconds", ""),
-            }
             if include_memory:
-                record.update(
-                    {
-                        "peak_gpu_used_mib": memory_probe.get("peak_gpu_used_mib", ""),
-                        "peak_gpu_delta_mib": memory_probe.get("peak_gpu_delta_mib", ""),
-                        "peak_process_rss_mib": memory_probe.get("peak_process_rss_mib", ""),
-                        "peak_process_rss_delta_mib": memory_probe.get(
-                            "peak_process_rss_delta_mib", ""
-                        ),
-                        "poll_interval_s": memory_probe.get("poll_interval_s", ""),
-                        "sample_count": memory_probe.get("sample_count", ""),
-                    }
-                )
+                record = {
+                    "comparison_key": row.get("comparison_key", ""),
+                    "comparison_backend": row.get("comparison_backend", ""),
+                    "comparison_residency": row.get("comparison_residency", ""),
+                    "comparison_startup_mode": row.get("comparison_startup_mode", ""),
+                    "comparison_execution_path": row.get("comparison_execution_path", ""),
+                    "comparison_path_variant": row.get("comparison_path_variant", ""),
+                    "comparison_z_collapse_mode": row.get("comparison_z_collapse_mode", ""),
+                    "comparison_rotation_label": row.get("comparison_rotation_label", ""),
+                    "comparison_cyrsoxs_baseline_startup_mode": row.get(
+                        "comparison_cyrsoxs_baseline_startup_mode", ""
+                    ),
+                    "comparison_cyrsoxs_baseline_key": row.get("comparison_cyrsoxs_baseline_key", ""),
+                    "status": row.get("status", ""),
+                    "probe_method": memory_probe.get("probe_method", ""),
+                    "baseline_gpu_used_mib": memory_probe.get("baseline_gpu_used_mib", ""),
+                    "peak_gpu_used_mib": memory_probe.get("peak_gpu_used_mib", ""),
+                    "peak_gpu_delta_mib": memory_probe.get("peak_gpu_delta_mib", ""),
+                    "baseline_process_rss_mib": memory_probe.get("baseline_process_rss_mib", ""),
+                    "peak_process_rss_mib": memory_probe.get("peak_process_rss_mib", ""),
+                    "peak_process_rss_delta_mib": memory_probe.get(
+                        "peak_process_rss_delta_mib", ""
+                    ),
+                    "poll_interval_s": memory_probe.get("poll_interval_s", ""),
+                    "sample_count": memory_probe.get("sample_count", ""),
+                    "rss_sample_count": memory_probe.get("rss_sample_count", ""),
+                    "gpu_observer_trace_path": memory_probe.get("gpu_observer_trace_path", ""),
+                }
+            else:
+                record = {
+                    "comparison_key": row.get("comparison_key", ""),
+                    "comparison_backend": row.get("comparison_backend", ""),
+                    "comparison_residency": row.get("comparison_residency", ""),
+                    "comparison_startup_mode": row.get("comparison_startup_mode", ""),
+                    "comparison_execution_path": row.get("comparison_execution_path", ""),
+                    "comparison_path_variant": row.get("comparison_path_variant", ""),
+                    "comparison_z_collapse_mode": row.get("comparison_z_collapse_mode", ""),
+                    "comparison_rotation_label": row.get("comparison_rotation_label", ""),
+                    "comparison_cyrsoxs_baseline_startup_mode": row.get(
+                        "comparison_cyrsoxs_baseline_startup_mode", ""
+                    ),
+                    "comparison_cyrsoxs_baseline_key": row.get("comparison_cyrsoxs_baseline_key", ""),
+                    "status": row.get("status", ""),
+                    "comparison_cyrsoxs_primary_seconds": row.get(
+                        "comparison_cyrsoxs_primary_seconds", ""
+                    ),
+                    "primary_seconds": row.get("primary_seconds", ""),
+                    "comparison_speedup_vs_cyrsoxs": row.get("comparison_speedup_vs_cyrsoxs", ""),
+                    "subprocess_seconds": row.get("subprocess_seconds", ""),
+                }
             writer.writerow(record)
 
 
@@ -749,7 +957,7 @@ def _write_human_report(path: Path, summary: dict[str, Any]) -> None:
         [
             f"# Comprehensive Backend Comparison Report ({summary['label']})",
             "",
-            "Small single-energy CoreShell cross-backend comparison.",
+            f"{summary['size_label'].capitalize()} single-energy CoreShell cross-backend comparison.",
             "",
             (
                 "Optional z-collapse rows are included in this report."
@@ -769,6 +977,8 @@ def _write_human_report(path: Path, summary: dict[str, Any]) -> None:
             "",
             "## Memory Pass",
             "",
+            "Speed is assessed only from the separate speed-pass series above.",
+            "This memory pass reports warmed same-GPU observer GPU deltas and parent-side RSS.",
             "Memory factors are reported as `cupy-rsoxs / cyrsoxs` using the matching legacy baseline row.",
             "",
             _ascii_table(memory_rows),
@@ -782,19 +992,21 @@ def _write_summary(path: Path, summary: dict[str, Any]) -> None:
     path.write_text(json.dumps(summary, indent=2, default=_json_default) + "\n")
 
 
-def _result_summary_line(result: dict[str, Any]) -> str:
+def _result_summary_line(result: dict[str, Any], *, include_speed: bool) -> str:
     if result.get("status") != "ok":
         return (
             f"{result.get('comparison_key', 'unknown')}: "
             f"{result.get('status')} ({result.get('error_type', 'unknown')})"
         )
-    parts = [
-        f"{result['comparison_key']}: primary {float(result['primary_seconds']):.3f}s",
-    ]
+    parts = [f"{result['comparison_key']}:"]
+    if include_speed:
+        parts.append(f"primary {float(result['primary_seconds']):.3f}s")
     probe = result.get("memory_probe")
     if probe:
         if "peak_gpu_used_mib" in probe:
             parts.append(f"peak GPU {float(probe['peak_gpu_used_mib']):.0f} MiB")
+        if "peak_gpu_delta_mib" in probe:
+            parts.append(f"peak GPU delta {float(probe['peak_gpu_delta_mib']):.0f} MiB")
         if "peak_process_rss_mib" in probe:
             parts.append(f"peak RSS {float(probe['peak_process_rss_mib']):.0f} MiB")
     return ", ".join(parts)
@@ -803,6 +1015,10 @@ def _result_summary_line(result: dict[str, Any]) -> str:
 def run_comparison(args: argparse.Namespace) -> int:
     if not has_visible_gpu():
         raise SystemExit("No visible NVIDIA GPU found for the comprehensive backend comparison study.")
+    if args.size_label not in SIZE_SPECS:
+        raise SystemExit(
+            f"--size-label expects one of {sorted(SIZE_SPECS)}, got {args.size_label!r}."
+        )
 
     run_label = args.label or _timestamp()
     run_dir = OUT_ROOT / run_label
@@ -812,14 +1028,14 @@ def run_comparison(args: argparse.Namespace) -> int:
     speed_table_path = run_dir / SPEED_TABLE_NAME
     memory_table_path = run_dir / MEMORY_TABLE_NAME
     report_path = run_dir / REPORT_NAME
-    cases = _build_cases(include_z_collapse=bool(args.include_z_collapse))
+    cases = _build_cases(include_z_collapse=bool(args.include_z_collapse), size_label=args.size_label)
 
     summary = {
         "label": run_label,
         "created_utc": _timestamp(),
         "python_executable": sys.executable,
         "gpu_index": int(args.gpu_index),
-        "size_label": "small",
+        "size_label": args.size_label,
         "energies_ev": list(CORE_SHELL_SINGLE_ENERGIES),
         "include_z_collapse": bool(args.include_z_collapse),
         "rotations": [
@@ -847,7 +1063,7 @@ def run_comparison(args: argparse.Namespace) -> int:
         )
         summary["speed_cases"][case.key] = result
         _write_summary(summary_path, summary)
-        print(_result_summary_line(result), flush=True)
+        print(_result_summary_line(result, include_speed=True), flush=True)
 
     print("Running comprehensive memory pass...", flush=True)
     for case in cases:
@@ -861,7 +1077,7 @@ def run_comparison(args: argparse.Namespace) -> int:
         )
         summary["memory_cases"][case.key] = result
         _write_summary(summary_path, summary)
-        print(_result_summary_line(result), flush=True)
+        print(_result_summary_line(result, include_speed=False), flush=True)
 
     _write_table(speed_table_path, list(summary["speed_cases"].values()), include_memory=False)
     _write_table(memory_table_path, list(summary["memory_cases"].values()), include_memory=True)
@@ -877,18 +1093,27 @@ def run_comparison(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Development-only comprehensive cross-backend small-CoreShell comparison. "
+            "Development-only comprehensive cross-backend single-size CoreShell comparison. "
             "Runs separate speed and memory passes across host warm/hot and "
-            "device steady/hot lanes."
+            "device steady/hot lanes. The memory pass uses a warmed same-GPU "
+            "CuPy memGetInfo observer plus process RSS polling."
         )
     )
     parser.add_argument("--label", default=None, help="Output subdirectory label under test-reports.")
     parser.add_argument("--gpu-index", type=int, default=0, help="Global GPU index to pin for serial runs.")
     parser.add_argument(
+        "--size-label",
+        default="small",
+        help="CoreShell size label to run, for example 'small', 'medium', or 'large'.",
+    )
+    parser.add_argument(
         "--memory-poll-interval-s",
         type=float,
-        default=0.05,
-        help="External polling cadence for the separate memory pass.",
+        default=0.01,
+        help=(
+            "Sampling cadence for the warmed CuPy GPU-memory observer and the "
+            "parent-side RSS polling during the separate memory pass."
+        ),
     )
     parser.add_argument(
         "--no-skip-existing",

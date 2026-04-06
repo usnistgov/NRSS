@@ -46,11 +46,16 @@ Principal cross-backend comparison:
     - host `warm` / `hot`: `cupy-rsoxs tensor_coeff` with `z_collapse_mode="mean"`,
     - device `steady` / `hot`: the same collapsed `tensor_coeff` path,
   - uses single energy only,
+  - accepts `--size-label` to choose the CoreShell ladder entry, for example
+    `small`, `medium`, or `large`,
   - uses the two requested rotation schemes only:
     - `no rotation`: `[0, 0, 0]`,
     - `0:5:165`: `[0, 5, 165]`,
   - records speed from the backend-specific maintained timing boundaries,
-  - records memory in a separate pass with external peak GPU polling plus process RSS polling,
+  - records memory in a separate pass with:
+    - a warmed same-GPU CuPy observer subprocess using `cupy.cuda.runtime.memGetInfo()`,
+    - baseline-subtracted peak GPU memory for the worker lifetime,
+    - and process RSS polling from the parent orchestrator,
   - writes a combined summary plus separate speed and memory TSVs,
   - includes a speedup column on each `cupy-rsoxs` row against the comparable
     legacy `cyrsoxs` run,
