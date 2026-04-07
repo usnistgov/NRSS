@@ -1734,13 +1734,48 @@ def test_cupy_device_resident_runtime_skips_orientation_staging_for_explicit_iso
 
 
 @pytest.mark.gpu
-def test_cupy_host_resident_runtime_keeps_staging_all_legacy_zero_array_fields():
-    """Ensure legacy zero-array isotropic materials no longer receive the explicit-contract staging shortcut."""
+def test_cupy_host_resident_direct_polarization_shortcuts_legacy_zero_array_fields():
+    """Ensure host-resident direct_polarization legacy-zero fields now stage only Vfrac."""
     cp = _import_cupy_required()
     morph = None
     try:
         morph = _build_two_material_isotropic_block_morphology(
             backend="cupy-rsoxs",
+            backend_options={"execution_path": "direct_polarization"},
+            resident_mode="host",
+            field_namespace="numpy",
+            isotropic_representation="legacy_zero_array",
+        )
+        result = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.Stream.null.synchronize()
+        assert list(result.to_backend_array().shape) == [1, 16, 16]
+        staged_fields = sorted(
+            (plan.material_id, plan.field_name)
+            for plan in morph.last_runtime_staging_report
+            if plan.original_namespace != "missing"
+        )
+        assert staged_fields == [
+            (1, "Vfrac"),
+            (2, "Vfrac"),
+        ]
+    finally:
+        if morph is not None:
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
+@pytest.mark.gpu
+def test_cupy_host_resident_tensor_coeff_keeps_staging_all_legacy_zero_array_fields():
+    """Ensure tensor_coeff keeps the historical legacy-zero staging behavior."""
+    cp = _import_cupy_required()
+    morph = None
+    try:
+        morph = _build_two_material_isotropic_block_morphology(
+            backend="cupy-rsoxs",
+            backend_options={"execution_path": "tensor_coeff"},
             resident_mode="host",
             field_namespace="numpy",
             isotropic_representation="legacy_zero_array",

@@ -2476,6 +2476,147 @@ medium-memory candidates if direct-path memory is revisited again.
    - memory-traffic reduction in `Segment B`
    - plus speed wins on isotropic-heavy or sparse-anisotropy workloads
 
+### April 7 2026 fused float32 isotropic accumulation follow-up
+
+This pass executed deferred idea `3` on top of the retained April 6 direct
+path state.
+
+Implementation shape:
+
+1. remove the float32 direct-path `isotropic_base_field`
+2. remove the fallback per-material `isotropic_term = vfrac * isotropic_diag`
+   temporary
+3. add:
+   - a float32 isotropic kernel for fully isotropic materials
+   - a fused float32 anisotropic kernel that writes both the isotropic and
+     anisotropic contributions directly into `p_x / p_y / p_z`
+
+Artifacts:
+
+1. dev recheck runner:
+   - `tests/validation/dev/core_shell_backend_performance/run_direct_polarization_fused_isotropic_recheck.py`
+2. summary:
+   - `test-reports/core-shell-backend-performance-dev/dp_fused_iso_run_20260407/direct_polarization_fused_isotropic_recheck_summary.json`
+
+Parity:
+
+1. small host no-rotation parity versus the maintained baseline:
+   - `max_abs = 0`
+   - `rmse = 0`
+   - `p95_abs = 0`
+
+Measured outcome versus the pre-pass maintained state:
+
+1. small device-hot `0:5:165`:
+   - `primary 0.273831 s -> 0.257478 s`
+   - peak GPU delta `876 MiB -> 760 MiB`
+2. medium host-hot no rotation:
+   - `primary 0.870253 s -> 0.898388 s`
+   - peak GPU delta `5806 MiB -> 4824 MiB`
+3. medium host-hot `0:5:165`:
+   - `primary 2.797279 s -> 2.752121 s`
+   - peak GPU delta `5806 MiB -> 4824 MiB`
+
+Disposition:
+
+1. accepted
+2. promoted into `src/NRSS/backends/cupy_rsoxs.py`
+
+Interpretation:
+
+1. this is the first direct-path isotropic-memory candidate that removed both
+   known float32 isotropic costs at once
+2. it reduced peak GPU memory by:
+   - about `116 MiB` or `13.2%` on the small direct-hot authority lane
+   - about `982 MiB` or `16.9%` on the medium host-hot lane
+3. it also improved the maintained multi-angle primary time on both measured
+   `0:5:165` surfaces
+4. the medium no-rotation host lane regressed by about `3.2%`, which remained
+   well inside the current direct-path acceptance gate
+
+### April 7 2026 host-resident `legacy_zero_array` runtime zero-field follow-up
+
+This pass executed deferred idea `5` and a narrow follow-up for idea `6`.
+
+Implementation shape:
+
+1. detect host-resident direct-path `legacy_zero_array` materials whose
+   `S / theta / psi` fields are all zero
+2. stage only `Vfrac` for those materials
+3. route them through the direct-path isotropic handling
+4. compare that simpler contract against an extra bucketed-material-loop
+   variant
+
+Artifacts:
+
+1. dev recheck runner:
+   - `tests/validation/dev/core_shell_backend_performance/run_direct_polarization_legacy_zero_recheck.py`
+2. summary:
+   - `test-reports/core-shell-backend-performance-dev/dp_legacy_zero_run_20260407/direct_polarization_legacy_zero_recheck_summary.json`
+
+Parity:
+
+1. small host no-rotation parity versus the maintained legacy baseline:
+   - `max_abs = 0`
+   - `rmse = 0`
+   - `p95_abs = 0`
+
+Measured outcome versus the post-fused-isotropic baseline:
+
+1. accepted runtime zero-field contract:
+   - small host no rotation:
+     - `primary 0.094900 s -> 0.084919 s`
+     - `A2 0.084897 s -> 0.075542 s`
+     - `B 0.004157 s -> 0.003363 s`
+     - peak GPU delta `760 MiB -> 568 MiB`
+   - small host `0:5:165`:
+     - `primary 0.354417 s -> 0.313630 s`
+     - `A2 0.096546 s -> 0.084159 s`
+     - `B 0.134353 s -> 0.106169 s`
+     - peak GPU delta `760 MiB -> 568 MiB`
+   - medium host no rotation:
+     - `primary 0.810066 s -> 0.736386 s`
+     - `A2 0.749655 s -> 0.682963 s`
+     - `B 0.031988 s -> 0.025205 s`
+     - peak GPU delta `4824 MiB -> 3288 MiB`
+   - medium host `0:5:165`:
+     - `primary 2.681578 s -> 2.400912 s`
+     - `A2 0.741228 s -> 0.686065 s`
+     - `B 1.062546 s -> 0.837708 s`
+     - peak GPU delta `4824 MiB -> 3288 MiB`
+2. bucketed follow-up:
+   - matched the accepted contract on peak GPU memory:
+     - `568 MiB` on both small host cases
+     - `3288 MiB` on both medium host cases
+   - but did not provide an additional memory win
+   - and only produced mixed speed differences versus the simpler contract
+
+Disposition:
+
+1. accepted:
+   - the runtime zero-field contract
+2. rejected:
+   - the extra bucketed-material-loop follow-up
+3. promoted accepted scope into `src/NRSS/backends/cupy_rsoxs.py`
+4. added focused smoke coverage for:
+   - the direct-path shortcut on host-resident legacy-zero materials
+   - the deliberate non-expansion of that shortcut to `tensor_coeff`
+
+Interpretation:
+
+1. deferred idea `5` was real and high leverage on the measured host-resident
+   compatibility surface
+2. the accepted contract reduced peak GPU memory by:
+   - about `192 MiB` or `25.3%` on the small host legacy lane
+   - about `1536 MiB` or `31.8%` on the medium host legacy lane
+3. deferred idea `6` did not justify a separate maintained implementation once
+   the zero-field contract already routed those materials through the isotropic
+   path
+4. the maintained scope is intentionally narrow:
+   - `execution_path='direct_polarization'`
+   - `resident_mode='host'`
+   - historical `legacy_zero_array` compatibility inputs only
+
 ## Update Rule
 
 When `direct_polarization` work produces either:

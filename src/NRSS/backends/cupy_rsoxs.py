@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
-from .arrays import assess_array_for_backend_runtime, coerce_array_for_backend
+from .arrays import assess_array_for_backend_runtime, coerce_array_for_backend, inspect_array
 from .registry import BackendUnavailableError
 from .runtime import BackendRuntime
 
@@ -595,12 +595,40 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         wx = cp.asarray(np.hanning(x), dtype=cp.float32)[None, None, :]
         return wz * wy * wx
 
+    def _is_runtime_zero_field_array(self, value, cp) -> bool:
+        if value is None:
+            return False
+        info = inspect_array(value)
+        namespace = info["namespace"]
+        if namespace == "numpy":
+            return bool(np.count_nonzero(np.asarray(value)) == 0)
+        if namespace == "cupy":
+            return bool(int(cp.count_nonzero(value).item()) == 0)
+        raise TypeError(
+            "cupy-rsoxs runtime zero-field detection requires numpy or cupy arrays, "
+            f"received namespace {namespace!r}."
+        )
+
+    def _material_is_runtime_zero_field(self, morphology, material, cp) -> bool:
+        if self._execution_path(morphology) != "direct_polarization":
+            return False
+        if str(getattr(morphology, "resident_mode", "")) != "host":
+            return False
+        if morphology._material_is_explicit_isotropic(material):
+            return False
+        return all(
+            self._is_runtime_zero_field_array(getattr(material, field_name), cp)
+            for field_name in ("S", "theta", "psi")
+        )
+
     def _runtime_material_views(self, morphology, cp):
         runtime_contract = morphology._runtime_compute_contract
         staging_reports = []
         runtime_materials = []
         for material_id, material in morphology.materials.items():
-            is_full_isotropic = morphology._material_is_explicit_isotropic(material)
+            is_full_isotropic = morphology._material_is_explicit_isotropic(material) or (
+                self._material_is_runtime_zero_field(morphology, material, cp)
+            )
             staged_fields = {"Vfrac": None, "S": None, "theta": None, "psi": None}
             field_names = ("Vfrac",) if is_full_isotropic else ("Vfrac", "S", "theta", "psi")
             for field_name in field_names:
@@ -735,16 +763,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
     ):
         angle_family_plan = self._angle_family_plan(morphology)
         shape_override = self._segment_c_shape_override(morphology)
-        isotropic_base_field = None
-        if (
-            self._z_collapse_mode(morphology) != "mean"
-            and cp.dtype(runtime_materials[0].Vfrac.dtype).name != "float16"
-        ):
-            isotropic_base_field = self._compute_direct_isotropic_base_field(
-                runtime_materials,
-                energy,
-                cp,
-            )
         return self._project_from_direct_polarization(
             morphology=morphology,
             runtime_materials=runtime_materials,
@@ -753,7 +771,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             ndimage=ndimage,
             window=window,
             angle_family_plan=angle_family_plan,
-            isotropic_base_field=isotropic_base_field,
             shape_override=shape_override,
             recorder=recorder,
         )
@@ -924,14 +941,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         sz = cp.cos(material.theta, dtype=cp.float32)
         del sin_theta
         return sx, sy, sz
-
-    def _compute_direct_isotropic_base_field(self, runtime_materials, energy, cp):
-        shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
-        isotropic_base = cp.zeros(shape, dtype=cp.complex64)
-        for material in runtime_materials:
-            isotropic_diag, _, _ = self._material_optical_scalars(material, energy)
-            isotropic_base += material.Vfrac * isotropic_diag
-        return isotropic_base
 
     def _compute_nt_components(self, runtime_materials, energy, cp, required_components=None):
         if cp.dtype(runtime_materials[0].Vfrac.dtype).name == "float16":
@@ -1641,9 +1650,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         mx = angle_plan.mx
         my = angle_plan.my
         kernel = self._direct_polarization_kernel(morphology, cp, runtime_materials[0].Vfrac.dtype)
-        if isotropic_base_field is not None:
-            cp.multiply(isotropic_base_field, np.float32(mx), out=p_x)
-            cp.multiply(isotropic_base_field, np.float32(my), out=p_y)
+        isotropic_kernel = self._direct_isotropic_kernel_float32(morphology, cp)
 
         for material in runtime_materials:
             isotropic_diag, aligned_base, anisotropic_delta = self._material_optical_scalars(
@@ -1651,13 +1658,20 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 energy,
             )
             vfrac = material.Vfrac
-            if isotropic_base_field is None:
-                isotropic_term = vfrac * isotropic_diag
-                p_x += isotropic_term * mx
-                p_y += isotropic_term * my
             if material.is_full_isotropic:
-                if isotropic_base_field is None:
-                    del isotropic_term
+                isotropic_kernel(
+                    ((vfrac.size + 255) // 256,),
+                    (256,),
+                    (
+                        vfrac,
+                        isotropic_diag,
+                        np.float32(mx),
+                        np.float32(my),
+                        p_x,
+                        p_y,
+                        np.uint64(vfrac.size),
+                    ),
+                )
                 continue
 
             kernel(
@@ -1668,6 +1682,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     material.S,
                     material.theta,
                     material.psi,
+                    isotropic_diag,
                     aligned_base,
                     anisotropic_delta,
                     np.float32(mx),
@@ -1678,8 +1693,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     np.uint64(vfrac.size),
                 ),
             )
-            if isotropic_base_field is None:
-                del isotropic_term
 
         p_x *= self._one_by_four_pi
         p_y *= self._one_by_four_pi
@@ -1800,10 +1813,45 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         if dtype_name == "float16":
             return self._direct_generic_kernel_float16(cp)
         if dtype_name == "float32":
+            self._direct_isotropic_kernel_float32(morphology, cp)
             return self._direct_generic_kernel_float32(morphology, cp)
         raise TypeError(
             "cupy-rsoxs direct_polarization received unsupported runtime morphology "
             f"dtype {dtype_name!r}."
+        )
+
+    def _direct_isotropic_kernel_float32(self, morphology, cp):
+        return self._build_rawkernel_with_fallback(
+            cp,
+            family="direct_polarization_generic",
+            cache_key_base="direct_polarization_isotropic_complex64_float32",
+            source=r"""
+            extern "C" __global__
+            void direct_polarization_isotropic_complex64_float32(
+                const float* vfrac,
+                const float2 isotropic_diag,
+                const float mx,
+                const float my,
+                float2* p_x,
+                float2* p_y,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+
+                const float vf = vfrac[idx];
+                p_x[idx].x += vf * isotropic_diag.x * mx;
+                p_x[idx].y += vf * isotropic_diag.y * mx;
+                p_y[idx].x += vf * isotropic_diag.x * my;
+                p_y[idx].y += vf * isotropic_diag.y * my;
+            }
+            """,
+            kernel_name="direct_polarization_isotropic_complex64_float32",
+            requested_backend=self._rawkernel_backend_option(morphology, "direct_polarization_generic"),
         )
 
     def _direct_generic_kernel_float32(self, morphology, cp):
@@ -1818,6 +1866,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 const float* s,
                 const float* theta,
                 const float* psi,
+                const float2 isotropic_diag,
                 const float2 aligned_base,
                 const float2 anisotropic_delta,
                 const float mx,
@@ -1834,7 +1883,13 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     return;
                 }
 
-                const float phi = vfrac[idx] * s[idx];
+                const float vf = vfrac[idx];
+                p_x[idx].x += vf * isotropic_diag.x * mx;
+                p_x[idx].y += vf * isotropic_diag.y * mx;
+                p_y[idx].x += vf * isotropic_diag.x * my;
+                p_y[idx].y += vf * isotropic_diag.y * my;
+
+                const float phi = vf * s[idx];
                 const float theta_i = theta[idx];
                 const float psi_i = psi[idx];
                 const float sin_theta = sinf(theta_i);

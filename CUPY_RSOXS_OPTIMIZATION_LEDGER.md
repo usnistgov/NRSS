@@ -1935,3 +1935,74 @@ Backend-wide summary:
    - idea `4`: packed voxel-style runtime staging plus device-owned material loop
    - idea `5`: legacy zero-array field slimdown
    - idea `6`: zero-field-aware execution fast paths
+
+## April 7 2026 direct-path fused-isotropic and legacy-zero follow-up
+
+Path-specific details and the full experiment summaries live in
+`CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md`.
+
+Backend-wide summary:
+
+1. accepted:
+   - replace the float32 direct-path cached isotropic-base-field structure with
+     fused direct isotropic accumulation
+   - implementation shape:
+     - drop the persistent `isotropic_base_field`
+     - drop the per-material `isotropic_term` temporary
+     - add a float32 isotropic kernel for fully isotropic materials
+     - fuse float32 anisotropic-material isotropic and anisotropic writes into
+       one direct kernel
+   - measured results:
+     - small device-hot `0:5:165`:
+       - `primary 0.273831 s -> 0.257478 s`
+       - peak GPU delta `876 MiB -> 760 MiB`
+     - medium host-hot no rotation:
+       - `primary 0.870253 s -> 0.898388 s`
+       - peak GPU delta `5806 MiB -> 4824 MiB`
+     - medium host-hot `0:5:165`:
+       - `primary 2.797279 s -> 2.752121 s`
+       - peak GPU delta `5806 MiB -> 4824 MiB`
+   - interpretation:
+     - this is the accepted realization of deferred idea `3`
+     - it lowered both the maintained small direct-hot peak and the measured
+       medium host-hot peak while keeping parity exact
+2. accepted:
+   - add a narrow runtime zero-field contract for host-resident direct-path
+     `legacy_zero_array` materials
+   - implementation shape:
+     - detect all-zero `S / theta / psi` legacy fields at runtime
+     - stage only `Vfrac`
+     - route those materials through isotropic direct-path handling
+   - measured results on the host-resident legacy lane:
+     - small no rotation:
+       - `primary 0.094900 s -> 0.084919 s`
+       - peak GPU delta `760 MiB -> 568 MiB`
+     - small `0:5:165`:
+       - `primary 0.354417 s -> 0.313630 s`
+       - peak GPU delta `760 MiB -> 568 MiB`
+     - medium no rotation:
+       - `primary 0.810066 s -> 0.736386 s`
+       - peak GPU delta `4824 MiB -> 3288 MiB`
+     - medium `0:5:165`:
+       - `primary 2.681578 s -> 2.400912 s`
+       - peak GPU delta `4824 MiB -> 3288 MiB`
+   - interpretation:
+     - this is the accepted realization of deferred idea `5`
+     - it is intentionally scoped to `execution_path='direct_polarization'`
+       plus `resident_mode='host'`
+3. rejected:
+   - extra bucketed-material-loop follow-up after the runtime zero-field
+     contract
+   - measured results:
+     - matched the accepted runtime-zero contract on peak GPU memory
+     - did not produce any additional memory win
+     - only produced mixed speed movement versus the simpler implementation
+   - interpretation:
+     - deferred idea `6` does not need a separate maintained implementation on
+       top of the accepted runtime-zero shortcut
+4. resulting maintained direct-path interpretation:
+   - keep the accepted in-place direct-path `Segment C`
+   - keep the accepted fused float32 isotropic direct accumulation
+   - keep the accepted direct-path host-resident legacy-zero runtime shortcut
+   - defer any packed voxel/device-owned material-loop redesign until a new
+     direct-path memory complaint remains unsolved after these accepted changes
