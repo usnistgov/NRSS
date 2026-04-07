@@ -11,8 +11,10 @@ It holds workflow, tutorial, test, and implementation details that should versio
 - Smoke tests: `tests/smoke`
 - Validation tests: `tests/validation`
 - Repo upgrade plan: `REPO_UPGRADE_PLAN.md`
-- `cupy-rsoxs` backend spec: `CUPY_RSOXS_BACKEND_SPEC.md`
-- `cupy-rsoxs` optimization ledger: `CUPY_RSOXS_OPTIMIZATION_LEDGER.md`
+- `cupy-rsoxs` backend spec: `optimization/cupy_rsoxs/backend_spec.md`
+- `cupy-rsoxs` optimization index: `optimization/cupy_rsoxs/README.md`
+- `cupy-rsoxs` validation/program status: `optimization/cupy_rsoxs/validation_and_status.md`
+- `cupy-rsoxs` optimization archive: `optimization/cupy_rsoxs/archive/`
 
 ## Source And Edit Map
 - `src/NRSS/morphology.py`: main `Morphology` / `Material` API, config handling, CyRSoXS object wiring, and run path.
@@ -50,39 +52,6 @@ It holds workflow, tutorial, test, and implementation details that should versio
 - Avoid committing notebook-output churn, checkpoint directories, logs, or other ignored artifacts unless the task explicitly requires regenerated artifacts.
 - Do not commit or leave behind generated caches such as `__pycache__`, `.nbc`, or `.nbi`, especially under `tests/validation/dev/`.
 
-## Tutorial-Derived Workflow Position
-
-This repo-local tutorial policy is grounded in the materials under `src/NRSS_tutorials`.
-Broader cross-repo morphology heuristics should not be treated as part of this repo-local file.
-
-All tutorials in `src/NRSS_tutorials` were reviewed:
-- 15 notebooks,
-- 6 tutorial `.py` files,
-- supporting assets/data.
-
-Observed pattern:
-- Pybind is the primary modern workflow (`Morphology`, `Material`, `morph.run(...)`).
-- The morphology object visualizer is a high-value quality gate before simulation.
-- `WPIntegrator`/PyHyperScattering and xarray-style outputs are common downstream interfaces.
-- Explicit CLI execution is rare and isolated to `coreshell_disk/CoreShell.ipynb`.
-
-Engineering rule from tutorials:
-- Do not add new feature work that requires CLI-first simulation flow.
-- Allow CLI only for legacy reproducibility and parity validation while deprecation is pending.
-- Point users toward the tutorial library early when they need concrete patterns; the MWCNT sequence is the intended end-to-end published example:
-  - `src/NRSS_tutorials/MWCNTs/nb1_rsoxs.ipynb`
-  - `src/NRSS_tutorials/MWCNTs/nb2_nexafs.ipynb`
-  - `src/NRSS_tutorials/MWCNTs/nb3_nrss.ipynb`
-- Use other tutorials in `src/NRSS_tutorials` when the modeling strategy differs, for example lattices, particles, disks, microscopy-informed, or morphology-specific builds.
-
-## Triage The Task Type
-Choose the closest mode before changing code:
-- Build new morphology.
-- Use/adapt existing morphology generation code.
-- Troubleshoot morphology creation (`visualizer` mismatch, slow RSA, overlaps/collisions).
-- Run morphology that already exists.
-- Troubleshoot simulation run behavior.
-
 ## Establish Local Context
 - Inspect `pyproject.toml`, relevant builders in `src/NRSS`, and local scripts before making workflow changes.
 - Confirm environment/dependencies and accelerator visibility before expensive runs.
@@ -91,48 +60,6 @@ Choose the closest mode before changing code:
 ## Docs And Tutorial Policy
 - Edit docs in `docs/source/`.
 - Do not edit generated docs output in `docs/build/`.
-- Do not treat in-repo tutorial notebooks as the default edit surface.
-- Only modify tutorial or docs notebooks in this repo when the task explicitly targets tutorial/docs notebook content.
-- Avoid output-only notebook churn unless the task explicitly requires refreshed outputs.
-
-## Required Pre-Run Gates In This Repo
-
-### 1. Construct Morphology In Memory
-1. Build physically meaningful fields and assemble `Material` + `Morphology`.
-2. For N materials, enforce voxel-wise closure (`sum(Vfrac_i) == 1` within tolerance).
-3. Keep units explicit, typically nm inputs with one conversion step for voxel-space geometry operations.
-4. Keep serialization optional; treat file IO as artifact/output, not the primary workflow.
-
-### 2. Validate And Visualize Before Running
-1. Run `morph.check_materials(...)`.
-2. Run `morph.validate_all(...)`.
-3. Use the morphology object's built-in visualizer as the gold-standard, authoritative pre-run check.
-4. Advise a full visualization suite at least once before the first run, and again after morphology logic changes.
-5. Advise close attention to both `Vfrac` structure and Euler-field structure (`theta`, `psi`).
-6. Do not proceed to simulation until morphology visualization matches model intent.
-7. If visual mismatch remains, inspect orientation/material fields directly (`Vfrac`, `S`, `theta`, `psi`) and diagnose before running.
-8. Direct-field diagnostic minimums:
-   - `Vfrac` must satisfy `0 <= Vfrac <= 1` per voxel/material.
-   - `S` should satisfy `0 < S < 1` for oriented phases; intentional isotropic/vacuum regions should use `S = 0`.
-   - `theta`/`psi` ranges are model-dependent; enforce convention consistency rather than fixed global bounds.
-
-### 3. Run From The Morphology Object
-1. Run simulations from the morphology object API (pybind default path).
-2. If alternate backends are available, keep the same pre-run validation and visualization gate.
-3. Use deterministic seeds and deterministic output naming for sweep/reproducibility workflows.
-
-### 4. Stop At Xarray-Compatible Output
-- Produce outputs usable by xarray-compatible tooling, including `WPIntegrator` pathways where applicable.
-- Defer hypothesis testing, parameter estimation, and full fitting-engine strategy to separate workflow guidance.
-
-### 5. Run Handoff Summary
-- At run handoff time, summarize:
-  - morphology provenance (builder entry point/script and key construction choices),
-  - seed/procedural randomness settings,
-  - backend selection and input/output policy settings when available,
-  - validation status (`check_materials`/`validate_all`) and visualization-gate status,
-  - output object/artifact locations for xarray-compatible downstream work.
-- Include explicit run metadata when available, for example versions, geometry, dtype, parameter hashes, and backend flags, to support reproducibility and future fitting workflows.
 
 ## Current Source-Coupled Behavior
 
@@ -150,9 +77,10 @@ Choose the closest mode before changing code:
 - The current docs/visualization path treat `psi % (2*pi)` and `0..2*pi` as the canonical presentation even though the validator does not hard-bound psi.
 
 ### Results lifetime safety
-- Treat raw pybind results objects as owner-lifetime-coupled objects.
-- If results are passed out of a function while the owning parent object is garbage-collected/deleted, results can be deallocated and later access may crash with a SIGSEGV, often without a Python exception.
-- Keep the owning object alive for as long as results are used, or convert/copy to stable Python-owned outputs before returning from scope.
+- For the `cyrsoxs` backend, if results are passed out of a function while the
+  owning parent object is garbage-collected or deleted, results can be
+  deallocated and later access may crash with a `SIGSEGV`, often without a
+  Python exception.
 
 ## Optional Test/Report Path
 - Use smoke tests to guard key behavior and integration points.
@@ -178,25 +106,6 @@ scripts/run_local_test_report.sh
 
 Physics-level intent:
 - `EAngleRotation` samples multiple in-plane orientations of the electric-field vector relative to model azimuth in the `YX` plane and averages the resulting full energy panels.
-- This is not a generic smoothing control.
-
-Current CyRSoXS behavior (v1.1.8.0 in local source) computes:
-- `numAnglesRotation = round((end-start)/increment + 1)`
-- sampled angle `i`: `start + i*increment`
-
-Endpoint inclusion depends on rounding and increment alignment. Use asymmetry-aware test morphologies and radial-symmetry metrics to check expected averaging behavior.
-
-Practical guidance:
-- If the model is conceived to be globally uniaxial and the user does not care about anisotropy, there is usually no reason to use `EAngleRotation`; azimuthal integration with it off contains essentially all the information that calculation will expose.
-- If the user does care about anisotropy, `EAngleRotation` can add meaningful information because it averages multiple electric-field snapshots relative to the model azimuth and often produces a more representative in-plane-powder response and a more meaningful standard `A` calculation.
-- For globally biaxial models where distinct `qx`/`qy` behavior is intentional, usually prefer `EAngleRotation = [0, 0, 0]` and do not treat the usual uniaxial `A` formula as automatically valid.
-- `EAngleRotation` is expensive: each step runs a full energy panel.
-- For development work, a practical compromise is often `EAngleRotation = [0, 15, 165]`.
-- Smaller increments give smoother averaging.
-- Extending toward a full circle can provide small advantages for reciprocal-space-asymmetric models, but the gain relative to a half-unit-circle sweep is usually modest.
-- Avoid using `EAngleRotation` to hide under-resolved or poorly sampled morphology choices; smoother is not automatically more physical.
-- Avoid redundant endpoint setups where the final angle duplicates the start-equivalent state unless that redundancy is part of an explicit validation check.
-- Prefer angle sets that sample unique states and align with the intended physical averaging.
 
 ## Runtime And Backend Notes Tied To Current Work
 - Current pybind simulation pathways may still require host-side transfers, so GPU-built morphology is not automatically an end-to-end on-device workflow.
@@ -206,11 +115,12 @@ Practical guidance:
 - Be cautious with multi-GPU CyRSoXS energy broadcasting: it can expose instability/segfault behavior in current workflows, so only use multi-GPU when that path is explicitly being exercised.
 
 ## CLI Compatibility Rule
-- New NRSS development, examples, and recommendations should be pybind-first.
-- Do not recommend CLI as the preferred path for modern workflows.
-- Keep CLI usage only for explicit historical reproduction requirements.
+- Do not recommend CLI as the preferred path for modern workflows; CLI only for explicit historical reproduction.
 
 ## Backend Upgrade Context
 - For repo-wide modernization goals, validation status, packaging direction, and historical prep status, use `REPO_UPGRADE_PLAN.md`.
-- For stable `cupy-rsoxs` backend details, including the CuPy mimic backend, backend contracts, input/output policies, and on-device data pathways, use `CUPY_RSOXS_BACKEND_SPEC.md`.
-- For `cupy-rsoxs` speed plans, benchmark interpretation, and accepted or rejected optimization outcomes, use `CUPY_RSOXS_OPTIMIZATION_LEDGER.md`.
+- For stable `cupy-rsoxs` backend contract and execution semantics, use `optimization/cupy_rsoxs/backend_spec.md`.
+- For `cupy-rsoxs` optimization work, always start with `optimization/cupy_rsoxs/README.md`.
+- For maintained `cupy-rsoxs` validation/path-matrix/program status, use `optimization/cupy_rsoxs/validation_and_status.md`.
+- Do not read the whole `optimization/cupy_rsoxs/` documentation tree by default; use its routing table to choose the one specific markdown file needed for the current task.
+- Do not open `optimization/cupy_rsoxs/archive/` unless the compact optimization docs are insufficient for a specific historical question.
