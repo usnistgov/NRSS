@@ -429,6 +429,27 @@ recover:
      - again treat allocator trimming as a separate experimental control rather
        than assuming reference deletion alone will return memory to other
        processes.
+   - candidate Segment `C` memory follow-up:
+     - the accepted April 6 direct-path in-place FFT result suggests a possible
+       `tensor_coeff` analogue,
+     - current `_compute_fft_nt_components(...)` still performs
+       `fft_component = cp.fft.fftn(component)` and only then writes the
+       shifted result back into `nt[idx]`,
+     - a future `tensor_coeff` experiment could try:
+       - cached cuFFT plan reuse
+       - in-place cuFFT on `nt[idx]`
+       - in-place Igor-order swap using the same general pattern now retained
+         for direct polarization
+     - April 6, 2026 host-hot recheck outcome:
+       - this was measured on the maintained `tensor_coeff` hot-lane authority
+         surface with a dev-only monkeypatch runner,
+       - parity was exact on the small no-rotation check including matching
+         finite/`NaN` masks,
+       - but no peak-GPU-delta reduction appeared on the measured small or
+         medium host-hot lanes,
+       - and Segment `C` became consistently slower,
+       - so this direct-path analogue should not be assumed to carry over to
+         `tensor_coeff`.
 7. Tensor-coeff-only experiment plan for the next memory pass:
    - scope rule:
      - limit the pass to `execution_path='tensor_coeff'`,
@@ -498,6 +519,55 @@ recover:
      - measure whether the combined strategy reduces the long-lived footprint
        enough to matter on shared GPUs without an unacceptable primary-time
        regression.
+   - experiment `mem08_inplace_segment_c_tensor_coeff`:
+     - adapt the retained direct-path `Segment C` structure to
+       `_compute_fft_nt_components(...)`:
+       - cached cuFFT plan
+       - in-place FFT on each `nt[idx]`
+       - in-place Igor-order swap
+     - record:
+       - primary wall time
+       - Segment `C` wall time
+       - peak GPU delta
+       - parity versus the maintained `tensor_coeff` baseline
+     - purpose:
+       - test whether the direct-path `-512 MiB` medium result points to a real
+         `tensor_coeff` memory-reduction opportunity as well.
+     - April 6, 2026 result:
+       - status: `rejected`
+       - measurement surface:
+         - host / hot only,
+         - `small` / no rotation,
+         - `medium` / no rotation,
+         - `medium` / `0:5:165`
+       - parity:
+         - small no-rotation check showed exact agreement on finite values and
+           matching `NaN` masks:
+           - `finite_voxel_count = 239424`
+           - `max_abs = 0`
+           - `rmse = 0`
+           - `p95_abs = 0`
+       - repeated median timing and memory results:
+         - `small` / no rotation:
+           - `primary 0.11162 s -> 0.11392 s`
+           - `Segment C 0.003067 s -> 0.003560 s`
+           - peak GPU delta `1230 MiB -> 1230 MiB`
+         - `medium` / no rotation:
+           - `primary 0.94712 s -> 0.93729 s`
+           - `Segment C 0.02445 s -> 0.02584 s`
+           - peak GPU delta `8622 MiB -> 8622 MiB`
+         - `medium` / `0:5:165`:
+           - `primary 1.05669 s -> 1.05808 s`
+           - `Segment C 0.04076 s -> 0.04254 s`
+           - peak GPU delta `10158 MiB -> 10158 MiB`
+       - interpretation:
+         - the in-place cuFFT plus in-place Igor-shift structure is
+           correctness-safe for the measured `tensor_coeff` lanes,
+         - but it did not lower observed whole-worker peak GPU memory at all on
+           the hot-lane authority surface,
+         - and it added a consistent `Segment C` slowdown of about `4%` to
+           `16%`,
+         - so it is not worth promoting into the maintained computation path.
    - escalation rule:
      - only if a small-case host result is promising, repeat the winning
        candidate on:
@@ -1817,3 +1887,51 @@ Backend-wide summary:
 6. current maintained direct-path state after this follow-up:
    - keep previously accepted direct-path opportunities `3` and `5`
    - additionally keep the accepted memory-lifetime cleanup trio above
+
+## April 6 2026 medium host-resident direct-path follow-up
+
+Path-specific details and the medium experiment summary now also live in
+`CUPY_RSOXS_DIRECT_POLARIZATION_OPTIMIZATION.md`.
+
+Backend-wide summary:
+
+1. accepted:
+   - promote true in-place direct-path `Segment C` to the maintained baseline
+   - implementation shape:
+     - cached cuFFT `C2C` plan
+     - in-place cuFFT on `p_x / p_y / p_z`
+     - in-place Igor-order swap kernel
+   - measured on the medium host-resident fair-comparison lane:
+     - no rotation:
+       - `primary 0.74166 s -> 0.75149 s`
+       - peak GPU delta `6144 MiB -> 5632 MiB`
+     - `0:5:165`:
+       - `primary 2.73686 s -> 2.77645 s`
+       - peak GPU delta `6144 MiB -> 5632 MiB`
+   - interpretation:
+     - removes one medium full-volume `complex64` block, about `512 MiB`, with
+       only about `1.3%` to `1.4%` slowdown
+2. rejected:
+   - remove the persistent `isotropic_base_field`
+   - measured on the same medium host-resident lane:
+     - no rotation:
+       - `primary 0.74166 s -> 0.75614 s`
+       - peak GPU delta `6144 MiB -> 5634 MiB`
+     - `0:5:165`:
+       - `primary 2.73686 s -> 3.70781 s`
+       - peak GPU delta `6144 MiB -> 6146 MiB`
+   - interpretation:
+     - this helps only the one-angle case
+     - on the maintained multi-angle lane it lost about `35%` speed and did not
+       reduce peak memory
+3. resulting maintained direct-path interpretation:
+   - keep the accepted per-energy isotropic base-field cache
+   - make true in-place direct-path `Segment C` the new baseline
+   - treat the no-isotropic-base result as evidence that any future isotropic
+     memory reduction must remove both the persistent base-field cache and the
+     per-material `isotropic_term` temporary
+4. deferred future exploration now recorded in the companion note:
+   - idea `3`: fused isotropic accumulation kernel
+   - idea `4`: packed voxel-style runtime staging plus device-owned material loop
+   - idea `5`: legacy zero-array field slimdown
+   - idea `6`: zero-field-aware execution fast paths

@@ -2246,6 +2246,236 @@ Updated retained end state after the fast-delta recheck:
 5. keep item `5`
 6. keep item `6`
 
+### April 6 2026 CuPy pool-off control on small direct-hot `direct_polarization`
+
+The user also requested a high-risk allocator control: disable the CuPy device
+and pinned memory pools inside the worker and compare the resulting small
+direct-hot `direct_polarization` lane against the current maintained state.
+
+Method:
+
+1. same development recheck harness shape as the fast-delta pass above
+2. artifact:
+   - `test-reports/core-shell-backend-performance-dev/dp_cupy_pool_off_20260406/direct_polarization_memcleanup_recheck_summary.json`
+3. authority surface:
+   - small CoreShell
+   - `resident_mode='device'`
+   - `startup_mode='hot'`
+   - `execution_path='direct_polarization'`
+   - speed repeats on:
+     - no rotation
+     - `0:5:165`
+   - memory repeats on:
+     - `0:5:165`
+4. repeated-run settings:
+   - `5` runs per variant
+   - same-GPU warmed CuPy observer
+   - `cupy.cuda.runtime.memGetInfo()` delta versus the stabilized observer
+     baseline
+
+Results versus the maintained baseline:
+
+1. baseline:
+   - no rotation median primary:
+     - `0.010642 s`
+   - `0:5:165` median primary:
+     - `0.276261 s`
+   - `0:5:165` median peak GPU delta:
+     - `940 MiB`
+2. CuPy pool off:
+   - no rotation median primary:
+     - `0.025799 s`
+   - `0:5:165` median primary:
+     - `0.608152 s`
+   - `0:5:165` median peak GPU delta:
+     - `884 MiB`
+
+Interpretation:
+
+1. disabling the pools lowered the observed peak GPU delta by only about
+   `56 MiB` or `6.0%`
+2. but it slowed the direct path by about:
+   - `2.42x` on no rotation
+   - `2.20x` on `0:5:165`
+3. parent-process RSS also rose materially on this environment during the
+   pool-off runs
+
+Disposition:
+
+1. rejected
+2. do not retain any allocator-pool-disable mode in tests or backend code
+3. treat this as an informative control showing that the current small
+   direct-hot peak is not worth trading for no-pool execution on this
+   environment
+4. if allocator behavior is revisited later, prefer targeted lifetime reuse or
+   release controls over globally disabling CuPy pooling
+
+### April 6 2026 medium host-resident Segment `C` and isotropic-cache follow-up
+
+The user then requested two separate medium-shape experiments on the fair
+cross-backend lane after the direct/CUDA code review:
+
+1. promote a true CyRSoXS-like in-place `Segment C`
+2. try removing the persistent `isotropic_base_field`
+
+Authority surface:
+
+1. shape:
+   - medium CoreShell
+   - `(64, 1024, 1024)`
+2. residency:
+   - `resident_mode='host'`
+3. startup:
+   - warmed worker
+4. path:
+   - `execution_path='direct_polarization'`
+5. rotations:
+   - no rotation
+   - `0:5:165`
+6. artifact summary:
+   - `test-reports/core-shell-backend-performance-dev/direct_polarization_medium_experiments_20260406/summary.json`
+
+Parity gate used for this follow-up:
+
+1. small host-resident no-rotation direct-path parity versus the maintained
+   baseline
+2. both candidates returned:
+   - `max_abs_diff = 0.0`
+   - `sum_abs_diff = 0.0`
+
+Measured outcome on the medium host-resident authority lane:
+
+1. maintained pre-promotion baseline:
+   - no rotation:
+     - `primary 0.74166 s`
+     - peak GPU delta `6144 MiB`
+   - `0:5:165`:
+     - `primary 2.73686 s`
+     - peak GPU delta `6144 MiB`
+2. true in-place `Segment C`:
+   - implementation shape:
+     - cached cuFFT `C2C` plan
+     - in-place cuFFT on `p_x / p_y / p_z`
+     - in-place Igor-order swap kernel modeled on the CyRSoXS swap logic
+   - no rotation:
+     - `primary 0.74166 s -> 0.75149 s`
+     - peak GPU delta `6144 MiB -> 5632 MiB`
+   - `0:5:165`:
+     - `primary 2.73686 s -> 2.77645 s`
+     - peak GPU delta `6144 MiB -> 5632 MiB`
+   - disposition:
+     - accepted
+     - retained in code as the new maintained baseline
+   - interpretation:
+     - this consistently removed one medium `complex64` full-volume block, about
+       `512 MiB`, with only about `1.3%` to `1.4%` slowdown
+3. no persistent `isotropic_base_field`:
+   - implementation shape:
+     - do not build the per-energy cached isotropic base field
+     - fall back to the per-material direct-path isotropic accumulation already
+       present in `_compute_direct_polarization(...)`
+   - no rotation:
+     - `primary 0.74166 s -> 0.75614 s`
+     - peak GPU delta `6144 MiB -> 5634 MiB`
+   - `0:5:165`:
+     - `primary 2.73686 s -> 3.70781 s`
+     - peak GPU delta `6144 MiB -> 6146 MiB`
+   - disposition:
+     - rejected for the maintained baseline
+   - interpretation:
+     - this helps only the one-angle case
+     - on the maintained multi-angle lane the speed loss was about `35%`
+     - and the memory win disappeared because the path still materializes the
+       per-material `isotropic_term = vfrac * isotropic_diag` temporary
+
+Updated maintained interpretation after this follow-up:
+
+1. keep the accepted per-energy isotropic base-field cache
+2. make true in-place direct-path `Segment C` the new maintained baseline
+3. treat the rejected no-isotropic-base result as evidence that a future
+   isotropic-memory reduction must remove both:
+   - the persistent cached base field
+   - and the per-material `isotropic_term` temporary
+4. note the cross-path implication carefully:
+   - this accepted direct-path in-place FFT result may also point to a future
+     `tensor_coeff` Segment `C` memory experiment, because
+     `_compute_fft_nt_components(...)` still does an out-of-place
+     `cp.fft.fftn(...)` before shifting back into `nt[idx]`
+   - but that possibility is still unmeasured on the maintained
+     `tensor_coeff` lanes and should not be generalized from direct
+     polarization without a separate parity, timing, and peak-memory pass
+
+### Deferred future exploration ideas `3-6` after the medium follow-up
+
+These ideas were not implemented in this follow-up and remain the next
+medium-memory candidates if direct-path memory is revisited again.
+
+#### Idea `3`: fused isotropic accumulation kernel
+
+1. implementation shape:
+   - replace both:
+     - the persistent per-energy `isotropic_base_field`
+     - and the per-material `isotropic_term = vfrac * isotropic_diag`
+       temporary
+   - with a small RawKernel that writes the isotropic contribution directly
+     into `p_x` and `p_y`
+2. why it remains attractive:
+   - the rejected no-isotropic-base control showed that removing only the cache
+     is not enough on the maintained multi-angle lane
+   - this fused kernel is the direct next step that could remove both known
+     isotropic-memory costs at once
+3. expected payoff:
+   - lower direct-path peak memory without giving back the accepted multi-angle
+     speed benefit of the isotropic cache
+
+#### Idea `4`: packed voxel-style runtime staging plus device-owned material loop
+
+1. implementation shape:
+   - pack direct-path runtime material fields into a CyRSoXS-like voxel record,
+     for example `(S, theta, psi, Vfrac)` plus a compact material-class tag
+   - let one direct-path kernel own the material loop internally, as the legacy
+     CUDA path does
+2. why it remains attractive:
+   - current direct-path runtime staging still keeps four separate arrays per
+     anisotropic material and loops over materials in Python
+   - this is the closest structural match to the CyRSoXS path
+3. expected payoff:
+   - reduced staging pressure
+   - lower launch overhead
+   - and less allocator churn during `Segment B`
+
+#### Idea `5`: legacy zero-array field slimdown
+
+1. implementation shape:
+   - add a runtime zero-field contract for historical `legacy_zero_array`
+     materials so all-zero `S / theta / psi` fields can be represented
+     compactly instead of being staged as concrete arrays
+2. why it remains attractive:
+   - the explicit isotropic contract already avoids this staging, but the
+     historical compatibility lane intentionally keeps those arrays alive
+   - medium direct-path memory complaints still encounter that compatibility
+     surface in practice
+3. expected payoff:
+   - lower host-to-device staging volume
+   - lower steady GPU footprint for isotropic-heavy morphologies
+
+#### Idea `6`: zero-field-aware execution fast paths
+
+1. implementation shape:
+   - bucket materials by field class, for example:
+     - fully isotropic
+     - legacy-zero isotropic
+     - anisotropic with nonzero aligned content
+   - specialize the direct-path work so known-zero branches skip unnecessary
+     loads and arithmetic
+2. why it remains attractive:
+   - once zero fields are represented explicitly, direct-path kernels can avoid
+     paying full anisotropic work for field classes that cannot contribute to
+     those terms
+3. expected payoff:
+   - memory-traffic reduction in `Segment B`
+   - plus speed wins on isotropic-heavy or sparse-anisotropy workloads
+
 ## Update Rule
 
 When `direct_polarization` work produces either:

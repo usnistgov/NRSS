@@ -2044,20 +2044,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             cp.multiply(p_y, window, out=p_y)
             cp.multiply(p_z, window, out=p_z)
 
-        fft_x = cp.fft.fftn(p_x)
-        self._replace_dc_component(fft_x)
-        self._igor_shift(fft_x, morphology, cp, out=p_x)
-        del fft_x
-
-        fft_y = cp.fft.fftn(p_y)
-        self._replace_dc_component(fft_y)
-        self._igor_shift(fft_y, morphology, cp, out=p_y)
-        del fft_y
-
-        fft_z = cp.fft.fftn(p_z)
-        self._replace_dc_component(fft_z)
-        self._igor_shift(fft_z, morphology, cp, out=p_z)
-        del fft_z
+        plan = self._direct_polarization_fft_plan(morphology, cp, p_x)
+        cufft = cp.cuda.cufft
+        for arr in (p_x, p_y, p_z):
+            # Match the CyRSoXS Segment C structure more closely: one persistent
+            # complex buffer per polarization component, cuFFT in place, then an
+            # in-place Igor-order swap instead of a second full shifted volume.
+            plan.fft(arr, arr, cufft.CUFFT_FORWARD)
+            self._replace_dc_component(arr)
+            self._igor_shift_inplace(arr, morphology, cp)
         return p_x, p_y, p_z
 
     def _accumulate_rotated_projection(
@@ -2210,6 +2205,20 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             neighbors.extend([arr[1, 0, 0], arr[z - 1, 0, 0]])
         arr[0, 0, 0] = sum(neighbors) / np.float32(len(neighbors))
 
+    def _direct_polarization_fft_plan(self, morphology, cp, arr):
+        from cupyx.scipy.fftpack import get_fft_plan
+
+        cache_key = (
+            "direct_polarization_fft_plan_complex64",
+            tuple(int(v) for v in arr.shape),
+            cp.dtype(arr.dtype).name,
+        )
+        plan = morphology._backend_runtime_state.get(cache_key)
+        if plan is None:
+            plan = get_fft_plan(arr, axes=(0, 1, 2), value_type="C2C")
+            morphology._backend_runtime_state[cache_key] = plan
+        return plan
+
     def _igor_shift_kernel(self, morphology, cp):
         return self._build_rawkernel_with_fallback(
             cp,
@@ -2252,6 +2261,56 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 }
                 """,
             kernel_name="igor_shift_complex64",
+            requested_backend=self._rawkernel_backend_option(morphology, "igor_shift"),
+        )
+
+    def _igor_shift_inplace_kernel(self, morphology, cp):
+        return self._build_rawkernel_with_fallback(
+            cp,
+            family="igor_shift",
+            cache_key_base="igor_shift_inplace_complex64",
+            source=r"""
+                extern "C" __global__
+                void igor_shift_inplace_complex64(
+                    float2* data,
+                    const int zdim,
+                    const int ydim,
+                    const int xdim,
+                    const unsigned long long total
+                ) {
+                    const unsigned long long idx =
+                        (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                        + (unsigned long long)threadIdx.x;
+                    if (idx >= total) {
+                        return;
+                    }
+
+                    const int x = (int)(idx % (unsigned long long)xdim);
+                    const unsigned long long tmp = idx / (unsigned long long)xdim;
+                    const int y = (int)(tmp % (unsigned long long)ydim);
+                    const int z = (int)(tmp / (unsigned long long)ydim);
+
+                    const int mid_x = xdim / 2;
+                    const int mid_y = ydim / 2;
+                    const int mid_z = zdim / 2;
+
+                    const int swap_x = (x <= mid_x) ? (mid_x - x) : (xdim + (mid_x - x));
+                    const int swap_y = (y <= mid_y) ? (mid_y - y) : (ydim + (mid_y - y));
+                    const int swap_z = (z <= mid_z) ? (mid_z - z) : (zdim + (mid_z - z));
+
+                    const unsigned long long swap_idx =
+                        ((unsigned long long)swap_z * (unsigned long long)ydim
+                         + (unsigned long long)swap_y) * (unsigned long long)xdim
+                        + (unsigned long long)swap_x;
+
+                    if (swap_idx > idx) {
+                        const float2 temp = data[swap_idx];
+                        data[swap_idx] = data[idx];
+                        data[idx] = temp;
+                    }
+                }
+                """,
+            kernel_name="igor_shift_inplace_complex64",
             requested_backend=self._rawkernel_backend_option(morphology, "igor_shift"),
         )
 
@@ -2299,6 +2358,23 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             ),
         )
         return out
+
+    def _igor_shift_inplace(self, arr, morphology, cp):
+        total = int(arr.size)
+        threads = 256
+        blocks = (total + threads - 1) // threads
+        self._igor_shift_inplace_kernel(morphology, cp)(
+            (blocks,),
+            (threads,),
+            (
+                arr,
+                np.int32(arr.shape[0]),
+                np.int32(arr.shape[1]),
+                np.int32(arr.shape[2]),
+                np.uint64(total),
+            ),
+        )
+        return arr
 
     def _direct_projection_rawkernel_backend(self):
         # For the direct detector kernels, nvcc avoids the large cold peak we
