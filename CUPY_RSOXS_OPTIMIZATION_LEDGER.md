@@ -59,7 +59,13 @@ recover:
    - detector / projection geometry cached in backend runtime state,
    - and `tensor_coeff` projection-family evaluation now uses detector-grid
      helpers for both general-angle and aligned `x` / `y` families instead of
-     materializing extra `scatter3d` volumes in that wrapper.
+     materializing extra `scatter3d` volumes in that wrapper,
+   - `tensor_coeff` float32 `Segment B` now uses fused isotropic accumulation
+     rather than materializing a per-material full-volume `isotropic_term`
+     temporary,
+   - and host-resident exact-zero `legacy_zero_array` materials now stage only
+     `Vfrac` on both maintained execution paths while device-resident staging
+     keeps the older all-field contract.
 2. The authoritative optimization timing harness now lives at:
    - `tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py`
    - supporting notes at `tests/validation/dev/cupy_rsoxs_optimization/README.md`
@@ -444,12 +450,52 @@ recover:
        - this was measured on the maintained `tensor_coeff` hot-lane authority
          surface with a dev-only monkeypatch runner,
        - parity was exact on the small no-rotation check including matching
-         finite/`NaN` masks,
+       finite/`NaN` masks,
        - but no peak-GPU-delta reduction appeared on the measured small or
          medium host-hot lanes,
        - and Segment `C` became consistently slower,
        - so this direct-path analogue should not be assumed to carry over to
          `tensor_coeff`.
+   - candidate Segment `B` isotropic-temporary follow-up:
+     - the accepted April 7 direct-path fused float32 isotropic result suggests
+       a possible `tensor_coeff` analogue,
+     - current `_compute_nt_components(...)` still materializes
+       `isotropic_term = vfrac * isotropic_diag` before adding it into `nt[0]`
+       and `nt[3]`,
+     - a future `tensor_coeff` experiment could try:
+       - a float32 isotropic accumulation kernel that writes directly into the
+         needed `nt` planes,
+       - or a fused float32 anisotropic kernel that writes both isotropic and
+         anisotropic contributions without materializing the full-volume
+         `isotropic_term` temporary,
+     - rationale:
+       - the direct-path win was only real once both the persistent cached
+         isotropic structure and the per-material isotropic temporary were
+         removed together,
+       - `tensor_coeff` does not carry the same cached base-field structure,
+         but it still carries the per-material `isotropic_term` temporary,
+       - April 7, 2026 result:
+         - accepted as `mem09_fused_isotropic_tensor_coeff`; see below.
+   - candidate host-resident legacy-zero compatibility follow-up:
+     - the accepted April 7 direct-path host `legacy_zero_array` runtime
+       zero-field contract suggests a possible `tensor_coeff` compatibility-lane
+       memory reduction,
+     - current maintained policy after `plan12_explicit_isotropic_contract` is
+       that historical `legacy_zero_array` inputs remain supported but do not
+       receive inferred isotropic optimization,
+     - a future `tensor_coeff` experiment could try:
+       - detecting host-resident `legacy_zero_array` materials whose
+         `S / theta / psi` fields are exactly zero,
+       - staging only `Vfrac` for that compatibility lane,
+       - and routing those materials through the existing isotropic handling,
+     - rationale:
+       - the direct-path result showed that this compatibility surface can still
+         dominate host-resident memory on practical medium cases,
+       - but the policy choice for `tensor_coeff` is more sensitive because the
+         explicit isotropic contract was intentionally introduced to avoid broad
+         inferred-isotropy behavior,
+       - April 7, 2026 result:
+         - accepted as `mem10_host_legacy_zero_tensor_coeff`; see below.
 7. Tensor-coeff-only experiment plan for the next memory pass:
    - scope rule:
      - limit the pass to `execution_path='tensor_coeff'`,
@@ -563,11 +609,124 @@ recover:
        - interpretation:
          - the in-place cuFFT plus in-place Igor-shift structure is
            correctness-safe for the measured `tensor_coeff` lanes,
-         - but it did not lower observed whole-worker peak GPU memory at all on
-           the hot-lane authority surface,
-         - and it added a consistent `Segment C` slowdown of about `4%` to
-           `16%`,
-         - so it is not worth promoting into the maintained computation path.
+       - but it did not lower observed whole-worker peak GPU memory at all on
+         the hot-lane authority surface,
+       - and it added a consistent `Segment C` slowdown of about `4%` to
+         `16%`,
+       - so it is not worth promoting into the maintained computation path.
+   - experiment `mem09_fused_isotropic_tensor_coeff`:
+     - adapt the accepted April 7 direct-path float32 fused-isotropic idea to
+       `_compute_nt_components(...)`:
+       - eliminate the full-volume float32 `isotropic_term` temporary,
+       - write isotropic `nt[0]` / `nt[3]` contributions directly,
+       - preserve exact parity with the maintained `tensor_coeff` algebra,
+     - record:
+       - primary wall time
+       - Segment `B` wall time
+       - peak GPU delta
+       - parity versus the maintained `tensor_coeff` baseline
+     - purpose:
+       - test whether the successful direct-path fused-isotropic memory win also
+         lowers `tensor_coeff` Segment `B` footprint without paying a material
+         speed penalty.
+     - April 7, 2026 result:
+       - status: `accepted`
+       - measurement surface:
+         - host / hot only,
+         - `small` / no rotation,
+         - `medium` / no rotation,
+         - `medium` / `0:5:165`
+       - parity:
+         - small no-rotation check preserved matching finite/`NaN` masks:
+           - `finite_voxel_count = 239424`
+           - `max_abs = 9.765625e-04`
+           - `rmse = 8.44371e-06`
+           - `p95_abs = 1.90735e-06`
+       - repeated median timing and memory results:
+         - `small` / no rotation:
+           - `primary 0.11695 s -> 0.10905 s`
+           - `Segment B 0.01649 s -> 0.00387 s`
+           - peak GPU delta `1230 MiB -> 1108 MiB`
+         - `medium` / no rotation:
+           - `primary 0.95914 s -> 0.86443 s`
+           - `Segment B 0.13213 s -> 0.02979 s`
+           - peak GPU delta `8622 MiB -> 7504 MiB`
+         - `medium` / `0:5:165`:
+           - `primary 1.07792 s -> 0.92839 s`
+           - `Segment B 0.20104 s -> 0.04201 s`
+           - peak GPU delta `10158 MiB -> 9036 MiB`
+       - interpretation:
+         - removing the float32 `isotropic_term` temporary is a real
+           `tensor_coeff` memory reduction,
+         - it also materially improves the maintained host-hot `Segment B`
+           timing surface,
+         - and the residual numerical drift is small enough to treat as the
+           expected fused-accumulation float32 roundoff tradeoff rather than a
+           physics regression.
+   - experiment `mem10_host_legacy_zero_tensor_coeff`:
+     - adapt the accepted April 7 host-resident direct-path runtime zero-field
+       shortcut to the `tensor_coeff` compatibility lane:
+       - detect exact-zero host `legacy_zero_array` `S / theta / psi`,
+       - stage only `Vfrac`,
+       - route those materials through the existing isotropic handling,
+     - record:
+       - primary wall time
+       - Segment `A2` wall time
+       - Segment `B` wall time
+       - peak GPU delta
+       - parity versus the maintained `tensor_coeff` baseline
+       - explicit comparison against the `enum_contract` lane
+     - purpose:
+       - test whether the direct-path host legacy-zero memory win carries over
+         to the maintained `tensor_coeff` compatibility surface without
+         reintroducing unsafe broad inferred-isotropy behavior.
+     - April 7, 2026 result:
+       - status: `accepted`
+       - maintained scope:
+         - host-resident only,
+         - exact-zero `legacy_zero_array` `S / theta / psi`,
+         - explicit `SFieldMode.ISOTROPIC` remains the authoritative preferred
+           public contract.
+       - parity:
+         - small no-rotation check showed exact agreement on finite values and
+           matching `NaN` masks:
+           - `finite_voxel_count = 239424`
+           - `max_abs = 0`
+           - `rmse = 0`
+           - `p95_abs = 0`
+       - repeated median timing and memory results versus maintained
+         `legacy_zero_array` baseline:
+         - `small` / no rotation:
+           - `primary 0.12540 s -> 0.09903 s`
+           - `A2 0.10262 s -> 0.08557 s`
+           - `Segment B 0.01660 s -> 0.00731 s`
+           - peak GPU delta `1230 MiB -> 1038 MiB`
+         - `small` / `0:5:165`:
+           - `primary 0.13364 s -> 0.11481 s`
+           - `A2 0.08960 s -> 0.08518 s`
+           - `Segment B 0.02500 s -> 0.01081 s`
+           - peak GPU delta `1422 MiB -> 1230 MiB`
+         - `medium` / no rotation:
+           - `primary 0.99602 s -> 0.64808 s`
+           - `A2 0.82530 s -> 0.55206 s`
+           - `Segment B 0.13213 s -> 0.05738 s`
+           - peak GPU delta `8622 MiB -> 7086 MiB`
+         - `medium` / `0:5:165`:
+           - `primary 1.10934 s -> 0.84177 s`
+           - `A2 0.83176 s -> 0.67992 s`
+           - `Segment B 0.20102 s -> 0.08599 s`
+           - peak GPU delta `10158 MiB -> 8622 MiB`
+       - explicit `enum_contract` comparison:
+         - the accepted runtime-zero shortcut matched the `enum_contract`
+           memory footprint on every measured lane,
+         - but it remained slower than `enum_contract`, so the explicit
+           isotropic contract should remain the preferred public representation.
+       - interpretation:
+         - the historical host-resident `legacy_zero_array` compatibility lane
+           can now recover the same GPU-memory footprint as `enum_contract`
+           without changing user-owned morphology data,
+         - and that makes the compatibility surface much less punitive while
+           preserving the preference for the explicit isotropic contract.
    - escalation rule:
      - only if a small-case host result is promising, repeat the winning
        candidate on:

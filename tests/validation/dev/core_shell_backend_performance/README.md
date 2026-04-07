@@ -95,6 +95,27 @@ mamba run -n nrss-dev python \
   --include-z-collapse
 ```
 
+Targeted tensor-coeff memory rechecks:
+
+- `run_tensor_coeff_inplace_segment_c_recheck.py`
+  - dev-only recheck for the direct-path-inspired true in-place `Segment C`
+    tensor analogue,
+  - current accepted disposition: rejected,
+  - the measured host-hot tensor lanes showed no peak-memory reduction and a
+    small `Segment C` slowdown.
+- `run_tensor_coeff_fused_isotropic_recheck.py`
+  - dev-only recheck for the accepted `mem09` tensor-coeff fused-isotropic
+    `Segment B` change,
+  - current accepted disposition: accepted,
+  - accepted artifact root:
+    `test-reports/core-shell-backend-performance-dev/tc_mem09_fused_isotropic_20260407/`.
+- `run_tensor_coeff_legacy_zero_recheck.py`
+  - dev-only recheck for the accepted `mem10` host-resident tensor-coeff
+    `legacy_zero_array` compatibility shortcut,
+  - current accepted disposition: accepted,
+  - accepted artifact root:
+    `test-reports/core-shell-backend-performance-dev/tc_mem10_legacy_zero_20260407/`.
+
 Artifacts are written under:
 
 - `test-reports/core-shell-backend-performance-dev/<label>/primary_backend_speed_comparison_summary.json`

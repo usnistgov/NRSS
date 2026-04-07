@@ -1231,6 +1231,19 @@ Not part of the prep milestone, but enabled by it:
    current detailed state.
    - current next-pass optimization focus is Segment `E` rotation and angle
      accumulation on the maintained `tensor_coeff` path,
+   - current accepted `tensor_coeff` memory updates in that ledger now include:
+     - a fused-isotropic `Segment B` implementation that removes the float32
+       `isotropic_term` temporary and lowers both host-hot time and peak GPU
+       memory on the maintained CoreShell lanes,
+     - and a narrow host-resident `legacy_zero_array` compatibility shortcut
+       that recovers the `enum_contract` memory footprint for that historical
+       tensor-coeff lane while keeping the explicit isotropic contract as the
+       preferred public representation,
+   - the next ranking focus remains Segment `E` rotation and angle
+     accumulation on the maintained `tensor_coeff` path,
+   - host-resident shared-GPU memory follow-up after these accepted changes is
+     now lower priority unless a new unresolved pressure point appears beyond
+     the fused-isotropic and legacy-zero fixes,
    - accepted Segment `E` changes now require the maintained CoreShell
      sim-regression physics gates on both the default host-resident and device
      strict/borrow `cupy-rsoxs` workflows because that validation exercises

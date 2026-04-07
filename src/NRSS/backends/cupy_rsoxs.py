@@ -609,10 +609,13 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             f"received namespace {namespace!r}."
         )
 
-    def _material_is_runtime_zero_field(self, morphology, material, cp) -> bool:
-        if self._execution_path(morphology) != "direct_polarization":
-            return False
+    def _supports_runtime_zero_field_shortcut(self, morphology) -> bool:
         if str(getattr(morphology, "resident_mode", "")) != "host":
+            return False
+        return self._execution_path(morphology) in {"tensor_coeff", "direct_polarization"}
+
+    def _material_is_runtime_zero_field(self, morphology, material, cp) -> bool:
+        if not self._supports_runtime_zero_field_shortcut(morphology):
             return False
         if morphology._material_is_explicit_isotropic(material):
             return False
@@ -943,7 +946,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return sx, sy, sz
 
     def _compute_nt_components(self, runtime_materials, energy, cp, required_components=None):
-        if cp.dtype(runtime_materials[0].Vfrac.dtype).name == "float16":
+        dtype_name = cp.dtype(runtime_materials[0].Vfrac.dtype).name
+        if dtype_name == "float16":
             return self._compute_nt_components_half_input(
                 runtime_materials,
                 energy,
@@ -952,49 +956,113 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             )
 
         required = {0, 1, 2, 3, 4} if required_components is None else set(required_components)
-        need0 = 0 in required
-        need1 = 1 in required
-        need2 = 2 in required
-        need3 = 3 in required
-        need4 = 4 in required
+        if dtype_name != "float32":
+            need0 = 0 in required
+            need1 = 1 in required
+            need2 = 2 in required
+            need3 = 3 in required
+            need4 = 4 in required
+            shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
+            nt = cp.zeros((5, *shape), dtype=cp.complex64)
+
+            for material in runtime_materials:
+                isotropic_diag, aligned_base, anisotropic_delta = self._material_optical_scalars(
+                    material,
+                    energy,
+                )
+                vfrac = material.Vfrac
+                isotropic_term = None
+                if need0 or need3:
+                    isotropic_term = vfrac * isotropic_diag
+                    if need0:
+                        nt[0] += isotropic_term
+                    if need3:
+                        nt[3] += isotropic_term
+                if material.is_full_isotropic:
+                    if isotropic_term is not None:
+                        del isotropic_term
+                    continue
+
+                phi_a = vfrac * material.S
+                sx, sy, sz = self._orientation_components(material, cp)
+
+                if need0:
+                    nt[0] += phi_a * (aligned_base + anisotropic_delta * sx * sx)
+                if need1:
+                    nt[1] += phi_a * anisotropic_delta * sx * sy
+                if need2:
+                    nt[2] += phi_a * anisotropic_delta * sx * sz
+                if need3:
+                    nt[3] += phi_a * (aligned_base + anisotropic_delta * sy * sy)
+                if need4:
+                    nt[4] += phi_a * anisotropic_delta * sy * sz
+
+                if isotropic_term is not None:
+                    del isotropic_term
+                del phi_a, sx, sy, sz
+
+            return nt
+
+        need0 = np.int32(0 in required)
+        need1 = np.int32(1 in required)
+        need2 = np.int32(2 in required)
+        need3 = np.int32(3 in required)
+        need4 = np.int32(4 in required)
         shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
         nt = cp.zeros((5, *shape), dtype=cp.complex64)
+        nt0, nt1, nt2, nt3, nt4 = (nt[idx] for idx in range(5))
+        threads = 256
+        isotropic_kernel = self._nt_accumulate_isotropic_float32_kernel(cp)
+        anisotropic_kernel = self._nt_accumulate_anisotropic_float32_kernel(cp)
 
         for material in runtime_materials:
             isotropic_diag, aligned_base, anisotropic_delta = self._material_optical_scalars(
                 material,
                 energy,
             )
-            vfrac = material.Vfrac
-            isotropic_term = None
-            if need0 or need3:
-                isotropic_term = vfrac * isotropic_diag
-                if need0:
-                    nt[0] += isotropic_term
-                if need3:
-                    nt[3] += isotropic_term
+            total = np.uint64(material.Vfrac.size)
+            blocks = (material.Vfrac.size + threads - 1) // threads
+
             if material.is_full_isotropic:
-                if isotropic_term is not None:
-                    del isotropic_term
+                isotropic_kernel(
+                    (blocks,),
+                    (threads,),
+                    (
+                        material.Vfrac,
+                        isotropic_diag,
+                        need0,
+                        need3,
+                        nt0,
+                        nt3,
+                        total,
+                    ),
+                )
                 continue
 
-            phi_a = vfrac * material.S
-            sx, sy, sz = self._orientation_components(material, cp)
-
-            if need0:
-                nt[0] += phi_a * (aligned_base + anisotropic_delta * sx * sx)
-            if need1:
-                nt[1] += phi_a * anisotropic_delta * sx * sy
-            if need2:
-                nt[2] += phi_a * anisotropic_delta * sx * sz
-            if need3:
-                nt[3] += phi_a * (aligned_base + anisotropic_delta * sy * sy)
-            if need4:
-                nt[4] += phi_a * anisotropic_delta * sy * sz
-
-            if isotropic_term is not None:
-                del isotropic_term
-            del phi_a, sx, sy, sz
+            anisotropic_kernel(
+                (blocks,),
+                (threads,),
+                (
+                    material.Vfrac,
+                    material.S,
+                    material.theta,
+                    material.psi,
+                    isotropic_diag,
+                    aligned_base,
+                    anisotropic_delta,
+                    need0,
+                    need1,
+                    need2,
+                    need3,
+                    need4,
+                    nt0,
+                    nt1,
+                    nt2,
+                    nt3,
+                    nt4,
+                    total,
+                ),
+            )
 
         return nt
 
@@ -1277,6 +1345,130 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             "nt_accumulate_anisotropic_half_input",
         )
         _CUPY_KERNEL_CACHE["nt_accumulate_anisotropic_half_input"] = kernel
+        return kernel
+
+    def _nt_accumulate_isotropic_float32_kernel(self, cp):
+        kernel = _CUPY_KERNEL_CACHE.get("nt_accumulate_isotropic_float32")
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            r"""
+            extern "C" __global__
+            void nt_accumulate_isotropic_float32(
+                const float* vfrac,
+                const float2 isotropic_diag,
+                const int need0,
+                const int need3,
+                float2* nt0,
+                float2* nt3,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+
+                const float vf = vfrac[idx];
+                if (need0) {
+                    nt0[idx].x += vf * isotropic_diag.x;
+                    nt0[idx].y += vf * isotropic_diag.y;
+                }
+                if (need3) {
+                    nt3[idx].x += vf * isotropic_diag.x;
+                    nt3[idx].y += vf * isotropic_diag.y;
+                }
+            }
+            """,
+            "nt_accumulate_isotropic_float32",
+        )
+        _CUPY_KERNEL_CACHE["nt_accumulate_isotropic_float32"] = kernel
+        return kernel
+
+    def _nt_accumulate_anisotropic_float32_kernel(self, cp):
+        kernel = _CUPY_KERNEL_CACHE.get("nt_accumulate_anisotropic_float32")
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            r"""
+            extern "C" __global__
+            void nt_accumulate_anisotropic_float32(
+                const float* vfrac,
+                const float* s,
+                const float* theta,
+                const float* psi,
+                const float2 isotropic_diag,
+                const float2 aligned_base,
+                const float2 anisotropic_delta,
+                const int need0,
+                const int need1,
+                const int need2,
+                const int need3,
+                const int need4,
+                float2* nt0,
+                float2* nt1,
+                float2* nt2,
+                float2* nt3,
+                float2* nt4,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+
+                const float vf = vfrac[idx];
+                if (need0 || need3) {
+                    const float iso_x = vf * isotropic_diag.x;
+                    const float iso_y = vf * isotropic_diag.y;
+                    if (need0) {
+                        nt0[idx].x += iso_x;
+                        nt0[idx].y += iso_y;
+                    }
+                    if (need3) {
+                        nt3[idx].x += iso_x;
+                        nt3[idx].y += iso_y;
+                    }
+                }
+
+                const float phi = vf * s[idx];
+                const float theta_i = theta[idx];
+                const float psi_i = psi[idx];
+                const float sin_theta = sinf(theta_i);
+                const float sx = cosf(psi_i) * sin_theta;
+                const float sy = sinf(psi_i) * sin_theta;
+                const float sz = cosf(theta_i);
+
+                if (need0) {
+                    nt0[idx].x += phi * (aligned_base.x + anisotropic_delta.x * sx * sx);
+                    nt0[idx].y += phi * (aligned_base.y + anisotropic_delta.y * sx * sx);
+                }
+                if (need1) {
+                    nt1[idx].x += phi * anisotropic_delta.x * sx * sy;
+                    nt1[idx].y += phi * anisotropic_delta.y * sx * sy;
+                }
+                if (need2) {
+                    nt2[idx].x += phi * anisotropic_delta.x * sx * sz;
+                    nt2[idx].y += phi * anisotropic_delta.y * sx * sz;
+                }
+                if (need3) {
+                    nt3[idx].x += phi * (aligned_base.x + anisotropic_delta.x * sy * sy);
+                    nt3[idx].y += phi * (aligned_base.y + anisotropic_delta.y * sy * sy);
+                }
+                if (need4) {
+                    nt4[idx].x += phi * anisotropic_delta.x * sy * sz;
+                    nt4[idx].y += phi * anisotropic_delta.y * sy * sz;
+                }
+            }
+            """,
+            "nt_accumulate_anisotropic_float32",
+        )
+        _CUPY_KERNEL_CACHE["nt_accumulate_anisotropic_float32"] = kernel
         return kernel
 
     def _compute_fft_nt_components(self, nt, morphology, cp, window, component_indices=None):
