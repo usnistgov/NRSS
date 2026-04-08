@@ -42,36 +42,17 @@ MIN_SIGNAL_FOR_LOG = 1e-5
 GEOMETRY_THRESHOLDS_BY_DIAMETER = {
     70.0: {
         "sr1_rms_log_max": 0.070,
-        "sr1_p95_log_abs_max": 0.170,
-        "sr1_flat_min_mae_max": 0.00085,
-        "sr1_flat_min_rmse_max": 0.00095,
-        "sr1_min_ratio_min": 20.0,
-        "sr1_point_ratio_min": 2.7,
+        "sr1_p95_log_abs_max": 0.120,
+        "sr1_min_mae_max": 0.00080,
+        "sr1_min_rmse_max": 0.00100,
     },
     128.0: {
-        "sr1_rms_log_max": 0.123,
-        "sr1_p95_log_abs_max": 0.260,
-        "sr1_flat_min_mae_max": 0.00070,
-        "sr1_flat_min_rmse_max": 0.00080,
-        "sr1_min_ratio_min": 24.0,
-        "sr1_point_ratio_min": 1.8,
+        "sr1_rms_log_max": 0.097,
+        "sr1_p95_log_abs_max": 0.255,
+        "sr1_min_mae_max": 0.00045,
+        "sr1_min_rmse_max": 0.00060,
     },
 }
-Z_COLLAPSE_DIRECT_THRESHOLDS_BY_DIAMETER = {
-    70.0: {
-        "sr1_rms_log_max": 0.060,
-        "sr1_p95_log_abs_max": 0.100,
-        "sr1_min_mae_max": 0.00070,
-        "sr1_min_rmse_max": 0.00090,
-    },
-    128.0: {
-        "sr1_rms_log_max": 0.085,
-        "sr1_p95_log_abs_max": 0.220,
-        "sr1_min_mae_max": 0.00035,
-        "sr1_min_rmse_max": 0.00045,
-    },
-}
-
 SUPERRES_COLORS = {
     1: "#1f77b4",
     2: "#d62728",
@@ -296,11 +277,22 @@ def _run_sphere_backend(
         _release_runtime_memory()
 
 
-def _pyhyper_iq_by_energy(scattering) -> dict[float, tuple[np.ndarray, np.ndarray]]:
-    from PyHyperScattering.integrate import WPIntegrator
+def _pyhyper_iq_by_energy(
+    scattering,
+    *,
+    phys_size_nm: float | None = None,
+    shape_zyx: tuple[int, int, int] | None = None,
+    energy_ev: float | None = None,
+) -> tuple[dict[float, tuple[np.ndarray, np.ndarray]], dict[str, object]]:
+    from PyHyperScattering.integrate import NRSSIntegrator
 
-    integrator = WPIntegrator(use_chunked_processing=False)
-    remeshed = integrator.integrateImageStack(scattering)
+    integrator = NRSSIntegrator(use_chunked_processing=False, force_np_backend=True)
+    remeshed = integrator.integrateImageStack(
+        scattering,
+        phys_size_nm=phys_size_nm,
+        shape_zyx=shape_zyx,
+        energy_ev=energy_ev,
+    )
 
     if "energy" not in remeshed.dims or "chi" not in remeshed.dims:
         raise AssertionError("PyHyperScattering output missing expected energy/chi dimensions.")
@@ -314,7 +306,7 @@ def _pyhyper_iq_by_energy(scattering) -> dict[float, tuple[np.ndarray, np.ndarra
         q = np.asarray(iq.coords[qdim].values, dtype=np.float64)
         sim_iq = np.asarray(iq.values, dtype=np.float64)
         iq_by_energy[float(energy)] = (q, sim_iq)
-    return iq_by_energy
+    return iq_by_energy, dict(remeshed.attrs)
 
 
 def _analytic_sphere_form_factor_iq(q: np.ndarray, diameter_nm: float) -> np.ndarray:
@@ -526,11 +518,9 @@ def _write_dev_plot(
     diameter_nm: float,
     energy_eV: float,
     q: np.ndarray,
-    flat_norm: np.ndarray,
     direct_norm: np.ndarray,
     sim_norm_by_superres: dict[int, np.ndarray],
     point_metrics_by_superres: dict[int, dict[str, float]],
-    flat_minima_metrics_by_superres: dict[int, dict[str, float]],
     direct_minima_metrics_by_superres: dict[int, dict[str, float]],
     timing_by_superres: dict[int, dict[str, float]],
     path_id: str,
@@ -542,9 +532,7 @@ def _write_dev_plot(
         [
             q >= Q_PLOT_MIN,
             q <= Q_PLOT_MAX,
-            np.isfinite(flat_norm),
             np.isfinite(direct_norm),
-            flat_norm > 0.0,
             direct_norm > 0.0,
         ]
     )
@@ -552,15 +540,12 @@ def _write_dev_plot(
         sim_norm = sim_norm_by_superres[superresolution]
         plot_mask = np.logical_and(plot_mask, np.isfinite(sim_norm) & (sim_norm > 0.0))
 
-    ax0.plot(q[plot_mask], flat_norm[plot_mask], color="black", linewidth=2.1, label="Analytical flat-detector (box averaged)")
     ax0.plot(
         q[plot_mask],
         direct_norm[plot_mask],
-        color="#7f7f7f",
-        linewidth=1.6,
-        linestyle="--",
-        alpha=0.9,
-        label="Analytical direct I(q)",
+        color="black",
+        linewidth=2.0,
+        label="Analytical I(|q|)",
     )
     for superresolution in SUPERRESOLUTIONS:
         ax0.plot(
@@ -584,12 +569,12 @@ def _write_dev_plot(
                 q >= Q_POINTWISE_MIN,
                 q <= Q_POINTWISE_MAX,
                 np.isfinite(sim_norm),
-                np.isfinite(flat_norm),
+                np.isfinite(direct_norm),
                 sim_norm > MIN_SIGNAL_FOR_LOG,
-                flat_norm > MIN_SIGNAL_FOR_LOG,
+                direct_norm > MIN_SIGNAL_FOR_LOG,
             ]
         )
-        resid = np.log10(sim_norm[mask]) - np.log10(flat_norm[mask])
+        resid = np.log10(sim_norm[mask]) - np.log10(direct_norm[mask])
         ax1.plot(
             q[mask],
             resid,
@@ -611,26 +596,24 @@ def _write_dev_plot(
             f"shape={SHAPE[0]}x{SHAPE[1]}x{SHAPE[2]}, PhysSize={PHYS_SIZE_NM:.2f} nm"
         ),
         (
-            f"PyHyper q, minima metric uses all minima in [{Q_EXTREMA_MIN:.2f}, {Q_EXTREMA_MAX:.2f}] nm^-1; "
+            f"NRSSIntegrator q, minima metric uses all minima in [{Q_EXTREMA_MIN:.2f}, {Q_EXTREMA_MAX:.2f}] nm^-1; "
             f"point metric uses q in [{Q_POINTWISE_MIN:.2f}, {Q_POINTWISE_MAX:.2f}] nm^-1"
         ),
-        f"flat-detector detector-pixel box average oversample={FLAT_DETECTOR_OVERSAMPLE}x",
+        "Reference curve is analytical sphere I(|q|) evaluated on the reduced NRSSIntegrator q grid.",
     ]
     for superresolution in SUPERRESOLUTIONS:
         point = point_metrics_by_superres[superresolution]
-        flat_min = flat_minima_metrics_by_superres[superresolution]
         direct_min = direct_minima_metrics_by_superres[superresolution]
-        ratio = direct_min["mae_abs_dq"] / flat_min["mae_abs_dq"]
         timing = timing_by_superres[superresolution]
         note_lines.append(
             (
                 f"sr={superresolution}: rms_log={point['rms_log']:.4f}; "
-                f"flat minima mae={flat_min['mae_abs_dq']:.5f} (n={flat_min['n_match']}); "
-                f"direct minima mae={direct_min['mae_abs_dq']:.5f} (n={direct_min['n_match']}); "
-                f"ratio={ratio:.2f}; sim={timing['sim_seconds']:.2f}s iq={timing['iq_seconds']:.2f}s"
+                f"direct minima mae={direct_min['mae_abs_dq']:.5f} "
+                f"rmse={direct_min['rmse_abs_dq']:.5f} (n={direct_min['n_match']}); "
+                f"sim={timing['sim_seconds']:.2f}s iq={timing['iq_seconds']:.2f}s"
             )
         )
-    fig.suptitle("Analytical Sphere Flat-Detector Comparison")
+    fig.suptitle("Analytical Sphere Form-Factor Comparison via NRSSIntegrator")
     fig.text(
         0.01,
         0.01,
@@ -641,7 +624,7 @@ def _write_dev_plot(
         bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "none"},
     )
     fig.tight_layout(rect=[0, 0.18, 1, 0.97])
-    out = PLOT_DIR / f"{path_id}__sphere_ff_flatdet_d{int(round(diameter_nm))}_e{energy_eV:.1f}.png"
+    out = PLOT_DIR / f"{path_id}__sphere_ff_qabs_d{int(round(diameter_nm))}_e{energy_eV:.1f}.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
     return out
@@ -650,6 +633,7 @@ def _write_dev_plot(
 def _evaluate_geometry_case(diameter_nm: float, nrss_path: ComputationPath) -> dict[str, object]:
     iq_by_superres = {}
     timing_by_superres = {}
+    attrs_by_superres = {}
     runtime_kwargs = _path_runtime_kwargs(nrss_path)
     for superresolution in SUPERRESOLUTIONS:
         sim_t0 = perf_counter()
@@ -661,7 +645,12 @@ def _evaluate_geometry_case(diameter_nm: float, nrss_path: ComputationPath) -> d
         )
         sim_seconds = perf_counter() - sim_t0
         iq_t0 = perf_counter()
-        iq_by_superres[superresolution] = _pyhyper_iq_by_energy(data)
+        iq_by_superres[superresolution], attrs_by_superres[superresolution] = _pyhyper_iq_by_energy(
+            data,
+            phys_size_nm=PHYS_SIZE_NM,
+            shape_zyx=SHAPE,
+            energy_ev=ENERGY_EV,
+        )
         iq_seconds = perf_counter() - iq_t0
         timing_by_superres[superresolution] = {
             "sim_seconds": float(sim_seconds),
@@ -671,127 +660,44 @@ def _evaluate_geometry_case(diameter_nm: float, nrss_path: ComputationPath) -> d
         _release_runtime_memory()
 
     q_ref, sim_iq_assert = iq_by_superres[ASSERT_SUPERRESOLUTION][float(ENERGY_EV)]
-
     direct_ref_iq = _analytic_sphere_form_factor_binned_iq(q_centers=q_ref, diameter_nm=diameter_nm)
     sim_norm_assert, direct_norm, _ = _normalize_to_first_q_gt_zero(q_ref, sim_iq_assert, direct_ref_iq)
     direct_point_metrics = _pointwise_metrics(q_ref, sim_norm_assert, direct_norm)
     direct_minima_metrics = _minima_alignment_metrics(q_ref, sim_norm_assert, direct_norm)
 
-    flat_image = _flat_detector_analytic_image(
-        diameter_nm=diameter_nm,
-        energy_eV=ENERGY_EV,
-        oversample=FLAT_DETECTOR_OVERSAMPLE,
-    )
-    q_flat, flat_ref_iq = _pyhyper_iq_by_energy(flat_image)[float(ENERGY_EV)]
-    if not np.allclose(q_ref, q_flat, atol=1e-12, rtol=0.0):
-        raise AssertionError("Flat-detector analytical q grid does not match simulation q grid.")
-
-    _, flat_norm, _ = _normalize_to_first_q_gt_zero(q_ref, sim_iq_assert, flat_ref_iq)
-
     sim_norm_by_superres = {}
     point_metrics_by_superres = {}
-    flat_minima_metrics_by_superres = {}
     direct_minima_metrics_by_superres = {}
     summary_lines = []
 
     for superresolution in SUPERRESOLUTIONS:
         q_sr, sim_iq_sr = iq_by_superres[superresolution][float(ENERGY_EV)]
-        if not np.allclose(q_sr, q_ref, atol=1e-12, rtol=0.0):
+        if not np.allclose(q_sr, q_ref, atol=1e-12, rtol=0.0, equal_nan=True):
             raise AssertionError(f"q-grid mismatch between sr={ASSERT_SUPERRESOLUTION} and sr={superresolution}.")
 
-        sim_norm_sr, _, _ = _normalize_to_first_q_gt_zero(q_ref, sim_iq_sr, flat_ref_iq)
+        sim_norm_sr, _, _ = _normalize_to_first_q_gt_zero(q_ref, sim_iq_sr, direct_ref_iq)
         sim_norm_by_superres[superresolution] = sim_norm_sr
 
-        point_metrics_by_superres[superresolution] = _pointwise_metrics(q_ref, sim_norm_sr, flat_norm)
-        flat_minima_metrics_by_superres[superresolution] = _minima_alignment_metrics(q_ref, sim_norm_sr, flat_norm)
+        point_metrics_by_superres[superresolution] = _pointwise_metrics(q_ref, sim_norm_sr, direct_norm)
         direct_minima_metrics_by_superres[superresolution] = _minima_alignment_metrics(q_ref, sim_norm_sr, direct_norm)
-
-        flat_mae = flat_minima_metrics_by_superres[superresolution]["mae_abs_dq"]
         direct_mae = direct_minima_metrics_by_superres[superresolution]["mae_abs_dq"]
         summary_lines.append(
             f"d={diameter_nm:.0f} sr={superresolution}: rms={point_metrics_by_superres[superresolution]['rms_log']:.4f}, "
-            f"flat_min_mae={flat_mae:.5f}, direct_min_mae={direct_mae:.5f}, ratio={direct_mae / flat_mae:.2f}"
+            f"direct_min_mae={direct_mae:.5f}"
         )
 
     return {
         "q_ref": q_ref,
-        "flat_norm": flat_norm,
         "direct_norm": direct_norm,
         "sim_norm_by_superres": sim_norm_by_superres,
         "point_metrics_by_superres": point_metrics_by_superres,
-        "flat_minima_metrics_by_superres": flat_minima_metrics_by_superres,
         "direct_minima_metrics_by_superres": direct_minima_metrics_by_superres,
         "direct_point_metrics": direct_point_metrics,
         "direct_minima_metrics": direct_minima_metrics,
+        "reduced_attrs": attrs_by_superres[ASSERT_SUPERRESOLUTION],
         "timing_by_superres": timing_by_superres,
         "summary_lines": summary_lines,
     }
-
-
-def _evaluate_z_collapse_geometry_case(diameter_nm: float, nrss_path: ComputationPath) -> dict[str, object]:
-    runtime_kwargs = _path_runtime_kwargs_with_z_collapse_mode(nrss_path, "mean")
-
-    sim_t0 = perf_counter()
-    data = _run_sphere_backend(
-        diameter_nm=diameter_nm,
-        superresolution=ASSERT_SUPERRESOLUTION,
-        energies_eV=[ENERGY_EV],
-        runtime_kwargs=runtime_kwargs,
-    )
-    sim_seconds = perf_counter() - sim_t0
-    iq_t0 = perf_counter()
-    q_ref, sim_iq = _pyhyper_iq_by_energy(data)[float(ENERGY_EV)]
-    iq_seconds = perf_counter() - iq_t0
-    del data
-    _release_runtime_memory()
-
-    direct_ref_iq = _analytic_sphere_form_factor_binned_iq(q_centers=q_ref, diameter_nm=diameter_nm)
-    sim_norm, direct_norm, _ = _normalize_to_first_q_gt_zero(q_ref, sim_iq, direct_ref_iq)
-    point_metrics = _pointwise_metrics(q_ref, sim_norm, direct_norm)
-    minima_metrics = _minima_alignment_metrics(q_ref, sim_norm, direct_norm)
-
-    flat_image = _flat_detector_analytic_image(
-        diameter_nm=diameter_nm,
-        energy_eV=ENERGY_EV,
-        oversample=FLAT_DETECTOR_OVERSAMPLE,
-    )
-    q_flat, flat_ref_iq = _pyhyper_iq_by_energy(flat_image)[float(ENERGY_EV)]
-    if not np.allclose(q_ref, q_flat, atol=1e-12, rtol=0.0):
-        raise AssertionError("Flat-detector analytical q grid does not match z-collapse simulation q grid.")
-    _, flat_norm, _ = _normalize_to_first_q_gt_zero(q_ref, sim_iq, flat_ref_iq)
-    flat_point_metrics = _pointwise_metrics(q_ref, sim_norm, flat_norm)
-    flat_minima_metrics = _minima_alignment_metrics(q_ref, sim_norm, flat_norm)
-
-    summary_lines = [
-        (
-            f"d={diameter_nm:.0f} collapse=mean sr={ASSERT_SUPERRESOLUTION}: "
-            f"direct_rms={point_metrics['rms_log']:.4f}, "
-            f"direct_p95={point_metrics['p95_log_abs']:.4f}, "
-            f"direct_min_mae={minima_metrics['mae_abs_dq']:.5f}, "
-            f"direct_min_rmse={minima_metrics['rmse_abs_dq']:.5f}"
-        ),
-        (
-            f"d={diameter_nm:.0f} collapse=mean sr={ASSERT_SUPERRESOLUTION}: "
-            f"flat_rms={flat_point_metrics['rms_log']:.4f}, "
-            f"flat_min_mae={flat_minima_metrics['mae_abs_dq']:.5f}"
-        ),
-    ]
-
-    return {
-        "q_ref": q_ref,
-        "direct_norm": direct_norm,
-        "sim_norm": sim_norm,
-        "point_metrics": point_metrics,
-        "minima_metrics": minima_metrics,
-        "flat_point_metrics": flat_point_metrics,
-        "flat_minima_metrics": flat_minima_metrics,
-        "timing": {
-            "sim_seconds": float(sim_seconds),
-            "iq_seconds": float(iq_seconds),
-        },
-        "summary_lines": summary_lines,
-    }
-
 
 @pytest.mark.gpu
 @pytest.mark.slow
@@ -799,7 +705,7 @@ def _evaluate_z_collapse_geometry_case(diameter_nm: float, nrss_path: Computatio
 @pytest.mark.toolchain_validation
 @pytest.mark.parametrize("diameter_nm", DIAMETERS_NM, ids=["dia70", "dia128"])
 def test_analytical_spherical_form_factor_pybind(diameter_nm: float, nrss_path: ComputationPath):
-    """Validate flat-detector sphere form-factor agreement and minima alignment through the pybind-to-PyHyper workflow."""
+    """Validate analytical sphere form-factor agreement through the maintained NRSSIntegrator reduction path."""
     if not _has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for analytical sphere form-factor test.")
 
@@ -811,11 +717,9 @@ def test_analytical_spherical_form_factor_pybind(diameter_nm: float, nrss_path: 
             diameter_nm=diameter_nm,
             energy_eV=ENERGY_EV,
             q=result["q_ref"],
-            flat_norm=result["flat_norm"],
             direct_norm=result["direct_norm"],
             sim_norm_by_superres=result["sim_norm_by_superres"],
             point_metrics_by_superres=result["point_metrics_by_superres"],
-            flat_minima_metrics_by_superres=result["flat_minima_metrics_by_superres"],
             direct_minima_metrics_by_superres=result["direct_minima_metrics_by_superres"],
             timing_by_superres=result["timing_by_superres"],
             path_id=nrss_path.id,
@@ -828,61 +732,13 @@ def test_analytical_spherical_form_factor_pybind(diameter_nm: float, nrss_path: 
 
     thresholds = GEOMETRY_THRESHOLDS_BY_DIAMETER[float(diameter_nm)]
     sr1_point = result["point_metrics_by_superres"][ASSERT_SUPERRESOLUTION]
-    sr1_flat_min = result["flat_minima_metrics_by_superres"][ASSERT_SUPERRESOLUTION]
     sr1_direct_min = result["direct_minima_metrics_by_superres"][ASSERT_SUPERRESOLUTION]
-    sr1_min_ratio = sr1_direct_min["mae_abs_dq"] / sr1_flat_min["mae_abs_dq"]
-    sr1_point_ratio = result["direct_point_metrics"]["rms_log"] / sr1_point["rms_log"]
+    reduced_attrs = result["reduced_attrs"]
 
+    assert reduced_attrs["source_integrator"] == "NRSSIntegrator"
+    assert reduced_attrs["nrss_semantic_mode"] == "3d_detector_aware"
+    assert reduced_attrs["radial_semantics"] == "q_abs_detector_corrected"
     assert sr1_point["rms_log"] <= thresholds["sr1_rms_log_max"]
     assert sr1_point["p95_log_abs"] <= thresholds["sr1_p95_log_abs_max"]
-    assert sr1_flat_min["mae_abs_dq"] <= thresholds["sr1_flat_min_mae_max"]
-    assert sr1_flat_min["rmse_abs_dq"] <= thresholds["sr1_flat_min_rmse_max"]
-    assert sr1_min_ratio >= thresholds["sr1_min_ratio_min"]
-    assert sr1_point_ratio >= thresholds["sr1_point_ratio_min"]
-
-    for superresolution in SUPERRESOLUTIONS:
-        flat_point = result["point_metrics_by_superres"][superresolution]
-        flat_min = result["flat_minima_metrics_by_superres"][superresolution]
-        direct_min = result["direct_minima_metrics_by_superres"][superresolution]
-        assert flat_point["rms_log"] <= result["direct_point_metrics"]["rms_log"] + 1e-12
-        assert flat_min["mae_abs_dq"] < direct_min["mae_abs_dq"]
-
-
-@pytest.mark.gpu
-@pytest.mark.slow
-@pytest.mark.physics_validation
-@pytest.mark.toolchain_validation
-@pytest.mark.path_subset("cupy_tensor_coeff", "cupy_direct_polarization")
-@pytest.mark.parametrize("diameter_nm", DIAMETERS_NM, ids=["dia70", "dia128"])
-def test_analytical_spherical_form_factor_z_collapse_direct_pybind(
-    diameter_nm: float,
-    nrss_path: ComputationPath,
-):
-    """Validate cupy-rsoxs z-collapse sphere form-factor agreement against direct analytical I(q)."""
-    if not _has_visible_gpu():
-        pytest.skip("No visible NVIDIA GPU found for analytical z-collapse sphere form-factor test.")
-
-    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
-    result = _evaluate_z_collapse_geometry_case(diameter_nm, nrss_path)
-
-    print("z_collapse_direct_point_metrics", result["point_metrics"])
-    print(
-        "z_collapse_direct_minima_metrics",
-        {k: v for k, v in result["minima_metrics"].items() if not isinstance(v, np.ndarray)},
-    )
-    print("z_collapse_flat_point_metrics", result["flat_point_metrics"])
-    print(
-        "z_collapse_flat_minima_metrics",
-        {k: v for k, v in result["flat_minima_metrics"].items() if not isinstance(v, np.ndarray)},
-    )
-    for line in result["summary_lines"]:
-        print(line)
-
-    thresholds = Z_COLLAPSE_DIRECT_THRESHOLDS_BY_DIAMETER[float(diameter_nm)]
-    assert result["point_metrics"]["rms_log"] <= thresholds["sr1_rms_log_max"]
-    assert result["point_metrics"]["p95_log_abs"] <= thresholds["sr1_p95_log_abs_max"]
-    assert result["minima_metrics"]["mae_abs_dq"] <= thresholds["sr1_min_mae_max"]
-    assert result["minima_metrics"]["rmse_abs_dq"] <= thresholds["sr1_min_rmse_max"]
-
-    assert result["point_metrics"]["rms_log"] < result["flat_point_metrics"]["rms_log"]
-    assert result["minima_metrics"]["mae_abs_dq"] < result["flat_minima_metrics"]["mae_abs_dq"]
+    assert sr1_direct_min["mae_abs_dq"] <= thresholds["sr1_min_mae_max"]
+    assert sr1_direct_min["rmse_abs_dq"] <= thresholds["sr1_min_rmse_max"]

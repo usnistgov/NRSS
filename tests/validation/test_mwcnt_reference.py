@@ -59,9 +59,14 @@ def _path_runtime_kwargs(path_id: str) -> dict[str, object]:
 @pytest.mark.toolchain_validation
 def test_mwcnt_experimental_reference_pybind(nrss_path: ComputationPath):
     """
-    Compare the maintained pybind+WPIntegrator MWCNT anisotropy observables to
-    the vendored experimental MWCNT WAXS reduction derived from the published
-    tutorial series and manuscript Table I parameterization.
+    Compare the maintained historical pybind+WPIntegrator MWCNT anisotropy
+    observables to the vendored experimental MWCNT WAXS reduction derived from
+    the published tutorial series and manuscript Table I parameterization.
+
+    This test intentionally preserves the tutorial-era detector-plane reduction
+    path because the vendored observables were built from that workflow. It
+    remains maintained for historical comparability, not as recommended
+    practice for new analytical NRSS validations.
 
     Reference:
     P. J. Dudenas, L. Q. Flagg, K. Goetz, P. Shapturenka, J. A. Fagan,

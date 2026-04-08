@@ -1,5 +1,14 @@
 This directory contains the minimal vendored inputs needed for the MWCNT experimental validation test.
 
+Historical reduction note:
+- The maintained MWCNT pytest path intentionally stays on `WPIntegrator`
+  because the vendored observables were derived from the historical tutorial
+  detector-plane `q_perp` reduction workflow.
+- This path is maintained for comparability to the published reference work and
+  for regression continuity. It should not be treated as recommended practice
+  for new analytical NRSS validations, which should prefer `NRSSIntegrator`
+  when comparing against geometry-aware `|q|` expressions.
+
 Files:
 - `MWCNT_reference_A.h5`: reduced experimental anisotropy observables used by the test.
 - `MWCNT_opts.csv`: interpolated MWCNT optical-constant source table used by the maintained morphology builder.

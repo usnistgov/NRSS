@@ -11,6 +11,15 @@ Files:
 - `CS_sim_reference.h5`: sim-derived regression golden generated from the
   maintained pybind + WPIntegrator + manual A-wedge baseline workflow
 
+Historical reduction note:
+- The maintained CoreShell pytest path intentionally stays on
+  `WPIntegrator` because the vendored experimental and sim-regression
+  references were built from that detector-plane `q_perp` workflow.
+- This path is maintained for historical comparability and regression
+  continuity. It should not be treated as the recommended reduction pattern for
+  new analytical NRSS validations, which should prefer `NRSSIntegrator` when
+  the target comparison is expressed in geometry-aware `|q|`.
+
 The maintained CoreShell migration should prefer `CS_reference.h5` for loading
 the golden data because `nrss-dev` does not currently ship `netCDF4` or
 `h5netcdf`.

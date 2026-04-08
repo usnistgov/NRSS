@@ -483,6 +483,15 @@ def _angular_distance_deg(angles_deg: np.ndarray, center_deg: float) -> np.ndarr
 
 
 def scattering_to_awedge(scattering: xr.DataArray) -> xr.DataArray:
+    """
+    Reduce CoreShell scattering through the maintained historical WPIntegrator path.
+
+    This helper intentionally preserves the legacy detector-plane ``q_perp``
+    remesh because the vendored CoreShell references were built from that
+    workflow. It remains maintained for historical comparability and regression
+    stability, not as the recommended reduction pattern for new analytical NRSS
+    validations.
+    """
     from PyHyperScattering.integrate import WPIntegrator
 
     integrator = WPIntegrator(use_chunked_processing=False)
@@ -562,7 +571,7 @@ def plot_core_shell_validation_panel(
     scenario: CoreShellScenario,
     reference_label: str,
     reference_citation: str,
-    model_label: str = "Pybind + WPIntegrator",
+    model_label: str = "Pybind + WPIntegrator (historical maintained path)",
 ) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig, axes = plt.subplots(2, 2, figsize=(12.0, 8.5), constrained_layout=True)

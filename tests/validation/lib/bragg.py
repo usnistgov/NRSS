@@ -487,6 +487,8 @@ def predict_bragg_spots_2d(
                     "k": int(h1),
                     "qx": qx0,
                     "qy": qy0,
+                    "q_perp": qmag,
+                    "q_abs_detector": qmag,
                     "qmag": qmag,
                     "predicted_intensity": intensity,
                 }
@@ -564,6 +566,9 @@ def predict_bragg_spots_3d(
                         "qy": qy0,
                         "qz": qz0,
                         "qz_detector": qz_detector,
+                        "q_perp": qperp,
+                        "q_abs_detector": qmag_detector,
+                        "q_abs_lattice": qmag_lattice,
                         "qmag": qperp,
                         "qmag_detector": qmag_detector,
                         "qmag_lattice": qmag_lattice,
@@ -584,6 +589,7 @@ def predict_bragg_spots_3d(
 def radial_shells_from_spots(
     spots: list[dict[str, float]],
     q_merge_tolerance: float,
+    q_key: str = "qmag",
 ) -> np.ndarray:
     q_merge_tolerance = float(q_merge_tolerance)
     if q_merge_tolerance <= 0.0:
@@ -591,8 +597,11 @@ def radial_shells_from_spots(
     if not spots:
         return np.zeros(0, dtype=np.float64)
 
+    if q_key not in spots[0]:
+        raise AssertionError(f"Requested q_key {q_key!r} not present in predicted-spot rows.")
+
     shells: list[float] = []
-    for qmag in sorted(float(spot["qmag"]) for spot in spots):
+    for qmag in sorted(float(spot[q_key]) for spot in spots):
         if not shells or abs(qmag - shells[-1]) > q_merge_tolerance:
             shells.append(qmag)
     return np.asarray(shells, dtype=np.float64)

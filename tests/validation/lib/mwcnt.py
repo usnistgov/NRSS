@@ -364,6 +364,15 @@ def run_mwcnt_pybind(
 
 
 def scattering_to_chiq(scattering: xr.DataArray) -> xr.DataArray:
+    """
+    Reduce MWCNT scattering through the maintained historical WPIntegrator path.
+
+    This helper intentionally preserves the legacy detector-plane ``q_perp``
+    remesh because the vendored MWCNT observables were derived from that
+    workflow. It remains maintained for historical comparability to the
+    tutorial/manuscript reduction path, not as recommended practice for new
+    analytical NRSS validations.
+    """
     from PyHyperScattering.integrate import WPIntegrator
 
     integrator = WPIntegrator(use_chunked_processing=False)
@@ -503,7 +512,7 @@ def plot_mwcnt_validation_panel(
     q_min_nm: float,
     q_max_nm: float,
     title: str = "MWCNT experimental validation",
-    simulation_label: str = "Pybind + WPIntegrator",
+    simulation_label: str = "Pybind + WPIntegrator (historical maintained path)",
     simulation_details: list[str] | None = None,
     eangle_rotation: list[float] | tuple[float, float, float] | None = None,
     description: str | None = None,

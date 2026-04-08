@@ -81,8 +81,13 @@ def _zcollapse_awedge(
 @pytest.mark.toolchain_validation
 def test_core_shell_experimental_reference_pybind(nrss_path: ComputationPath):
     """
-    Compare the maintained pybind+WPIntegrator CoreShell A-wedge to the vendored
-    experimental PGN RSoXS reference.
+    Compare the maintained historical pybind+WPIntegrator CoreShell A-wedge to
+    the vendored experimental PGN RSoXS reference.
+
+    This test intentionally preserves the legacy detector-plane reduction path
+    because the vendored reference was built from that workflow. It remains
+    maintained for comparability, not as recommended practice for new
+    analytical NRSS validations.
 
     Reference:
     Subhrangsu Mukherjee, Jason K. Streit, Eliot Gann, Kumar Saurabh, Daniel F.
@@ -120,8 +125,9 @@ def test_core_shell_experimental_reference_pybind(nrss_path: ComputationPath):
 @pytest.mark.toolchain_validation
 def test_core_shell_sim_regression_pybind(nrss_path: ComputationPath):
     """
-    Compare the maintained pybind+WPIntegrator CoreShell A-wedge to the local
-    sim-derived regression golden stored alongside the experimental reference.
+    Compare the maintained historical pybind+WPIntegrator CoreShell A-wedge to
+    the local sim-derived regression golden stored alongside the experimental
+    reference.
     """
     if not has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for CoreShell sim-regression validation.")

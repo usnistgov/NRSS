@@ -111,10 +111,10 @@ def _path_runtime_kwargs(nrss_path: ComputationPath) -> dict[str, object]:
     }
 
 
-def _pyhyper_iq(scattering) -> tuple[np.ndarray, np.ndarray]:
-    from PyHyperScattering.integrate import WPIntegrator
+def _pyhyper_iq(scattering) -> tuple[np.ndarray, np.ndarray, dict[str, object]]:
+    from PyHyperScattering.integrate import NRSSIntegrator
 
-    integrator = WPIntegrator(use_chunked_processing=False)
+    integrator = NRSSIntegrator(use_chunked_processing=False, force_np_backend=True)
     remeshed = integrator.integrateImageStack(scattering)
     if "chi" not in remeshed.dims:
         raise AssertionError("PyHyperScattering output missing chi dimension.")
@@ -125,6 +125,7 @@ def _pyhyper_iq(scattering) -> tuple[np.ndarray, np.ndarray]:
     return (
         np.asarray(iq.coords[qdim].values, dtype=np.float64),
         np.asarray(iq.values, dtype=np.float64),
+        dict(remeshed.attrs),
     )
 
 
@@ -464,11 +465,12 @@ def _evaluate_case(case: Bragg2DCase, nrss_path: ComputationPath) -> dict[str, o
     )
 
     t3 = perf_counter()
-    radial_q, radial_iq = _pyhyper_iq(scattering)
+    radial_q, radial_iq, radial_attrs = _pyhyper_iq(scattering)
     t4 = perf_counter()
     shell_qs = radial_shells_from_spots(
         predicted_spots,
         q_merge_tolerance=2.5 * float(peak_metrics["q_pixel"]),
+        q_key="q_perp",
     )
     radial_metrics = _radial_shell_metrics(
         q=radial_q,
@@ -496,6 +498,7 @@ def _evaluate_case(case: Bragg2DCase, nrss_path: ComputationPath) -> dict[str, o
         "unexpected_peaks": unexpected_peaks,
         "radial_q": radial_q,
         "radial_iq": radial_iq,
+        "radial_attrs": radial_attrs,
         "shell_qs": shell_qs,
         "radial_metrics": radial_metrics,
         "timing": timing,
@@ -506,8 +509,12 @@ def _assert_case_result(case: Bragg2DCase, result: dict[str, object]) -> None:
     thresholds = CASE_THRESHOLDS[case.case_id]
     peak_metrics = result["peak_metrics"]
     radial_metrics = result["radial_metrics"]
+    radial_attrs = result["radial_attrs"]
     unexpected_peaks = result["unexpected_peaks"]
 
+    assert radial_attrs["source_integrator"] == "NRSSIntegrator"
+    assert radial_attrs["nrss_semantic_mode"] == "2d_reciprocal_plane"
+    assert radial_attrs["radial_semantics"] == "q_perp"
     assert peak_metrics["p95_abs_dq"] <= thresholds["peak_p95_abs_dq_max"]
     assert peak_metrics["max_abs_dq"] <= thresholds["peak_max_abs_dq_max"]
     assert peak_metrics["min_peak_ratio"] >= thresholds["peak_ratio_min"]

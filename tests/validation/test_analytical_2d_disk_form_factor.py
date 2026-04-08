@@ -247,10 +247,10 @@ def _run_disk_backend(
         _release_runtime_memory()
 
 
-def _pyhyper_iq_by_energy(scattering) -> dict[float, tuple[np.ndarray, np.ndarray]]:
-    from PyHyperScattering.integrate import WPIntegrator
+def _pyhyper_iq_by_energy(scattering) -> tuple[dict[float, tuple[np.ndarray, np.ndarray]], dict[str, object]]:
+    from PyHyperScattering.integrate import NRSSIntegrator
 
-    integrator = WPIntegrator(use_chunked_processing=False)
+    integrator = NRSSIntegrator(use_chunked_processing=False, force_np_backend=True)
     remeshed = integrator.integrateImageStack(scattering)
 
     if "energy" not in remeshed.dims or "chi" not in remeshed.dims:
@@ -265,7 +265,7 @@ def _pyhyper_iq_by_energy(scattering) -> dict[float, tuple[np.ndarray, np.ndarra
         q = np.asarray(iq.coords[qdim].values, dtype=np.float64)
         sim_iq = np.asarray(iq.values, dtype=np.float64)
         iq_by_energy[float(energy)] = (q, sim_iq)
-    return iq_by_energy
+    return iq_by_energy, dict(remeshed.attrs)
 
 
 def _analytic_disk_form_factor_iq(q: np.ndarray, diameter_nm: float) -> np.ndarray:
@@ -532,7 +532,7 @@ def _evaluate_geometry_case(diameter_nm: float, nrss_path: ComputationPath) -> d
         )
         sim_seconds = perf_counter() - sim_t0
         iq_t0 = perf_counter()
-        iq_by_superres[superresolution] = _pyhyper_iq_by_energy(data)
+        iq_by_superres[superresolution], reduced_attrs = _pyhyper_iq_by_energy(data)
         iq_seconds = perf_counter() - iq_t0
         timing_by_superres[superresolution] = {
             "sim_seconds": float(sim_seconds),
@@ -576,6 +576,7 @@ def _evaluate_geometry_case(diameter_nm: float, nrss_path: ComputationPath) -> d
         "minima_metrics_by_superres": minima_metrics_by_superres,
         "assert_metrics": assert_metrics,
         "assert_minima_metrics": assert_minima_metrics,
+        "reduced_attrs": reduced_attrs,
         "timing_by_superres": timing_by_superres,
         "summary_lines": summary_lines,
     }
@@ -585,7 +586,11 @@ def _assert_geometry_case_result(diameter_nm: float, result: dict[str, object]) 
     thresholds = GEOMETRY_THRESHOLDS_BY_DIAMETER[float(diameter_nm)]
     sr1_point = result["point_metrics_by_superres"][ASSERT_SUPERRESOLUTION]
     sr1_minima = result["minima_metrics_by_superres"][ASSERT_SUPERRESOLUTION]
+    reduced_attrs = result["reduced_attrs"]
 
+    assert reduced_attrs["source_integrator"] == "NRSSIntegrator"
+    assert reduced_attrs["nrss_semantic_mode"] == "2d_reciprocal_plane"
+    assert reduced_attrs["radial_semantics"] == "q_perp"
     assert sr1_point["rms_log"] <= thresholds["sr1_rms_log_max"]
     assert sr1_point["p95_log_abs"] <= thresholds["sr1_p95_log_abs_max"]
     assert sr1_minima["mae_abs_dq"] <= thresholds["sr1_min_mae_max"]
@@ -598,7 +603,7 @@ def _assert_geometry_case_result(diameter_nm: float, result: dict[str, object]) 
 @pytest.mark.toolchain_validation
 @pytest.mark.parametrize("diameter_nm", DIAMETERS_NM, ids=["dia70", "dia128"])
 def test_analytical_2d_disk_form_factor_pybind(diameter_nm: float, nrss_path: ComputationPath):
-    """Validate direct analytical 2D disk form-factor agreement and minima alignment through the pybind-to-PyHyper workflow."""
+    """Validate direct analytical 2D disk form-factor agreement through the maintained NRSSIntegrator reduction path."""
     if not _has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for analytical 2D disk form-factor test.")
 

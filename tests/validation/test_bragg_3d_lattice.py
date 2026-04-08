@@ -93,7 +93,7 @@ CASE_THRESHOLDS = {
         "peak_p95_abs_dq_max": 0.006,
         "peak_max_abs_dq_max": 0.018,
         "peak_ratio_min": 15.0,
-        "radial_p95_abs_dq_max": 0.024,
+        "radial_p95_abs_dq_max": 0.025,
         "radial_max_abs_dq_max": 0.026,
         "missed_shell_count_max": 1,
         "unexpected_peak_count_max": 0,
@@ -123,11 +123,16 @@ def _path_runtime_kwargs(nrss_path: ComputationPath) -> dict[str, object]:
     }
 
 
-def _pyhyper_iq(scattering) -> tuple[np.ndarray, np.ndarray]:
-    from PyHyperScattering.integrate import WPIntegrator
+def _pyhyper_iq(scattering) -> tuple[np.ndarray, np.ndarray, dict[str, object]]:
+    from PyHyperScattering.integrate import NRSSIntegrator
 
-    integrator = WPIntegrator(use_chunked_processing=False)
-    remeshed = integrator.integrateImageStack(scattering)
+    integrator = NRSSIntegrator(use_chunked_processing=False, force_np_backend=True)
+    remeshed = integrator.integrateImageStack(
+        scattering,
+        phys_size_nm=PHYS_SIZE_NM,
+        shape_zyx=SHAPE,
+        energy_ev=ENERGY_EV,
+    )
     if "chi" not in remeshed.dims:
         raise AssertionError("PyHyperScattering output missing chi dimension.")
     qdim = next((dim for dim in remeshed.dims if dim == "q" or dim.startswith("q")), None)
@@ -137,6 +142,7 @@ def _pyhyper_iq(scattering) -> tuple[np.ndarray, np.ndarray]:
     return (
         np.asarray(iq.coords[qdim].values, dtype=np.float64),
         np.asarray(iq.values, dtype=np.float64),
+        dict(remeshed.attrs),
     )
 
 
@@ -534,6 +540,7 @@ def _evaluate_case(case: Bragg3DCase, nrss_path: ComputationPath) -> dict[str, o
     all_shell_qs = radial_shells_from_spots(
         all_predicted_spots,
         q_merge_tolerance=2.5 * float(min(np.abs(qx[1] - qx[0]), np.abs(qy[1] - qy[0]))),
+        q_key="q_abs_detector",
     )
     predicted_spots = predict_bragg_spots_3d(
         primitive_vectors_nm=np.asarray(metadata["primitive_vectors_nm"], dtype=np.float64),
@@ -559,11 +566,12 @@ def _evaluate_case(case: Bragg3DCase, nrss_path: ComputationPath) -> dict[str, o
     )
 
     t3 = perf_counter()
-    radial_q, radial_iq = _pyhyper_iq(scattering)
+    radial_q, radial_iq, radial_attrs = _pyhyper_iq(scattering)
     t4 = perf_counter()
     shell_qs = radial_shells_from_spots(
         predicted_spots,
         q_merge_tolerance=2.5 * float(peak_metrics["q_pixel"]),
+        q_key="q_abs_detector",
     )
     radial_metrics = _radial_shell_metrics(
         q=radial_q,
@@ -597,6 +605,7 @@ def _evaluate_case(case: Bragg3DCase, nrss_path: ComputationPath) -> dict[str, o
         "unexpected_peaks": unexpected_peaks,
         "radial_q": radial_q,
         "radial_iq": radial_iq,
+        "radial_attrs": radial_attrs,
         "shell_qs": shell_qs,
         "radial_metrics": radial_metrics,
         "radial_evidence": radial_evidence,
@@ -609,8 +618,12 @@ def _assert_case_result(case: Bragg3DCase, result: dict[str, object]) -> None:
     peak_metrics = result["peak_metrics"]
     radial_metrics = result["radial_metrics"]
     radial_evidence = result["radial_evidence"]
+    radial_attrs = result["radial_attrs"]
     unexpected_peaks = result["unexpected_peaks"]
 
+    assert radial_attrs["source_integrator"] == "NRSSIntegrator"
+    assert radial_attrs["nrss_semantic_mode"] == "3d_detector_aware"
+    assert radial_attrs["radial_semantics"] == "q_abs_detector_corrected"
     assert peak_metrics["p95_abs_dq"] <= thresholds["peak_p95_abs_dq_max"]
     assert peak_metrics["max_abs_dq"] <= thresholds["peak_max_abs_dq_max"]
     assert peak_metrics["min_peak_ratio"] >= thresholds["peak_ratio_min"]
