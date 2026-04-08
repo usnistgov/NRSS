@@ -964,7 +964,11 @@ class Morphology:
                 scattering_data = xr.DataArray(
                     scattering_data,
                     dims=['energy', 'qy', 'qx'],
-                    coords={'qy': qy, 'qx': qx, 'energy': self.config['Energies']}
+                    coords={'qy': qy, 'qx': qx, 'energy': self.config['Energies']},
+                    attrs={
+                        'phys_size_nm': float(self.PhysSize),
+                        'z_dim': int(self.NumZYX[0]),
+                    },
                 )
                 
                 if return_xarray:

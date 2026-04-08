@@ -229,6 +229,10 @@ class CupyScatteringResult:
             scattering_data,
             dims=["energy", "qy", "qx"],
             coords={"qy": qy, "qx": qx, "energy": list(self.energies)},
+            attrs={
+                "phys_size_nm": float(self.phys_size),
+                "z_dim": int(self.num_zyx[0]),
+            },
         )
 
     def release(self):
@@ -308,16 +312,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             if window is not None:
                 del window
             del runtime_materials
-        result = CupyScatteringResult(
-            data=result_data,
-            energies=energies,
-            phys_size=float(morphology.PhysSize),
-            num_zyx=tuple(int(v) for v in morphology.NumZYX),
+        result = recorder.measure(
+            "F",
+            lambda: self._assemble_and_retain_result(
+                morphology=morphology,
+                result_data=result_data,
+                energies=energies,
+            ),
         )
-
-        morphology._backend_result = result
-        morphology.scatteringPattern = result
-        self._update_kernel_reports(morphology)
         segment_seconds, segment_measurements, measurement = recorder.finalize()
         if recorder.selected_segments:
             morphology._backend_timings = {
@@ -331,6 +333,18 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
         if return_xarray:
             return result.to_xarray()
+        return result
+
+    def _assemble_and_retain_result(self, morphology, result_data, energies):
+        result = CupyScatteringResult(
+            data=result_data,
+            energies=energies,
+            phys_size=float(morphology.PhysSize),
+            num_zyx=tuple(int(v) for v in morphology.NumZYX),
+        )
+        morphology._backend_result = result
+        morphology.scatteringPattern = result
+        self._update_kernel_reports(morphology)
         return result
 
     def validate_all(self, morphology, *, quiet: bool = True) -> None:

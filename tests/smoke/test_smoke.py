@@ -2493,6 +2493,88 @@ def test_cyrsoxs_release_runtime_unlocks_mutation_and_rebuilds_pybind_objects():
         morph.release_runtime()
 
 
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff", "cupy_direct_polarization")
+def test_cupy_return_xarray_includes_minimal_reduction_metadata(nrss_path: ComputationPath):
+    """Ensure detached cupy-rsoxs xarray results carry the minimal attrs needed for reduction."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for cupy xarray metadata smoke test.")
+
+    morph = _build_two_material_isotropic_block_morphology(
+        backend=nrss_path.backend,
+        backend_options=nrss_path.backend_options,
+        resident_mode=nrss_path.resident_mode,
+        field_namespace=nrss_path.field_namespace,
+        isotropic_representation="enum_contract",
+    )
+    try:
+        scattering = morph.run(stdout=False, stderr=False, return_xarray=True)
+        assert scattering.attrs == {"phys_size_nm": 5.0, "z_dim": 4}
+        assert scattering.dims == ("energy", "qy", "qx")
+    finally:
+        morph.release_runtime()
+        _release_cupy_memory()
+
+
+@pytest.mark.gpu
+@pytest.mark.cyrsoxs_only
+def test_cyrsoxs_return_xarray_includes_minimal_reduction_metadata():
+    """Ensure detached legacy cyrsoxs xarray results carry the minimal attrs needed for reduction."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for cyrsoxs xarray metadata smoke test.")
+
+    energies = [285.0]
+    shape = (1, 8, 8)
+    zeros = np.zeros(shape, dtype=np.float32)
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=np.ones(shape, dtype=np.float32),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [1e-4, 2e-4, 1e-4, 2e-4]},
+        name="poly",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=zeros.copy(),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="vacuum",
+    )
+    config = {
+        "CaseType": 0,
+        "MorphologyType": 0,
+        "Energies": energies,
+        "EAngleRotation": [0.0, 0.0, 0.0],
+        "RotMask": 1,
+        "WindowingType": 0,
+        "AlgorithmType": 0,
+        "ReferenceFrame": 1,
+        "EwaldsInterpolation": 1,
+    }
+
+    morph = Morphology(
+        2,
+        materials={1: mat1, 2: mat2},
+        PhysSize=5.0,
+        config=config,
+        backend="cyrsoxs",
+        create_cy_object=True,
+    )
+    try:
+        scattering = morph.run(stdout=False, stderr=False, return_xarray=True)
+        assert scattering.attrs == {"phys_size_nm": 5.0, "z_dim": 1}
+        assert scattering.dims == ("energy", "qy", "qx")
+    finally:
+        morph.release_runtime()
+
+
 @pytest.mark.cyrsoxs_only
 def test_vacuum_named_matches_explicit_zero_constants():
     """Verify named vacuum optical constants match explicit all-zero constants."""
