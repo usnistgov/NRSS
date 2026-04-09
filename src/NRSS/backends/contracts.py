@@ -50,7 +50,7 @@ _BACKEND_ARRAY_CONTRACTS = {
         "runtime_device": "gpu",
         "default_dtype": "float32",
         "supported_dtypes": ("float32", "float16"),
-        "default_execution_path": "tensor_coeff",
+        "default_execution_path": "direct_polarization",
         "supported_execution_paths": (
             "tensor_coeff",
             "direct_polarization",

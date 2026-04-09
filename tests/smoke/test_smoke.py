@@ -761,6 +761,53 @@ def test_default_backend_resolution_prefers_cupy_rsoxs_when_available(monkeypatc
     assert resolve_backend_name(None) == "cupy-rsoxs"
 
 
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_legacy_inputdata_proxy_maps_config_style_assignments():
+    """Ensure legacy inputData config-style mutations still work under cupy-rsoxs."""
+    shape = (1, 4, 4)
+    zeros = np.zeros(shape, dtype=np.float32)
+    material = Material(
+        materialID=1,
+        Vfrac=np.ones(shape, dtype=np.float32),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=[285.0],
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: material},
+        PhysSize=5.0,
+        backend="cupy-rsoxs",
+        create_cy_object=False,
+    )
+
+    assert morph.inputData is not None
+    assert not morph.inputData
+
+    morph.inputData.windowingType = 1
+    morph.inputData.referenceFrame = 1
+    morph.inputData.interpolationType = 1
+    morph.inputData.rotMask = 1
+    morph.inputData.setEnergies([285.0, 286.0])
+    morph.inputData.setERotationAngle(StartAngle=0.0, IncrementAngle=2.0, EndAngle=10.0)
+    morph.inputData.setPhysSize(7.5)
+    morph.inputData.setDimensions(shape, order="ZYX")
+
+    assert morph.WindowingType == 1
+    assert morph.ReferenceFrame == 1
+    assert morph.EwaldsInterpolation == 1
+    assert morph.RotMask == 1
+    assert morph.Energies == [285.0, 286.0]
+    assert morph.EAngleRotation == [0.0, 2.0, 10.0]
+    assert morph.PhysSize == 7.5
+    assert morph.NumZYX == shape
+    assert morph.inputData.validate()
+
+
 @pytest.mark.backend_agnostic_contract
 @pytest.mark.cpu
 def test_cupy_backend_array_contract_defaults_to_host_resident_numpy():
@@ -782,12 +829,12 @@ def test_cupy_backend_array_contract_defaults_to_host_resident_numpy():
     assert contract["device"] == "cpu"
     assert contract["mixed_precision_mode"] is None
     assert contract["z_collapse_mode"] is None
-    assert contract["options"]["execution_path"] == "tensor_coeff"
+    assert contract["options"]["execution_path"] == "direct_polarization"
     assert contract["options"]["mixed_precision_mode"] is None
     assert contract["options"]["z_collapse_mode"] is None
     assert runtime_contract["namespace"] == "cupy"
     assert runtime_contract["device"] == "gpu"
-    assert runtime_contract["options"]["execution_path"] == "tensor_coeff"
+    assert runtime_contract["options"]["execution_path"] == "direct_polarization"
     assert runtime_contract["options"]["mixed_precision_mode"] is None
     assert runtime_contract["options"]["z_collapse_mode"] is None
     assert plan.target_namespace == "numpy"
@@ -850,7 +897,7 @@ def test_cupy_backend_rejects_legacy_dtype_option_with_migration_error():
 
 def _expected_cupy_backend_options(
     *,
-    execution_path: str = "tensor_coeff",
+    execution_path: str = "direct_polarization",
     mixed_precision_mode: str | None = None,
     z_collapse_mode: str | None = None,
 ) -> dict[str, str | None]:

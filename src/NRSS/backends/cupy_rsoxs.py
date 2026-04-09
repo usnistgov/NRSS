@@ -676,7 +676,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return tuple(runtime_materials)
 
     def _execution_path(self, morphology) -> str:
-        return str(morphology.backend_options.get("execution_path", "tensor_coeff"))
+        return str(morphology.backend_options.get("execution_path", "direct_polarization"))
 
     def _run_single_energy(self, morphology, runtime_materials, energy, cp, ndimage, window, recorder):
         execution_path = self._execution_path(morphology)

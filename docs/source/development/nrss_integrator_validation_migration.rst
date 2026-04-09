@@ -1,5 +1,5 @@
-NRSSIntegrator Validation Migration Proposal
-===========================================
+NRSSIntegrator Validation Migration
+===================================
 
 Summary
 -------
@@ -11,10 +11,11 @@ NRSS now has a clearer reduction split:
   especially when the target comparison is a geometry-aware analytical
   ``I(|q|)`` curve or shell position.
 
-This proposal recommends updating the maintained NRSS validation surface so that
-the form-factor and Bragg-structure tests use ``NRSSIntegrator`` as the primary
-radial reducer, while the CoreShell and MWCNT tests remain on
-``WPIntegrator`` for explicit historical-comparability reasons.
+This note records the completed migration of the maintained NRSS validation
+surface so that the form-factor and Bragg-structure tests use
+``NRSSIntegrator`` as the primary radial reducer, while the CoreShell and
+MWCNT tests remain on ``WPIntegrator`` for explicit
+historical-comparability reasons.
 
 Implementation Status
 ---------------------
@@ -90,76 +91,70 @@ Goals
 - Reduce duplication between the older detector-space analytical tests and the
   newer ``NRSSIntegrator``-specific validation modules.
 
-Recommended Maintained End State
---------------------------------
+Maintained End State
+--------------------
 
 Form-factor tests:
 
-- ``tests/validation/test_analytical_sphere_form_factor.py`` should be migrated
-  so its primary assertion path is:
+- ``tests/validation/test_analytical_sphere_form_factor.py`` now uses the
+  primary assertion path:
   ``NRSS scattering -> NRSSIntegrator -> analytical sphere I(|q|)``.
-- ``tests/validation/test_analytical_2d_disk_form_factor.py`` should be migrated
-  so its primary assertion path is:
+- ``tests/validation/test_analytical_2d_disk_form_factor.py`` now uses the
+  primary assertion path:
   ``NRSS scattering -> NRSSIntegrator -> analytical 2D disk I(q)``.
-- The existing transition-style modules
-  ``tests/validation/test_nrss_integrator_sphere_form_factor.py`` and
-  ``tests/validation/test_nrss_integrator_2d_disk_form_factor.py`` already
-  encode most of the desired semantics and should be treated as the source
-  material for the maintained versions, rather than keeping two parallel test
-  families indefinitely.
+- The temporary transition-style modules that previously carried the
+  ``NRSSIntegrator``-specific migration logic were merged into the maintained
+  analytical tests and then removed.
 
 Bragg tests:
 
-- ``tests/validation/test_bragg_2d_lattice.py`` should use ``NRSSIntegrator``
-  for the quasi-powder radial workup.
-- ``tests/validation/test_bragg_3d_lattice.py`` should use ``NRSSIntegrator``
-  for the quasi-powder radial workup and should compare shell positions against
-  detector-corrected ``|q|`` rather than detector-plane ``q_perp``.
+- ``tests/validation/test_bragg_2d_lattice.py`` now uses
+  ``NRSSIntegrator`` for the quasi-powder radial workup.
+- ``tests/validation/test_bragg_3d_lattice.py`` now uses
+  ``NRSSIntegrator`` for the quasi-powder radial workup and compares shell
+  positions against detector-corrected ``|q|`` rather than detector-plane
+  ``q_perp``.
 
 Historical exceptions:
 
-- ``tests/validation/test_core_shell_reference.py`` should remain on
+- ``tests/validation/test_core_shell_reference.py`` remains on
   ``WPIntegrator``.
-- ``tests/validation/test_mwcnt_reference.py`` should remain on
+- ``tests/validation/test_mwcnt_reference.py`` remains on
   ``WPIntegrator``.
-- Both should state clearly in docstrings, helper docstrings, plot labels, and
+- Both now state clearly in docstrings, helper docstrings, plot labels, and
   data README notes that this is a maintained historical path kept for direct
   comparability with vendored legacy references, not the recommended pattern
   for new analytical validations.
 
-Concrete File-Level Changes
----------------------------
+Implemented File-Level Changes
+------------------------------
 
-1. Promote the ``NRSSIntegrator`` form-factor modules into the maintained path.
+1. Promote the ``NRSSIntegrator`` form-factor logic into the maintained path.
 
-- Rework ``tests/validation/test_analytical_sphere_form_factor.py`` around the
-  reduction helper already proven in
-  ``tests/validation/test_nrss_integrator_sphere_form_factor.py``.
-- Rework ``tests/validation/test_analytical_2d_disk_form_factor.py`` around the
-  reduction helper already proven in
-  ``tests/validation/test_nrss_integrator_2d_disk_form_factor.py``.
-- After migration, either:
-
-  - retire the ``test_nrss_integrator_*`` modules entirely, or
-  - keep them only briefly while thresholds are being tuned, with an explicit
-    comment that they are transitional and must not become a second maintained
-    surface.
+- ``tests/validation/test_analytical_sphere_form_factor.py`` was reworked onto
+  an ``NRSSIntegrator``-based maintained path with detector-corrected
+  ``|q|`` semantics.
+- ``tests/validation/test_analytical_2d_disk_form_factor.py`` was reworked
+  onto an ``NRSSIntegrator``-based maintained path with explicit
+  ``q_perp`` semantics.
+- The temporary ``test_nrss_integrator_*`` migration modules were removed after
+  their logic was folded into the maintained analytical test files.
 
 2. Standardize the reduction helper used by Bragg validations.
 
-- In ``tests/validation/test_bragg_2d_lattice.py``, replace the local
-  ``WPIntegrator``-based ``_pyhyper_iq`` helper with an
+- In ``tests/validation/test_bragg_2d_lattice.py``, the local
+  ``WPIntegrator``-based ``_pyhyper_iq`` helper was replaced with an
   ``NRSSIntegrator``-based helper.
-- Assert that the reduced output carries:
+- The test now asserts that the reduced output carries:
 
   - ``source_integrator == "NRSSIntegrator"``
   - ``nrss_semantic_mode == "2d_reciprocal_plane"``
   - ``radial_semantics == "q_perp"``
 
-- In ``tests/validation/test_bragg_3d_lattice.py``, replace the local
-  ``WPIntegrator``-based ``_pyhyper_iq`` helper with an
+- In ``tests/validation/test_bragg_3d_lattice.py``, the local
+  ``WPIntegrator``-based ``_pyhyper_iq`` helper was replaced with an
   ``NRSSIntegrator``-based helper that passes explicit metadata when needed.
-- Assert that the reduced output carries:
+- The test now asserts that the reduced output carries:
 
   - ``source_integrator == "NRSSIntegrator"``
   - ``nrss_semantic_mode == "3d_detector_aware"``
@@ -167,67 +162,63 @@ Concrete File-Level Changes
 
 3. Fix Bragg shell semantics in the shared helper layer.
 
-- In ``tests/validation/lib/bragg.py``, ``predict_bragg_spots_3d`` currently
-  stores detector-plane ``q_perp`` in the generic ``qmag`` field and stores the
-  detector-corrected magnitude separately as ``qmag_detector``.
-- That is appropriate for the detector-image overlay, but it is the wrong
-  default for the maintained radial-shell comparison.
-- The shared helper should expose both quantities explicitly:
+- In ``tests/validation/lib/bragg.py``, the 3D spot predictor now exposes both
+  detector-plane and detector-corrected radial coordinates explicitly.
+- The shared helper now exposes:
 
   - ``q_perp`` for detector-plane spot overlay logic
   - ``q_abs_detector`` for radial-shell comparison logic
   - optionally ``q_abs_lattice`` for pure reciprocal-lattice bookkeeping
 
-- ``radial_shells_from_spots`` should accept a key name or a coordinate mode so
-  the 2D tests can cluster shells using ``q_perp`` while the 3D tests cluster
-  shells using detector-corrected ``|q|``.
+- ``radial_shells_from_spots`` now accepts a key name so the 2D tests cluster
+  shells using ``q_perp`` while the 3D tests cluster shells using
+  detector-corrected ``|q|``.
 
 4. Clarify historical ``WPIntegrator`` maintenance in shared helpers.
 
-- Add explicit docstrings/comments to
+- Added explicit docstrings/comments to
   ``tests/validation/lib/core_shell.py:scattering_to_awedge`` and
-  ``tests/validation/lib/mwcnt.py:scattering_to_chiq`` that these helpers keep
-  the historical ``WPIntegrator`` reduction for compatibility with vendored
-  legacy references.
-- Update default plot labels such as
-  ``"Pybind + WPIntegrator"`` to something like
+  ``tests/validation/lib/mwcnt.py:scattering_to_chiq`` explaining that these
+  helpers keep the historical ``WPIntegrator`` reduction for compatibility
+  with vendored legacy references.
+- Updated default plot labels such as
   ``"Pybind + WPIntegrator (historical maintained path)"``.
-- Update:
+- Updated:
 
   - ``tests/validation/data/core_shell/README.md``
   - ``tests/validation/data/mwcnt/README.md``
 
   so the same point is documented near the vendored reference artifacts.
 
-Recommended Migration Sequence
-------------------------------
+Applied Migration Sequence
+--------------------------
 
 1. Consolidate the sphere and 2D disk tests first.
 
-- These are the cleanest analytical references.
-- They already have ``NRSSIntegrator`` prototypes in-tree.
-- They provide the baseline semantics and threshold style for later Bragg work.
+- These were the cleanest analytical references.
+- They provided the baseline semantics and threshold style for later Bragg
+  work.
 
 2. Migrate the 2D Bragg radial workup next.
 
-- This is low risk because ``NRSSIntegrator`` should reduce to the same radial
+- This was low risk because ``NRSSIntegrator`` reduces to the same radial
   coordinate as ``WPIntegrator`` for ``z_dim == 1``.
-- The main value is making the maintained reducer explicit and asserting the
+- The main value was making the maintained reducer explicit and asserting the
   semantics in test metadata.
 
 3. Migrate the 3D Bragg radial workup last.
 
-- This is the only Bragg path where shell-position semantics actually change.
-- Thresholds should be re-derived after the shell coordinate switches from
+- This was the only Bragg path where shell-position semantics actually changed.
+- Thresholds were re-derived after the shell coordinate switched from
   ``q_perp`` to detector-corrected ``|q|``.
-- Keep detector-image spot-overlay assertions unchanged; only the radial shell
-  comparison should move to the detector-corrected coordinate.
+- Detector-image spot-overlay assertions were kept unchanged; only the radial
+  shell comparison moved to the detector-corrected coordinate.
 
 4. Apply the historical-note pass to CoreShell and MWCNT.
 
-- This is documentation and labeling work, not a physics-model change.
-- It should land with the test migration so reviewers can see the maintained
-  policy in one place.
+- This was documentation and labeling work, not a physics-model change.
+- It landed with the test migration so reviewers can see the maintained policy
+  in one place.
 
 Acceptance Criteria
 -------------------

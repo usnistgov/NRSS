@@ -37,6 +37,119 @@ from typing import Callable, TypeVar, ParamSpec
 P = ParamSpec("P")
 T = TypeVar("T")
 
+
+class _LegacyInputDataProxy:
+    """Backend-neutral compatibility shim for legacy ``morph.inputData`` usage."""
+
+    _ATTRIBUTE_TO_CONFIG = {
+        "windowingType": "WindowingType",
+        "interpolationType": "EwaldsInterpolation",
+        "referenceFrame": "ReferenceFrame",
+        "rotMask": "RotMask",
+    }
+
+    def __init__(self, morphology):
+        object.__setattr__(self, "_morphology", morphology)
+
+    def __bool__(self):
+        # Keep internal ``if self.inputData`` checks behaving as if no pybind
+        # object exists for non-CyRSoXS backends.
+        return False
+
+    def __repr__(self):
+        return (
+            f"<LegacyInputDataProxy backend={self._morphology.backend!r} "
+            f"NumMaterial={self._morphology.numMaterial}>"
+        )
+
+    def __getattr__(self, name):
+        if name in self._ATTRIBUTE_TO_CONFIG:
+            return getattr(self._morphology, self._ATTRIBUTE_TO_CONFIG[name])
+        if name == "NumMaterial":
+            return self._morphology.numMaterial
+        raise AttributeError(
+            f"{type(self).__name__!s} does not provide attribute {name!r}. "
+            "Only the legacy config-like InputData surface is emulated for "
+            "non-CyRSoXS backends."
+        )
+
+    def __setattr__(self, name, value):
+        if name in self._ATTRIBUTE_TO_CONFIG:
+            setattr(self._morphology, self._ATTRIBUTE_TO_CONFIG[name], value)
+            return
+        raise AttributeError(
+            f"{type(self).__name__!s} does not support setting attribute {name!r}. "
+            "Only the legacy config-like InputData surface is emulated for "
+            "non-CyRSoXS backends."
+        )
+
+    def setCaseType(self, value):
+        self._morphology.CaseType = value
+
+    def setMorphologyType(self, value):
+        self._morphology.MorphologyType = value
+
+    def setAlgorithm(self, AlgorithmID, MaxStreams=1):
+        del MaxStreams
+        self._morphology.AlgorithmType = AlgorithmID
+
+    def setEnergies(self, energies):
+        self._morphology.Energies = energies
+
+    def setERotationAngle(self, *args, **kwargs):
+        if args and kwargs:
+            raise TypeError("setERotationAngle accepts either positional or keyword arguments, not both.")
+        if kwargs:
+            try:
+                start_angle = kwargs["StartAngle"]
+                end_angle = kwargs["EndAngle"]
+                increment_angle = kwargs["IncrementAngle"]
+            except KeyError as exc:
+                raise TypeError(
+                    "setERotationAngle requires StartAngle, EndAngle, and IncrementAngle."
+                ) from exc
+        elif len(args) == 3:
+            start_angle, end_angle, increment_angle = args
+        else:
+            raise TypeError(
+                "setERotationAngle requires exactly three values: "
+                "StartAngle, EndAngle, IncrementAngle."
+            )
+        self._morphology.EAngleRotation = [start_angle, increment_angle, end_angle]
+
+    def setPhysSize(self, value):
+        self._morphology.PhysSize = value
+
+    def setDimensions(self, dimensions, order=None):
+        if order is not None and str(order) != "ZYX":
+            raise ValueError("Only ZYX morphology ordering is supported.")
+        self._morphology.NumZYX = tuple(int(v) for v in dimensions)
+
+    def validate(self):
+        try:
+            self._morphology.validate_all(quiet=True)
+        except Exception:
+            return False
+        return True
+
+    def print(self):
+        print(
+            "Legacy InputData compatibility proxy\n"
+            f"backend = {self._morphology.backend}\n"
+            f"CaseType = {self._morphology.CaseType}\n"
+            f"Energies = {self._morphology.Energies}\n"
+            f"EAngleRotation = {self._morphology.EAngleRotation}\n"
+            f"MorphologyType = {self._morphology.MorphologyType}\n"
+            f"AlgorithmType = {self._morphology.AlgorithmType}\n"
+            f"WindowingType = {self._morphology.WindowingType}\n"
+            f"RotMask = {self._morphology.RotMask}\n"
+            f"ReferenceFrame = {self._morphology.ReferenceFrame}\n"
+            f"EwaldsInterpolation = {self._morphology.EwaldsInterpolation}\n"
+            f"PhysSize = {self._morphology.PhysSize}\n"
+            f"NumZYX = {self._morphology.NumZYX}"
+        )
+
+
 def wraps(wrapper: Callable[P, T]) -> Callable[[Callable[P, T]], Callable[P, T]]:
     """
     A decorator to preserve the original function's docstring.
@@ -98,7 +211,8 @@ def _validate_ownership_policy(policy, backend_name):
 
 class Morphology:
     '''
-    Object used to hold all the components necessary for a complete CyRSoXS morphology
+    Object used to hold the components necessary for a complete NRSS morphology
+    and its backend execution contract.
 
     Attributes
     ----------
@@ -164,6 +278,95 @@ class Morphology:
                  input_policy='coerce',
                  output_policy='numpy',
                  ownership_policy=None):
+        """
+        Create a morphology and bind it to an NRSS backend.
+
+        Parameters
+        ----------
+        numMaterial : int
+            Number of materials in the morphology.
+        materials : dict[int, Material] or None, default None
+            Mapping from material ID to :class:`Material` objects. If omitted,
+            empty ``Material`` placeholders are created.
+        PhysSize : float or None, default None
+            Physical voxel size.
+        config : dict, default {"CaseType": 0, "MorphologyType": 0,
+                                "Energies": [270.0],
+                                "EAngleRotation": [0.0, 1.0, 0.0]}
+            Simulation configuration. Missing keys are filled from
+            ``Morphology.config_default``. In particular, the effective defaults
+            also include ``AlgorithmType=0``, ``WindowingType=0``,
+            ``RotMask=0``, ``ReferenceFrame=1``, and
+            ``EwaldsInterpolation=1``.
+
+            ``EAngleRotation`` is ordered as
+            ``[StartAngle, IncrementAngle, EndAngle]``.
+        create_cy_object : bool, default True
+            If ``True``, prepare backend/runtime objects during construction.
+        backend : {"cupy-rsoxs", "cyrsoxs"} or None, default None
+            Preferred backend. If omitted, NRSS resolves the default backend
+            automatically, preferring ``"cupy-rsoxs"`` when available and
+            otherwise falling back to ``"cyrsoxs"``.
+        backend_options : mapping or None, default None
+            Backend-specific options. These are normalized during construction
+            and are exposed later via :attr:`backend_options`.
+
+            ``cyrsoxs`` options:
+            - ``dtype``: only ``"float32"`` is supported.
+
+            ``cupy-rsoxs`` options:
+            - ``execution_path``: ``"direct_polarization"`` (default) or
+              ``"tensor_coeff"``.
+              Selects the maintained CuPy execution path.
+              ``"direct_polarization"`` is now the default public path.
+              ``"tensor_coeff"`` remains the maintained alternate path.
+            - ``mixed_precision_mode``: ``None`` (default) or
+              ``"reduced_morphology_bit_depth"``.
+              Expert-only reduced-precision morphology-input mode. This is the
+              approved half-input path for ``cupy-rsoxs``; it is not a generic
+              dtype knob. Runtime compute remains ``float32`` / ``complex64``.
+            - ``z_collapse_mode``: ``None`` (default) or ``"mean"``.
+              Expert-only effective-2D approximation. The public morphology
+              shape is not mutated. This mode is currently incompatible with
+              ``mixed_precision_mode``.
+            - ``kernel_preload_stage``: ``"a1"`` by default on the
+              ``"direct_polarization"`` path, otherwise ``"off"`` unless set
+              explicitly. Supported values are ``"off"``, ``"a1"``, and
+              ``"a2"``.
+            - ``igor_shift_backend``: RawKernel compiler selection for the
+              Igor-shift kernel family. Defaults to ``"nvcc"`` on the
+              ``"direct_polarization"`` path and ``"nvrtc"`` otherwise.
+              Supported values are ``"auto"``, ``"nvcc"``, and ``"nvrtc"``.
+            - ``direct_polarization_backend``: RawKernel compiler selection for
+              maintained direct-polarization kernels. Defaults to ``"nvrtc"``.
+              Supported values are ``"auto"``, ``"nvcc"``, and ``"nvrtc"``.
+        resident_mode : {"host", "device"} or None, default None
+            Location of the authoritative morphology arrays. ``"cupy-rsoxs"``
+            defaults to ``"host"`` and also supports ``"device"``.
+            ``"cyrsoxs"`` supports only ``"host"``.
+        input_policy : {"coerce", "strict"}, default "coerce"
+            How input arrays are validated for the selected backend.
+            ``"coerce"`` converts arrays as needed. ``"strict"`` requires
+            arrays to already satisfy the backend contract.
+        output_policy : {"numpy", "backend-native", "backend"}, default "numpy"
+            Output array policy for simulation results. ``"backend"`` is
+            accepted as an alias for ``"backend-native"``.
+        ownership_policy : {"copy", "borrow"} or None, default None
+            How input material arrays are retained by the morphology. If
+            omitted, this defaults to ``"borrow"`` for ``"cupy-rsoxs"`` and
+            ``"copy"`` for ``"cyrsoxs"``.
+
+        Notes
+        -----
+        ``backend_options`` are normalized at construction time. As a result,
+        :attr:`backend_options` may include defaults that were not passed
+        explicitly. For example, with ``backend="cupy-rsoxs"`` and no explicit
+        ``execution_path``, the normalized defaults include
+        ``execution_path="direct_polarization"``,
+        ``kernel_preload_stage="a1"``,
+        ``igor_shift_backend="nvcc"``, and
+        ``direct_polarization_backend="nvrtc"``.
+        """
 
         self._numMaterial = numMaterial
         self._PhysSize = PhysSize
@@ -196,6 +399,8 @@ class Morphology:
         self.last_kernel_backend_report = {}
         self.last_kernel_preload_report = {}
         self.inputData = None
+        if self._backend != "cyrsoxs":
+            self.inputData = _LegacyInputDataProxy(self)
         self.OpticalConstants = None
         self.voxelData = None
         self.scatteringPattern = None
@@ -1149,7 +1354,8 @@ class OpticalConstants:
 
 class Material(OpticalConstants):
     '''
-    Object to hold the voxel-level data for a CyRSoXS morphology. Inherits from the OpticalConstants class.
+    Object to hold the voxel-level data for an NRSS morphology. Inherits from
+    the OpticalConstants class.
 
     Attributes
     ----------
@@ -1184,6 +1390,52 @@ class Material(OpticalConstants):
 
     def __init__(self, materialID=1, Vfrac=None, S=None, theta=None, psi=None,
                  NumZYX=None, energies=None, opt_constants=None, name=None):
+        """
+        Create a material field bundle and optional optical-constant mapping.
+
+        Parameters
+        ----------
+        materialID : int, default 1
+            Integer material identifier used by NRSS.
+        Vfrac : ndarray or None, default None
+            Volume-fraction field for this material.
+        S : ndarray or SFieldMode or None, default None
+            Orientational order parameter field. Use
+            ``SFieldMode.ISOTROPIC`` to declare an explicitly isotropic
+            material contract.
+        theta : ndarray or None, default None
+            Second Euler angle field in the NRSS ZYZ convention.
+        psi : ndarray or None, default None
+            Third Euler angle field in the NRSS ZYZ convention.
+        NumZYX : tuple[int, int, int] or None, default None
+            Material array shape as ``(NumZ, NumY, NumX)``. If omitted and
+            ``Vfrac`` is array-like, the shape is inferred from ``Vfrac``.
+        energies : sequence[float] or None, default None
+            Energy grid for the optical constants.
+        opt_constants : dict or None, default None
+            Optical constants keyed by energy.
+        name : str or None, default None
+            Optional material name. ``name="vacuum"`` is treated as an explicit
+            isotropic convenience contract.
+
+        Notes
+        -----
+        The isotropic formalism is important enough to document explicitly:
+
+        - ``SFieldMode.ISOTROPIC`` means this material should be treated as
+          fully isotropic.
+        - Under this contract, ``theta`` and ``psi`` are ignored and are
+          normalized to ``None``.
+        - Using this contract correctly can dramatically reduce the memory
+          footprint of the calculation and improve runtime, because NRSS does
+          not need to carry full orientation fields for that material.
+        - ``name="vacuum"`` automatically opts into this explicit isotropic
+          contract. If conflicting ``S``, ``theta``, or ``psi`` values are
+          provided, they are ignored with a warning.
+
+        This isotropic contract is semantic, not just shorthand for filling
+        orientation arrays with zeros.
+        """
         self._owner_morphology = None
         self._explicit_isotropic_contract = False
         self.materialID = materialID
