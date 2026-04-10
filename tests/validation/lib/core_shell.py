@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import importlib
+import os
 import subprocess
 import sys
 import time
@@ -95,18 +96,36 @@ BASELINE_SCENARIO = CoreShellScenario(
 
 
 @lru_cache(maxsize=1)
-def has_visible_gpu() -> bool:
+def physical_gpu_devices() -> tuple[str, ...]:
     try:
         result = subprocess.run(
-            ["nvidia-smi", "-L"],
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
     except FileNotFoundError:
-        return False
-    return result.returncode == 0 and "GPU " in result.stdout
+        return ()
+    if result.returncode != 0:
+        return ()
+    return tuple(line.strip() for line in result.stdout.splitlines() if line.strip())
+
+
+@lru_cache(maxsize=1)
+def visible_gpu_devices() -> tuple[str, ...]:
+    env_value = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if env_value is not None:
+        cleaned = env_value.strip()
+        if not cleaned or cleaned == "-1":
+            return ()
+        return tuple(part.strip() for part in cleaned.split(",") if part.strip())
+    return physical_gpu_devices()
+
+
+@lru_cache(maxsize=1)
+def has_visible_gpu() -> bool:
+    return bool(visible_gpu_devices())
 
 
 def release_runtime_memory() -> None:

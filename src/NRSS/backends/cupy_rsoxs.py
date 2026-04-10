@@ -6,6 +6,7 @@ import math
 import os
 import shutil
 import time
+import warnings
 from typing import Any
 
 import numpy as np
@@ -354,20 +355,65 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             print("CuPy backend validation completed successfully.")
 
     def release(self, morphology) -> None:
+        self._release_morphology_owned_cupy_state(morphology)
+        self._clear_process_global_cupy_state()
+        self._drain_cupy_memory_pools()
+
+    def _release_morphology_owned_cupy_state(self, morphology) -> None:
         result = getattr(morphology, "_backend_result", None)
         if result is not None and hasattr(result, "release"):
             result.release()
         morphology._backend_result = None
         morphology.scatteringPattern = None
+        if hasattr(morphology, "scattering_data"):
+            morphology.scattering_data = None
+
+        # Clear any direct CuPy arrays hanging off the morphology instance.
+        for attr_name, value in tuple(morphology.__dict__.items()):
+            try:
+                if inspect_array(value)["namespace"] == "cupy":
+                    morphology.__dict__[attr_name] = None
+            except Exception:
+                continue
+
         morphology._backend_runtime_state.clear()
+        morphology.last_runtime_staging_report = []
+        morphology.last_kernel_backend_report = {}
+        morphology.last_kernel_preload_report = {}
+
+    def _clear_process_global_cupy_state(self) -> None:
+        _CUPY_KERNEL_CACHE.clear()
+        _CUPY_KERNEL_BACKEND_REPORT.clear()
+
+        igor_order_cache = getattr(self, "_igor_order_cache", None)
+        if igor_order_cache is not None:
+            igor_order_cache.clear()
+
+    def _drain_cupy_memory_pools(self) -> None:
         try:
             import cupy as cp
         except Exception:
             return
-        gc.collect()
-        cp.cuda.Stream.null.synchronize()
-        cp.get_default_memory_pool().free_all_blocks()
-        cp.get_default_pinned_memory_pool().free_all_blocks()
+
+        def _best_effort(action):
+            try:
+                action()
+            except Exception:
+                pass
+
+        _best_effort(gc.collect)
+        _best_effort(cp.clear_memo)
+        if hasattr(cp, "fft") and hasattr(cp.fft, "config"):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                _best_effort(cp.fft.config.clear_plan_cache)
+
+        for _ in range(2):
+            _best_effort(cp.cuda.Stream.null.synchronize)
+            _best_effort(cp.cuda.runtime.deviceSynchronize)
+            _best_effort(cp.get_default_memory_pool().free_all_blocks)
+            _best_effort(cp.get_default_pinned_memory_pool().free_all_blocks)
+            _best_effort(gc.collect)
 
     def _segment_recorder(self, morphology, cp):
         requested_segments = self._requested_timing_segments(morphology)

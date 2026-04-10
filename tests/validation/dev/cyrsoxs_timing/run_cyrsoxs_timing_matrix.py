@@ -25,10 +25,70 @@ if str(REPO_ROOT) not in sys.path:
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-# Development studies should default to one visible GPU unless the caller has
-# already pinned the runtime.
 os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+
+
+def _query_physical_gpu_devices() -> tuple[str, ...]:
+    try:
+        completed = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError:
+        return ()
+    if completed.returncode != 0:
+        return ()
+    return tuple(line.strip() for line in completed.stdout.splitlines() if line.strip())
+
+
+def _bootstrap_single_gpu_visibility(argv: list[str]) -> dict[str, Any]:
+    existing = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if existing is not None and existing.strip():
+        return {
+            "mode": "inherited",
+            "requested_gpu_index": None,
+            "cuda_visible_devices": existing.strip(),
+        }
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--gpu-index", default="auto")
+    args, _unknown = parser.parse_known_args(argv[1:])
+    requested = str(args.gpu_index).strip() or "auto"
+
+    if requested.lower() == "auto":
+        devices = _query_physical_gpu_devices()
+        if devices:
+            os.environ["CUDA_VISIBLE_DEVICES"] = devices[0]
+            return {
+                "mode": "auto_first_physical_gpu",
+                "requested_gpu_index": "auto",
+                "cuda_visible_devices": devices[0],
+                "physical_gpu_devices": list(devices),
+            }
+        return {
+            "mode": "auto_no_gpu_resolved",
+            "requested_gpu_index": "auto",
+            "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
+            "physical_gpu_devices": [],
+        }
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = requested
+    return {
+        "mode": "explicit_gpu_index",
+        "requested_gpu_index": requested,
+        "cuda_visible_devices": requested,
+    }
+
+
+# Keep standalone timing runs single-GPU by default, but do not mutate
+# CUDA visibility when this module is imported by another harness.
+if __name__ == "__main__":
+    _EARLY_GPU_BOOTSTRAP = _bootstrap_single_gpu_visibility(sys.argv)
+else:
+    _EARLY_GPU_BOOTSTRAP = None
 
 from NRSS.backends import format_backend_availability, get_backend_info
 from NRSS.morphology import Material, Morphology
@@ -353,6 +413,8 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         "timing_boundary": PRIMARY_TIMING_BOUNDARY,
         "note": case.notes or _case_note(case),
         "worker_warmup_runs_requested": int(case.worker_warmup_runs),
+        "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
+        "gpu_bootstrap": _EARLY_GPU_BOOTSTRAP,
         "status": "error",
     }
 
@@ -678,6 +740,7 @@ def run_matrix(args: argparse.Namespace) -> int:
         "created_utc": _timestamp(),
         "python_executable": sys.executable,
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
+        "gpu_bootstrap": _EARLY_GPU_BOOTSTRAP,
         "backend": DEFAULT_BACKEND,
         "backend_import_target": backend_info.import_target,
         "timing_boundary": PRIMARY_TIMING_BOUNDARY,
@@ -743,6 +806,15 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--label", default=None, help="Output subdirectory label under test-reports.")
+    parser.add_argument(
+        "--gpu-index",
+        default="auto",
+        help=(
+            "Single-GPU selection for standalone runs. Defaults to 'auto', which picks the first "
+            "physical GPU when CUDA_VISIBLE_DEVICES is otherwise unset. Imported orchestrators "
+            "should pin GPUs via CUDA_VISIBLE_DEVICES instead."
+        ),
+    )
     parser.add_argument(
         "--isotropic-material-representation",
         default="legacy_zero_array",

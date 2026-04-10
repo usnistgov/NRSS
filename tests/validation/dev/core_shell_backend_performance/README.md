@@ -9,7 +9,7 @@ Principal cross-backend comparison:
 
 - `run_primary_backend_speed_comparison.py`
   - this is the principal cross-backend comparison entry point for backend dev work,
-  - runs the fixed single-energy primary-time panel across:
+  - runs the fixed single-energy and triple-energy primary-time panel across:
     - legacy `cyrsoxs` cold,
     - legacy `cyrsoxs` pre-warm,
     - `cupy-rsoxs` host cold,
@@ -19,7 +19,9 @@ Principal cross-backend comparison:
     - `small`: `(32, 512, 512)`,
     - `medium`: `(64, 1024, 1024)`,
     - `large`: `(96, 1536, 1536)`,
-  - uses single-energy cases only,
+  - uses the standard energy panels:
+    - single energy: `285.0`,
+    - triple energy: `284.7, 285.0, 285.2`,
   - uses the two comparison rotations only:
     - `no rotation`: `[0, 0, 0]`,
     - `some rotation`: `[0, 15, 165]`,
@@ -35,17 +37,28 @@ Principal cross-backend comparison:
 
 - `run_comprehensive_backend_comparison.py`
   - dev-only small-CoreShell comprehensive comparison tier,
-  - keeps the maintained default benchmark unchanged,
+  - defines the maintained default comprehensive benchmark for this comparison tier,
   - supports an opt-in z-collapse extension via `--include-z-collapse`,
   - runs separate speed and memory passes over:
-    - host `warm`: `cyrsoxs`, `cupy-rsoxs tensor_coeff`, `cupy-rsoxs direct_polarization`,
-    - host `hot`: the same three host paths with one untimed identical warm-up run inside each worker,
-    - device `steady`: `cupy-rsoxs tensor_coeff`, `cupy-rsoxs direct_polarization`,
-    - device `hot`: the same two device paths with one untimed identical warm-up run inside each worker,
+    - speed pass:
+      - host `cold`: `cyrsoxs`, `cupy-rsoxs tensor_coeff`, `cupy-rsoxs direct_polarization`,
+      - host `hot`: the same three host paths with one untimed identical warm-up run inside each worker,
+      - device `steady`: `cupy-rsoxs tensor_coeff`, `cupy-rsoxs direct_polarization`,
+      - device `hot`: the same two device paths with one untimed identical warm-up run inside each worker,
+    - memory pass:
+      - host `hot`: `cyrsoxs`, `cupy-rsoxs tensor_coeff`, `cupy-rsoxs direct_polarization`,
+      - device `hot`: `cupy-rsoxs tensor_coeff`, `cupy-rsoxs direct_polarization`,
   - with `--include-z-collapse`, adds:
-    - host `warm` / `hot`: `cupy-rsoxs tensor_coeff` with `z_collapse_mode="mean"`,
-    - device `steady` / `hot`: the same collapsed `tensor_coeff` path,
-  - uses single energy only,
+    - speed pass:
+      - host `cold` / `hot`: `cupy-rsoxs tensor_coeff` with `z_collapse_mode="mean"`,
+      - device `steady` / `hot`: the same collapsed `tensor_coeff` path,
+    - memory pass:
+      - host `hot`: the collapsed `tensor_coeff` path,
+      - device `hot`: the collapsed `tensor_coeff` path,
+  - uses the standard energy panels:
+    - speed cold / steady rows: single energy only,
+    - speed hot rows: single and triple energy,
+    - memory rows: hot-only, with both single and triple energy,
   - accepts `--size-label` to choose the CoreShell ladder entry, for example
     `small`, `medium`, or `large`,
   - uses the two requested rotation schemes only:
@@ -56,13 +69,18 @@ Principal cross-backend comparison:
     - a warmed same-GPU CuPy observer subprocess using `cupy.cuda.runtime.memGetInfo()`,
     - baseline-subtracted peak GPU memory for the worker lifetime,
     - and process RSS polling from the parent orchestrator,
+  - if 3 or more visible GPUs are available, runs these backend/path buckets in parallel on separate GPUs:
+    - `cyrsoxs`,
+    - `cupy-rsoxs tensor_coeff` including opt-in tensor-collapse variants,
+    - `cupy-rsoxs direct_polarization`,
+  - if fewer than 3 GPUs are visible, falls back to serial execution on one GPU,
   - writes a combined summary plus separate speed and memory TSVs,
   - includes a speedup column on each `cupy-rsoxs` row against the comparable
     legacy `cyrsoxs` run,
   - tags collapsed rows separately in the TSV and Markdown report with
     `z collapse = mean` so they do not alias plain `tensor_coeff`,
-  - treats device `steady` as comparable to legacy `warm`, and device `hot` as
-    comparable to legacy `hot`,
+  - treats device `hot` as comparable to legacy `hot`,
+  - leaves device `steady` without a legacy speedup baseline in the report,
   - writes a simple human-readable Markdown report table in the same
     `test-reports` run directory.
 

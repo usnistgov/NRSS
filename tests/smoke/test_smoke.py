@@ -2327,6 +2327,90 @@ def test_cupy_release_runtime_unlocks_mutation_and_allows_rerun():
         _release_cupy_memory()
 
 
+@pytest.mark.gpu
+def test_cupy_release_runtime_clears_host_mode_pool_and_kernel_cache():
+    """Ensure host-mode release_runtime drops pooled bytes and NRSS kernel caches."""
+    cp = _import_cupy_required()
+    cupy_backend = importlib.import_module("NRSS.backends.cupy_rsoxs")
+
+    shape = (2, 4, 4)
+    energies = [285.0]
+    zeros = np.zeros(shape, dtype=np.float32)
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=np.ones(shape, dtype=np.float32),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="vacuum_1",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=zeros.copy(),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="vacuum_2",
+    )
+    config = {
+        "CaseType": 0,
+        "MorphologyType": 0,
+        "Energies": energies,
+        "EAngleRotation": [0.0, 0.0, 0.0],
+        "RotMask": 0,
+        "WindowingType": 0,
+        "AlgorithmType": 0,
+        "ReferenceFrame": 1,
+        "EwaldsInterpolation": 1,
+    }
+
+    morph = None
+    try:
+        _release_cupy_memory()
+        cupy_backend._CUPY_KERNEL_CACHE.clear()
+        cupy_backend._CUPY_KERNEL_BACKEND_REPORT.clear()
+        if hasattr(cp, "clear_memo"):
+            cp.clear_memo()
+
+        morph = Morphology(
+            2,
+            materials={1: mat1, 2: mat2},
+            PhysSize=5.0,
+            config=config,
+            backend="cupy-rsoxs",
+            resident_mode="host",
+            input_policy="strict",
+            create_cy_object=True,
+        )
+        result = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.runtime.deviceSynchronize()
+
+        assert list(result.to_backend_array().shape) == [1, 4, 4]
+        assert cp.get_default_memory_pool().total_bytes() > 0
+        assert len(cupy_backend._CUPY_KERNEL_CACHE) > 0
+
+        morph.release_runtime()
+        cp.cuda.runtime.deviceSynchronize()
+
+        assert morph._backend_result is None
+        assert morph.scatteringPattern is None
+        assert cp.get_default_memory_pool().used_bytes() == 0
+        assert cp.get_default_memory_pool().total_bytes() == 0
+        assert len(cupy_backend._CUPY_KERNEL_CACHE) == 0
+    finally:
+        if morph is not None:
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
 @pytest.mark.backend_agnostic_contract
 def test_tiny_deterministic_white_noise_kernel():
     """Check deterministic numeric fingerprint for a tiny white-noise smoothing kernel."""
