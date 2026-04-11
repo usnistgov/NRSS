@@ -6,11 +6,14 @@ This file intentionally excludes already-landed ideas.
 It also separates truly untried work from partially tried work that is not yet
 cleanly closed.
 
+If the task is to resume the shared host-resident reusable-staging branch from a
+cold start, open `shared_reusable_staging_branch_plan.md` after this file.
+
 ## Truly Untried
 
 | Path | Idea | Primary Goal | Segment | Note |
 | --- | --- | --- | --- | --- |
-| `shared` | host-resident derivative staging plus isotropic/anisotropic runtime split | speed | `A2/B` | next major untried attempt; for host residency, stage `phi_a`, `sx`, `sy`, `sz` in `A2`, replace repeated per-energy trig/product work in `B`, and split isotropic vs anisotropic material paths so anisotropic kernels no longer need raw `S/theta/psi` and may not need `Vfrac`; device residency remains a separate higher-memory fast-path question because staged arrays may alias authoritative CuPy inputs |
+| `shared` | direct-path isotropic/anisotropic rawkernel split after reusable staging | speed | `B` | host-resident float32 GPU reusable staging is now the maintained standard path, but the float32 `direct_polarization` precomputed kernel still reads `Vfrac` only to pay for the isotropic term; split isotropic and anisotropic direct kernels so anisotropic-precomputed work consumes only `phi_a`, `sx`, `sy`, `sz` |
 | `tensor_coeff` | `planE05_tensor_coeff_projection_rotation_fusion` | speed | `E` | combine `x/y/xy` weighting with rotation accumulation and avoid the intermediate per-angle detector image |
 | `tensor_coeff` | `planE06_exact_quarter_turn_fast_path` | speed | `E` | use exact `90/180/270` transforms when rotation lands on the detector grid |
 | `tensor_coeff` | `planD06_segment_d_scratch_reuse` | possible memory / allocator relief | `D` | documented but never implemented; low priority because the remaining `D` surface was not convincingly allocator-limited |
@@ -18,103 +21,94 @@ cleanly closed.
 | `direct_polarization` | packed voxel-style runtime staging plus device-owned material loop | speed / memory / launch pressure | `B` | structural CyRSoXS-like redesign; still deferred |
 | `direct_polarization` | narrower orientation-only cache mode | throughput with smaller memory tradeoff than full cache mode | multi-angle `B` | documented but not attempted |
 
-### Resumption Notes: host-resident derivative staging plus isotropic/anisotropic runtime split
+### Resumption Notes: direct-path isotropic/anisotropic rawkernel split after reusable staging
 
-This is the next major untried optimization to attempt.
+The CPU-vs-GPU reusable-staging comparison is now closed.
 
-Current repeated work that motivates the idea:
+Historical branch plan and implementation notes:
 
-- `A2` currently stages runtime material views once per run, but it stages raw
-  morphology fields (`Vfrac`, `S`, `theta`, `psi`) rather than derivative
-  products.
-- `tensor_coeff` `B` currently recomputes `phi_a = Vfrac * S` and orientation
-  components `sx`, `sy`, `sz` for every energy.
-- `direct_polarization` `B` currently recomputes the same orientation-derived
-  quantities for every energy, and repeats per-angle work inside the direct
-  path.
-- Multi-energy sweeps therefore continue paying for repeated trig / product
-  work even though these quantities depend only on morphology, not energy.
+- `shared_reusable_staging_branch_plan.md`
 
-Proposed host-resident fast path:
+Completed outcome:
 
-- Restrict the first attempt to `resident_mode='host'`.
-- During `A2`, after staging CuPy runtime arrays from authoritative NumPy
-  morphology inputs, build derivative runtime fields for anisotropic materials:
-  - `phi_a = Vfrac * S`
-  - `sx = cos(psi) * sin(theta)`
-  - `sy = sin(psi) * sin(theta)`
-  - `sz = cos(theta)`
-- Keep `Vfrac` available for isotropic work.
-- Stop passing raw `S`, `theta`, `psi` into anisotropic `B` kernels once the
-  staged derivative path exists.
+- CPU-side reusable computation was rejected:
+  - slower than the incumbent host path on both maintained execution paths,
+  - higher peak GPU memory than baseline,
+  - no reason to keep it as a maintained or benchmarked branch surface.
+- GPU-side reusable computation in host-resident float32 mode was accepted:
+  - `A2` stages `Vfrac`, `S`, `theta`, `psi` one anisotropic material at a time,
+  - GPU precompute builds `phi_a`, `sx`, `sy`, `sz`,
+  - raw staged `S`, `theta`, `psi` are dropped immediately,
+  - steady-state runtime keeps `Vfrac + phi_a + sx + sy + sz` for anisotropic
+    host-resident float32 materials,
+  - this is now the maintained standard host-resident float32 path rather than
+    an experiment switch.
 
-Runtime-layout idea:
+Authority artifacts from the completed comparison:
 
-- Split runtime materials into isotropic and anisotropic families rather than
-  carrying one mixed view shape.
-- Isotropic runtime entries should retain only the fields needed for isotropic
-  accumulation, primarily `Vfrac` plus optical constants / material id.
-- Anisotropic runtime entries should retain the derivative fields needed by the
-  hot `B` kernels:
-  - `phi_a`
-  - `sx`
-  - `sy`
-  - `sz`
-- For the anisotropic path, `Vfrac` may become unnecessary after `A2`; confirm
-  this separately for each execution path before removing it from the runtime
-  view.
+- speed comparison summary:
+  - `test-reports/cupy-rsoxs-optimization-dev/codex_shared_reusable_authority_20260410a/summary.json`
+- peak-memory summary:
+  - `test-reports/core-shell-backend-performance-dev/codex_shared_reusable_memprobe_20260410T170810Z/shared_reusable_memory_summary.json`
 
-Why this is attractive:
+What remains open is narrower than the original branch plan:
 
-- It moves morphology-only math out of per-energy `B` and into one-time `A2`.
-- It should help both maintained execution paths.
-- For host residency, the staged CuPy arrays are runtime copies, not the
-  authoritative NumPy fields, so replacing raw staged orientation fields with
-  derivative fields is semantically safe.
-- The memory tradeoff is modest relative to larger cache-mode ideas because the
-  proposal reuses the existing runtime-staging concept rather than creating an
-  energy-batched tensor cache.
+- `tensor_coeff` benefited from reusable staging and is already on the
+  intended structure.
+- `direct_polarization` did not show a meaningful end-to-end multi-energy win
+  on the heavier host-resident lane that should have challenged it:
+  - artifact:
+    - `test-reports/core-shell-backend-performance-dev/codex_dp_20energy_0_15_165_exactband_20260410T172052Z/dp_20energy_0_15_165_exactband_summary.json`
+  - lane:
+    - 20 energies using exact CoreShell optics keys from `280.0` to `289.5` eV
+      in `0.5` eV steps,
+    - `EAngleRotation=[0,15,165]`
+  - result:
+    - baseline median primary `1.7327 s`,
+    - reusable-GPU median primary `1.7289 s`,
+    - effectively flat at `-0.22%`.
 
-Device-residency caveat:
+Why the direct path likely stayed flat:
 
-- Do not assume the same in-place strategy is safe for `resident_mode='device'`.
-- In the current runtime staging flow, arrays that already satisfy the runtime
-  contract may be returned unchanged, so staged arrays can alias authoritative
-  CuPy morphology inputs.
-- `cupy-rsoxs` also defaults to borrowed ownership, so overwriting staged
-  device arrays can corrupt authoritative morphology state.
-- Device residency may still benefit from a related fast path, but that should
-  be treated as a separate higher-memory cache mode or explicit copy mode, not
-  as the same default host-resident optimization.
+- The incumbent float32 `direct_polarization` path was already a fused raw
+  kernel, not an unfused Python/CuPy expression chain.
+- The precomputed float32 direct kernel still reads `Vfrac` because isotropic
+  and anisotropic accumulation remain fused in one kernel.
+- In the current precomputed direct kernel, `Vfrac` is used only for the
+  isotropic diagonal term; the anisotropic contribution itself uses only
+  `phi_a`, `sx`, `sy`, `sz`.
+- So the current direct precompute path trades inline trig / product work for:
+  - an extra one-time `A2` GPU precompute kernel,
+  - an extra steady-state global read of `phi_a`,
+  - while still retaining the steady-state `Vfrac` read for isotropic work.
+- That means the direct-path precomputed kernel has not yet reached the cleaner
+  anisotropic-only memory shape implied by the original branch idea.
 
-Likely implementation shape for the first attempt:
+Evidence that the anisotropic split is mathematically valid:
 
-- Extend runtime staging in `A2` to optionally produce derivative anisotropic
-  views for host residency.
-- Introduce explicit runtime-view types or fields for isotropic vs
-  anisotropic materials rather than overloading `theta`/`psi` semantics.
-- Update `tensor_coeff` float32 `B` kernels to consume derivative anisotropic
-  inputs directly.
-- Update `direct_polarization` float32 `B` kernels to consume derivative
-  anisotropic inputs directly.
-- Leave half-input / mixed-precision support out of the first attempt unless
-  the float32 path lands cleanly.
-- Leave device-resident morphology support behavior unchanged in the first
-  attempt.
+- The collapsed-mean direct path already computes isotropic work from `Vfrac`
+  separately and anisotropic work from `phi_a + sx/sy/sz`.
+- So the remaining issue is kernel layout, not physics semantics.
 
-Recommended first benchmark / acceptance shape:
+Recommended next implementation:
 
-- Start with host-resident float32 morphology only.
-- Compare one-morphology multi-energy sweeps before and after the change.
-- Measure at least `A2`, `B`, and end-to-end runtime with the private backend
-  timing segments.
-- Run both execution paths:
-  - `tensor_coeff`
-  - `direct_polarization`
-- Include at least one angle-light and one angle-heavy case, because the direct
-  path repeats `B` work inside the angle loop.
-- Require no physics regressions against the maintained validation surface
-  before treating the change as accepted.
+- Keep the accepted reusable-staging runtime layout.
+- For float32 `direct_polarization`, split anisotropic-material work into:
+  - isotropic-only accumulation kernel using `Vfrac`,
+  - anisotropic-precomputed kernel using only `phi_a`, `sx`, `sy`, `sz`.
+- Do not change device-resident behavior in the first pass.
+- Do not expand the first pass to half-input / mixed precision.
+
+Recommended resume benchmark shape:
+
+- Measure at least `A2`, `B`, and primary end-to-end timing.
+- Use host-resident float32 only.
+- Keep the heavy direct-path challenge lane:
+  - 20 exact CoreShell energies from `280.0` to `289.5` eV,
+  - `EAngleRotation=[0,15,165]`
+- Recheck the noisier angle-heavy lane if needed:
+  - triple-energy `0:5:175`
+- Require no physics regressions before treating the split as accepted.
 
 ## Partially Tried Or Still Live
 

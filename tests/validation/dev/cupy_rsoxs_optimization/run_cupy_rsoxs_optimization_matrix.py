@@ -1262,12 +1262,18 @@ def _timing_cases(
                             resident_mode=variant.resident_mode,
                             input_policy=variant.input_policy,
                             ownership_policy=variant.ownership_policy,
-                            backend_options=backend_options,
+                            backend_options=dict(backend_options),
                             timing_segments=timing_segments,
                             worker_warmup_runs=worker_warmup_runs,
                             notes=notes,
                         )
                     )
+
+                reusable_note = (
+                    "Host-resident float32 anisotropic materials use standard GPU reusable staging in A2."
+                    if mode == "host"
+                    else "Device-resident timing lane."
+                )
 
                 for size_label in size_labels:
                     append_case(
@@ -1280,7 +1286,8 @@ def _timing_cases(
                         eangle_rotation=EANGLE_OFF,
                         notes=(
                             f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                            f"Primary no-rotation tuning lane. execution_path={execution_path}."
+                            f"{reusable_note} Primary no-rotation tuning lane. "
+                            f"execution_path={execution_path}."
                         ),
                     )
 
@@ -1295,7 +1302,7 @@ def _timing_cases(
                             eangle_rotation=EANGLE_OFF,
                             notes=(
                                 f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Secondary three-energy no-rotation checkpoint lane. "
+                                f"{reusable_note} Secondary three-energy no-rotation checkpoint lane. "
                                 f"execution_path={execution_path}."
                             ),
                         )
@@ -1313,8 +1320,8 @@ def _timing_cases(
                             eangle_rotation=EANGLE_OFF,
                             notes=(
                                 f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Development-only centered-energy no-rotation lane with {energy_count} "
-                                f"energies. execution_path={execution_path}."
+                                f"{reusable_note} Development-only centered-energy no-rotation lane "
+                                f"with {energy_count} energies. execution_path={execution_path}."
                             ),
                         )
 
@@ -1329,7 +1336,7 @@ def _timing_cases(
                             eangle_rotation=EANGLE_LIMITED,
                             notes=(
                                 f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Secondary limited-EAngle checkpoint lane. "
+                                f"{reusable_note} Secondary limited-EAngle checkpoint lane. "
                                 f"execution_path={execution_path}."
                             ),
                         )
@@ -1348,7 +1355,8 @@ def _timing_cases(
                             eangle_rotation=eangle_rotation,
                             notes=(
                                 f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Custom single-energy rotation lane with EAngleRotation={list(eangle_rotation)} "
+                                f"{reusable_note} Custom single-energy rotation lane with "
+                                f"EAngleRotation={list(eangle_rotation)} "
                                 f"([StartAngle, IncrementAngle, EndAngle]). "
                                 f"execution_path={execution_path}."
                             ),
@@ -1368,8 +1376,8 @@ def _timing_cases(
                             eangle_rotation=EANGLE_OFF,
                             notes=(
                                 f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Custom explicit-energy no-rotation lane with energies={list(energies_ev)}. "
-                                f"execution_path={execution_path}."
+                                f"{reusable_note} Custom explicit-energy no-rotation lane with "
+                                f"energies={list(energies_ev)}. execution_path={execution_path}."
                             ),
                         )
 
@@ -1391,7 +1399,7 @@ def _timing_cases(
                                 eangle_rotation=eangle_rotation,
                                 notes=(
                                     f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                    f"Custom explicit-energy plus custom rotation lane with "
+                                    f"{reusable_note} Custom explicit-energy plus custom rotation lane with "
                                     f"energies={list(energies_ev)} and EAngleRotation={list(eangle_rotation)} "
                                     f"([StartAngle, IncrementAngle, EndAngle]). "
                                     f"execution_path={execution_path}."
@@ -1409,8 +1417,8 @@ def _timing_cases(
                         eangle_rotation=EANGLE_FULL,
                         notes=(
                             f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                            f"Occasional expensive checkpoint for the full parity-style rotation loop. "
-                            f"execution_path={execution_path}."
+                            f"{reusable_note} Occasional expensive checkpoint for the full parity-style "
+                            f"rotation loop. execution_path={execution_path}."
                         ),
                     )
     return cases

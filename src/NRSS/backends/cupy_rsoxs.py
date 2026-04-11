@@ -59,6 +59,7 @@ __device__ inline float nrss_half_bits_to_float(const unsigned short h) {
 _RAWKERNEL_BACKEND_OPTION_NAMES = {
     "igor_shift": "igor_shift_backend",
     "direct_polarization_generic": "direct_polarization_backend",
+    "direct_polarization_precomputed": "direct_polarization_backend",
 }
 
 
@@ -78,6 +79,10 @@ class _RuntimeMaterialView:
     theta: Any
     psi: Any
     is_full_isotropic: bool
+    phi_a: Any | None = None
+    sx: Any | None = None
+    sy: Any | None = None
+    sz: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -538,6 +543,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         families = ["igor_shift"]
         if self._execution_path(morphology) == "direct_polarization":
             families.append("direct_polarization_generic")
+            if self._uses_host_reusable_precompute(morphology):
+                families.append("direct_polarization_precomputed")
             shape_override = self._segment_c_shape_override(morphology)
             z_count = self._shape_tuple(morphology, shape_override=shape_override)[0]
             families.append(
@@ -601,6 +608,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 self._igor_shift_kernel(morphology, cp)
             elif family == "direct_polarization_generic":
                 self._direct_polarization_kernel(morphology, cp, runtime_dtype)
+            elif family == "direct_polarization_precomputed":
+                self._direct_precomputed_kernel_float32(morphology, cp)
             elif family == "direct_detector_projection_single_slice":
                 self._direct_detector_projection_single_slice_kernel(cp)
             elif family == "direct_detector_projection_interpolated":
@@ -674,6 +683,23 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             return False
         return self._execution_path(morphology) in {"tensor_coeff", "direct_polarization"}
 
+    def _uses_host_reusable_precompute(self, morphology) -> bool:
+        if str(getattr(morphology, "resident_mode", "")) != "host":
+            return False
+        if self._execution_path(morphology) not in {"tensor_coeff", "direct_polarization"}:
+            return False
+        runtime_dtype = str(morphology._runtime_compute_contract.get("runtime_dtype", "float32"))
+        return runtime_dtype == "float32"
+
+    def _direct_isotropic_mode(self, morphology) -> str | None:
+        if self._execution_path(morphology) != "direct_polarization":
+            return None
+        mode = morphology.backend_options.get("direct_isotropic_mode")
+        return None if mode is None else str(mode)
+
+    def _uses_direct_cached_isotropic_base(self, morphology) -> bool:
+        return self._direct_isotropic_mode(morphology) == "cached_base"
+
     def _material_is_runtime_zero_field(self, morphology, material, cp) -> bool:
         if not self._supports_runtime_zero_field_shortcut(morphology):
             return False
@@ -684,27 +710,120 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             for field_name in ("S", "theta", "psi")
         )
 
+    def _stage_runtime_field(
+        self,
+        value,
+        *,
+        field_name: str,
+        material_id: int,
+        runtime_contract,
+        staging_reports: list[Any],
+    ):
+        plan = assess_array_for_backend_runtime(
+            value,
+            backend_name=self.name,
+            field_name=field_name,
+            material_id=material_id,
+            contract=runtime_contract,
+        )
+        staging_reports.append(plan)
+        return coerce_array_for_backend(value, plan)
+
+    def _build_precomputed_runtime_fields_gpu(self, *, vfrac, s, theta, psi, cp) -> dict[str, Any]:
+        phi_a = cp.empty_like(vfrac)
+        sx = cp.empty_like(vfrac)
+        sy = cp.empty_like(vfrac)
+        sz = cp.empty_like(vfrac)
+        total = np.uint64(vfrac.size)
+        threads = 256
+        blocks = (vfrac.size + threads - 1) // threads
+        self._host_reusable_precompute_float32_kernel(cp)(
+            (blocks,),
+            (threads,),
+            (vfrac, s, theta, psi, phi_a, sx, sy, sz, total),
+        )
+        return {
+            "Vfrac": vfrac,
+            "phi_a": phi_a,
+            "sx": sx,
+            "sy": sy,
+            "sz": sz,
+        }
+
     def _runtime_material_views(self, morphology, cp):
         runtime_contract = morphology._runtime_compute_contract
         staging_reports = []
         runtime_materials = []
+        use_host_reusables = self._uses_host_reusable_precompute(morphology)
         for material_id, material in morphology.materials.items():
             is_full_isotropic = morphology._material_is_explicit_isotropic(material) or (
                 self._material_is_runtime_zero_field(morphology, material, cp)
             )
-            staged_fields = {"Vfrac": None, "S": None, "theta": None, "psi": None}
-            field_names = ("Vfrac",) if is_full_isotropic else ("Vfrac", "S", "theta", "psi")
-            for field_name in field_names:
-                value = getattr(material, field_name)
-                plan = assess_array_for_backend_runtime(
-                    value,
-                    backend_name=self.name,
-                    field_name=field_name,
+            staged_fields = {
+                "Vfrac": None,
+                "S": None,
+                "theta": None,
+                "psi": None,
+                "phi_a": None,
+                "sx": None,
+                "sy": None,
+                "sz": None,
+            }
+            if is_full_isotropic:
+                staged_fields["Vfrac"] = self._stage_runtime_field(
+                    material.Vfrac,
+                    field_name="Vfrac",
                     material_id=material_id,
-                    contract=runtime_contract,
+                    runtime_contract=runtime_contract,
+                    staging_reports=staging_reports,
                 )
-                staging_reports.append(plan)
-                staged_fields[field_name] = coerce_array_for_backend(value, plan)
+            elif use_host_reusables:
+                staged_fields["Vfrac"] = self._stage_runtime_field(
+                    material.Vfrac,
+                    field_name="Vfrac",
+                    material_id=material_id,
+                    runtime_contract=runtime_contract,
+                    staging_reports=staging_reports,
+                )
+                raw_s = self._stage_runtime_field(
+                    material.S,
+                    field_name="S",
+                    material_id=material_id,
+                    runtime_contract=runtime_contract,
+                    staging_reports=staging_reports,
+                )
+                raw_theta = self._stage_runtime_field(
+                    material.theta,
+                    field_name="theta",
+                    material_id=material_id,
+                    runtime_contract=runtime_contract,
+                    staging_reports=staging_reports,
+                )
+                raw_psi = self._stage_runtime_field(
+                    material.psi,
+                    field_name="psi",
+                    material_id=material_id,
+                    runtime_contract=runtime_contract,
+                    staging_reports=staging_reports,
+                )
+                precomputed = self._build_precomputed_runtime_fields_gpu(
+                    vfrac=staged_fields["Vfrac"],
+                    s=raw_s,
+                    theta=raw_theta,
+                    psi=raw_psi,
+                    cp=cp,
+                )
+                staged_fields.update(precomputed)
+                del raw_s, raw_theta, raw_psi
+            else:
+                for field_name in ("Vfrac", "S", "theta", "psi"):
+                    staged_fields[field_name] = self._stage_runtime_field(
+                        getattr(material, field_name),
+                        field_name=field_name,
+                        material_id=material_id,
+                        runtime_contract=runtime_contract,
+                        staging_reports=staging_reports,
+                    )
 
             runtime_materials.append(
                 _RuntimeMaterialView(
@@ -715,6 +834,10 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     theta=staged_fields["theta"],
                     psi=staged_fields["psi"],
                     is_full_isotropic=is_full_isotropic,
+                    phi_a=staged_fields["phi_a"],
+                    sx=staged_fields["sx"],
+                    sy=staged_fields["sy"],
+                    sz=staged_fields["sz"],
                 )
             )
 
@@ -1005,6 +1128,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         del sin_theta
         return sx, sy, sz
 
+    def _has_precomputed_runtime_reusables(self, material) -> bool:
+        return all(getattr(material, name, None) is not None for name in ("phi_a", "sx", "sy", "sz"))
+
     def _compute_nt_components(self, runtime_materials, energy, cp, required_components=None):
         dtype_name = cp.dtype(runtime_materials[0].Vfrac.dtype).name
         if dtype_name == "float16":
@@ -1043,8 +1169,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                         del isotropic_term
                     continue
 
-                phi_a = vfrac * material.S
-                sx, sy, sz = self._orientation_components(material, cp)
+                if self._has_precomputed_runtime_reusables(material):
+                    phi_a = material.phi_a
+                    sx = material.sx
+                    sy = material.sy
+                    sz = material.sz
+                else:
+                    phi_a = vfrac * material.S
+                    sx, sy, sz = self._orientation_components(material, cp)
 
                 if need0:
                     nt[0] += phi_a * (aligned_base + anisotropic_delta * sx * sx)
@@ -1059,7 +1191,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
                 if isotropic_term is not None:
                     del isotropic_term
-                del phi_a, sx, sy, sz
+                if not self._has_precomputed_runtime_reusables(material):
+                    del phi_a, sx, sy, sz
 
             return nt
 
@@ -1074,6 +1207,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         threads = 256
         isotropic_kernel = self._nt_accumulate_isotropic_float32_kernel(cp)
         anisotropic_kernel = self._nt_accumulate_anisotropic_float32_kernel(cp)
+        anisotropic_precomputed_kernel = self._nt_accumulate_anisotropic_precomputed_float32_kernel(cp)
 
         for material in runtime_materials:
             isotropic_diag, aligned_base, anisotropic_delta = self._material_optical_scalars(
@@ -1099,30 +1233,57 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 )
                 continue
 
-            anisotropic_kernel(
-                (blocks,),
-                (threads,),
-                (
-                    material.Vfrac,
-                    material.S,
-                    material.theta,
-                    material.psi,
-                    isotropic_diag,
-                    aligned_base,
-                    anisotropic_delta,
-                    need0,
-                    need1,
-                    need2,
-                    need3,
-                    need4,
-                    nt0,
-                    nt1,
-                    nt2,
-                    nt3,
-                    nt4,
-                    total,
-                ),
-            )
+            if self._has_precomputed_runtime_reusables(material):
+                anisotropic_precomputed_kernel(
+                    (blocks,),
+                    (threads,),
+                    (
+                        material.Vfrac,
+                        material.phi_a,
+                        material.sx,
+                        material.sy,
+                        material.sz,
+                        isotropic_diag,
+                        aligned_base,
+                        anisotropic_delta,
+                        need0,
+                        need1,
+                        need2,
+                        need3,
+                        need4,
+                        nt0,
+                        nt1,
+                        nt2,
+                        nt3,
+                        nt4,
+                        total,
+                    ),
+                )
+            else:
+                anisotropic_kernel(
+                    (blocks,),
+                    (threads,),
+                    (
+                        material.Vfrac,
+                        material.S,
+                        material.theta,
+                        material.psi,
+                        isotropic_diag,
+                        aligned_base,
+                        anisotropic_delta,
+                        need0,
+                        need1,
+                        need2,
+                        need3,
+                        need4,
+                        nt0,
+                        nt1,
+                        nt2,
+                        nt3,
+                        nt4,
+                        total,
+                    ),
+                )
 
         return nt
 
@@ -1188,8 +1349,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             if material.is_full_isotropic:
                 continue
 
-            phi_a = vfrac * material.S
-            sx, sy, sz = self._orientation_components(material, cp)
+            if self._has_precomputed_runtime_reusables(material):
+                phi_a = material.phi_a
+                sx = material.sx
+                sy = material.sy
+                sz = material.sz
+            else:
+                phi_a = vfrac * material.S
+                sx, sy, sz = self._orientation_components(material, cp)
 
             if need0:
                 contrib0 = phi_a * (aligned_base + anisotropic_delta * sx * sx)
@@ -1212,7 +1379,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 nt[4] += cp.sum(contrib4, axis=0, dtype=cp.complex64, keepdims=True) / z_count
                 del contrib4
 
-            del phi_a, sx, sy, sz
+            if not self._has_precomputed_runtime_reusables(material):
+                del phi_a, sx, sy, sz
 
         return nt
 
@@ -1447,6 +1615,46 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         _CUPY_KERNEL_CACHE["nt_accumulate_isotropic_float32"] = kernel
         return kernel
 
+    def _host_reusable_precompute_float32_kernel(self, cp):
+        kernel = _CUPY_KERNEL_CACHE.get("host_reusable_precompute_float32")
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            r"""
+            extern "C" __global__
+            void host_reusable_precompute_float32(
+                const float* vfrac,
+                const float* s,
+                const float* theta,
+                const float* psi,
+                float* phi_a,
+                float* sx,
+                float* sy,
+                float* sz,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+
+                const float theta_i = theta[idx];
+                const float psi_i = psi[idx];
+                const float sin_theta = sinf(theta_i);
+                phi_a[idx] = vfrac[idx] * s[idx];
+                sx[idx] = cosf(psi_i) * sin_theta;
+                sy[idx] = sinf(psi_i) * sin_theta;
+                sz[idx] = cosf(theta_i);
+            }
+            """,
+            "host_reusable_precompute_float32",
+        )
+        _CUPY_KERNEL_CACHE["host_reusable_precompute_float32"] = kernel
+        return kernel
+
     def _nt_accumulate_anisotropic_float32_kernel(self, cp):
         kernel = _CUPY_KERNEL_CACHE.get("nt_accumulate_anisotropic_float32")
         if kernel is not None:
@@ -1529,6 +1737,88 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             "nt_accumulate_anisotropic_float32",
         )
         _CUPY_KERNEL_CACHE["nt_accumulate_anisotropic_float32"] = kernel
+        return kernel
+
+    def _nt_accumulate_anisotropic_precomputed_float32_kernel(self, cp):
+        kernel = _CUPY_KERNEL_CACHE.get("nt_accumulate_anisotropic_precomputed_float32")
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            r"""
+            extern "C" __global__
+            void nt_accumulate_anisotropic_precomputed_float32(
+                const float* vfrac,
+                const float* phi_a,
+                const float* sx,
+                const float* sy,
+                const float* sz,
+                const float2 isotropic_diag,
+                const float2 aligned_base,
+                const float2 anisotropic_delta,
+                const int need0,
+                const int need1,
+                const int need2,
+                const int need3,
+                const int need4,
+                float2* nt0,
+                float2* nt1,
+                float2* nt2,
+                float2* nt3,
+                float2* nt4,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+
+                const float vf = vfrac[idx];
+                if (need0 || need3) {
+                    const float iso_x = vf * isotropic_diag.x;
+                    const float iso_y = vf * isotropic_diag.y;
+                    if (need0) {
+                        nt0[idx].x += iso_x;
+                        nt0[idx].y += iso_y;
+                    }
+                    if (need3) {
+                        nt3[idx].x += iso_x;
+                        nt3[idx].y += iso_y;
+                    }
+                }
+
+                const float phi = phi_a[idx];
+                const float sx_i = sx[idx];
+                const float sy_i = sy[idx];
+                const float sz_i = sz[idx];
+
+                if (need0) {
+                    nt0[idx].x += phi * (aligned_base.x + anisotropic_delta.x * sx_i * sx_i);
+                    nt0[idx].y += phi * (aligned_base.y + anisotropic_delta.y * sx_i * sx_i);
+                }
+                if (need1) {
+                    nt1[idx].x += phi * anisotropic_delta.x * sx_i * sy_i;
+                    nt1[idx].y += phi * anisotropic_delta.y * sx_i * sy_i;
+                }
+                if (need2) {
+                    nt2[idx].x += phi * anisotropic_delta.x * sx_i * sz_i;
+                    nt2[idx].y += phi * anisotropic_delta.y * sx_i * sz_i;
+                }
+                if (need3) {
+                    nt3[idx].x += phi * (aligned_base.x + anisotropic_delta.x * sy_i * sy_i);
+                    nt3[idx].y += phi * (aligned_base.y + anisotropic_delta.y * sy_i * sy_i);
+                }
+                if (need4) {
+                    nt4[idx].x += phi * anisotropic_delta.x * sy_i * sz_i;
+                    nt4[idx].y += phi * anisotropic_delta.y * sy_i * sz_i;
+                }
+            }
+            """,
+            "nt_accumulate_anisotropic_precomputed_float32",
+        )
+        _CUPY_KERNEL_CACHE["nt_accumulate_anisotropic_precomputed_float32"] = kernel
         return kernel
 
     def _compute_fft_nt_components(self, nt, morphology, cp, window, component_indices=None):
@@ -1815,6 +2105,16 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         valid_counts = None
         use_rot_mask = bool(morphology.RotMask)
         num_angles = len(angle_family_plan.angles)
+        isotropic_base_field = None
+        if self._uses_direct_cached_isotropic_base(morphology):
+            isotropic_base_field = recorder.measure(
+                "B",
+                lambda: self._compute_direct_isotropic_base_field(
+                    runtime_materials=runtime_materials,
+                    energy=energy,
+                    cp=cp,
+                ),
+            )
         for angle_plan, (matrix_yx, offset_yx) in zip(
             angle_family_plan.angles,
             self._rotation_transforms(morphology, cp),
@@ -1872,6 +2172,42 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             del projection
         return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
 
+    def _compute_direct_isotropic_base_field(self, runtime_materials, energy, cp):
+        if not runtime_materials:
+            return None
+        if cp.dtype(runtime_materials[0].Vfrac.dtype).name != "float32":
+            return None
+        return self._compute_direct_isotropic_base_field_float32(runtime_materials, energy, cp)
+
+    def _compute_direct_isotropic_base_field_float32(self, runtime_materials, energy, cp):
+        isotropic_materials = [material for material in runtime_materials if material.is_full_isotropic]
+        if not isotropic_materials:
+            return None
+
+        shape = tuple(int(v) for v in isotropic_materials[0].Vfrac.shape)
+        base = cp.zeros(shape, dtype=cp.complex64)
+        threads = 256
+        kernel = self._direct_isotropic_base_accumulate_float32_kernel(cp)
+        for material in isotropic_materials:
+            isotropic_diag, _aligned_base, _anisotropic_delta = self._material_optical_scalars(
+                material,
+                energy,
+            )
+            total = np.uint64(material.Vfrac.size)
+            blocks = (material.Vfrac.size + threads - 1) // threads
+            kernel(
+                (blocks,),
+                (threads,),
+                (
+                    material.Vfrac,
+                    isotropic_diag,
+                    base,
+                    total,
+                ),
+            )
+        return base
+
+
     def _compute_direct_polarization(
         self,
         morphology,
@@ -1896,12 +2232,19 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 cp,
             )
         shape = tuple(int(v) for v in runtime_materials[0].Vfrac.shape)
-        p_x = cp.zeros(shape, dtype=cp.complex64)
-        p_y = cp.zeros(shape, dtype=cp.complex64)
-        p_z = cp.zeros(shape, dtype=cp.complex64)
         mx = angle_plan.mx
         my = angle_plan.my
-        kernel = self._direct_polarization_kernel(morphology, cp, runtime_materials[0].Vfrac.dtype)
+        if isotropic_base_field is not None:
+            p_x = cp.empty(shape, dtype=cp.complex64)
+            p_y = cp.empty(shape, dtype=cp.complex64)
+            cp.multiply(isotropic_base_field, np.float32(mx), out=p_x)
+            cp.multiply(isotropic_base_field, np.float32(my), out=p_y)
+        else:
+            p_x = cp.zeros(shape, dtype=cp.complex64)
+            p_y = cp.zeros(shape, dtype=cp.complex64)
+        p_z = cp.zeros(shape, dtype=cp.complex64)
+        generic_kernel = self._direct_generic_kernel_float32(morphology, cp)
+        precomputed_kernel = self._direct_precomputed_kernel_float32(morphology, cp)
         isotropic_kernel = self._direct_isotropic_kernel_float32(morphology, cp)
 
         for material in runtime_materials:
@@ -1911,6 +2254,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             )
             vfrac = material.Vfrac
             if material.is_full_isotropic:
+                if isotropic_base_field is not None:
+                    continue
                 isotropic_kernel(
                     ((vfrac.size + 255) // 256,),
                     (256,),
@@ -1926,25 +2271,47 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 )
                 continue
 
-            kernel(
-                ((vfrac.size + 255) // 256,),
-                (256,),
-                (
-                    vfrac,
-                    material.S,
-                    material.theta,
-                    material.psi,
-                    isotropic_diag,
-                    aligned_base,
-                    anisotropic_delta,
-                    np.float32(mx),
-                    np.float32(my),
-                    p_x,
-                    p_y,
-                    p_z,
-                    np.uint64(vfrac.size),
-                ),
-            )
+            if self._has_precomputed_runtime_reusables(material):
+                precomputed_kernel(
+                    ((vfrac.size + 255) // 256,),
+                    (256,),
+                    (
+                        vfrac,
+                        material.phi_a,
+                        material.sx,
+                        material.sy,
+                        material.sz,
+                        isotropic_diag,
+                        aligned_base,
+                        anisotropic_delta,
+                        np.float32(mx),
+                        np.float32(my),
+                        p_x,
+                        p_y,
+                        p_z,
+                        np.uint64(vfrac.size),
+                    ),
+                )
+            else:
+                generic_kernel(
+                    ((vfrac.size + 255) // 256,),
+                    (256,),
+                    (
+                        vfrac,
+                        material.S,
+                        material.theta,
+                        material.psi,
+                        isotropic_diag,
+                        aligned_base,
+                        anisotropic_delta,
+                        np.float32(mx),
+                        np.float32(my),
+                        p_x,
+                        p_y,
+                        p_z,
+                        np.uint64(vfrac.size),
+                    ),
+                )
 
         p_x *= self._one_by_four_pi
         p_y *= self._one_by_four_pi
@@ -1979,23 +2346,31 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             if material.is_full_isotropic:
                 continue
 
-            phi_a = material.Vfrac * material.S
-            sx, sy, sz = self._orientation_components(material, cp)
+            if self._has_precomputed_runtime_reusables(material):
+                phi_a = material.phi_a
+                sx = material.sx
+                sy = material.sy
+                sz = material.sz
+            else:
+                phi_a = material.Vfrac * material.S
+                sx, sy, sz = self._orientation_components(material, cp)
             field_projection = sx * mx + sy * my
 
             contrib_x = phi_a * (mx * aligned_base + anisotropic_delta * sx * field_projection)
             p_x += cp.sum(contrib_x, axis=0, dtype=cp.complex64, keepdims=True) / z_count
-            del contrib_x, sx
+            del contrib_x
 
             contrib_y = phi_a * (my * aligned_base + anisotropic_delta * sy * field_projection)
             p_y += cp.sum(contrib_y, axis=0, dtype=cp.complex64, keepdims=True) / z_count
-            del contrib_y, sy
+            del contrib_y
 
             contrib_z = phi_a * (anisotropic_delta * sz * field_projection)
             p_z += cp.sum(contrib_z, axis=0, dtype=cp.complex64, keepdims=True) / z_count
-            del contrib_z, sz
+            del contrib_z
 
-            del phi_a, field_projection
+            if not self._has_precomputed_runtime_reusables(material):
+                del phi_a, sx, sy, sz
+            del field_projection
 
         p_x *= self._one_by_four_pi
         p_y *= self._one_by_four_pi
@@ -2106,6 +2481,37 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             requested_backend=self._rawkernel_backend_option(morphology, "direct_polarization_generic"),
         )
 
+    def _direct_isotropic_base_accumulate_float32_kernel(self, cp):
+        kernel = _CUPY_KERNEL_CACHE.get("direct_isotropic_base_accumulate_float32")
+        if kernel is not None:
+            return kernel
+
+        kernel = cp.RawKernel(
+            r"""
+            extern "C" __global__
+            void direct_isotropic_base_accumulate_float32(
+                const float* vfrac,
+                const float2 isotropic_diag,
+                float2* base,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+
+                const float vf = vfrac[idx];
+                base[idx].x += vf * isotropic_diag.x;
+                base[idx].y += vf * isotropic_diag.y;
+            }
+            """,
+            "direct_isotropic_base_accumulate_float32",
+        )
+        _CUPY_KERNEL_CACHE["direct_isotropic_base_accumulate_float32"] = kernel
+        return kernel
+
     def _direct_generic_kernel_float32(self, morphology, cp):
         return self._build_rawkernel_with_fallback(
             cp,
@@ -2160,6 +2566,60 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             """,
             kernel_name="direct_polarization_generic_complex64",
             requested_backend=self._rawkernel_backend_option(morphology, "direct_polarization_generic"),
+        )
+
+    def _direct_precomputed_kernel_float32(self, morphology, cp):
+        return self._build_rawkernel_with_fallback(
+            cp,
+            family="direct_polarization_precomputed",
+            cache_key_base="direct_polarization_precomputed_complex64",
+            source=r"""
+            extern "C" __global__
+            void direct_polarization_precomputed_complex64(
+                const float* vfrac,
+                const float* phi_a,
+                const float* sx,
+                const float* sy,
+                const float* sz,
+                const float2 isotropic_diag,
+                const float2 aligned_base,
+                const float2 anisotropic_delta,
+                const float mx,
+                const float my,
+                float2* p_x,
+                float2* p_y,
+                float2* p_z,
+                const unsigned long long total
+            ) {
+                const unsigned long long idx =
+                    (unsigned long long)blockDim.x * (unsigned long long)blockIdx.x
+                    + (unsigned long long)threadIdx.x;
+                if (idx >= total) {
+                    return;
+                }
+
+                const float vf = vfrac[idx];
+                p_x[idx].x += vf * isotropic_diag.x * mx;
+                p_x[idx].y += vf * isotropic_diag.y * mx;
+                p_y[idx].x += vf * isotropic_diag.x * my;
+                p_y[idx].y += vf * isotropic_diag.y * my;
+
+                const float phi = phi_a[idx];
+                const float sx_i = sx[idx];
+                const float sy_i = sy[idx];
+                const float sz_i = sz[idx];
+                const float field_projection = sx_i * mx + sy_i * my;
+
+                p_x[idx].x += phi * (mx * aligned_base.x + anisotropic_delta.x * sx_i * field_projection);
+                p_x[idx].y += phi * (mx * aligned_base.y + anisotropic_delta.y * sx_i * field_projection);
+                p_y[idx].x += phi * (my * aligned_base.x + anisotropic_delta.x * sy_i * field_projection);
+                p_y[idx].y += phi * (my * aligned_base.y + anisotropic_delta.y * sy_i * field_projection);
+                p_z[idx].x += phi * (anisotropic_delta.x * sz_i * field_projection);
+                p_z[idx].y += phi * (anisotropic_delta.y * sz_i * field_projection);
+            }
+            """,
+            kernel_name="direct_polarization_precomputed_complex64",
+            requested_backend=self._rawkernel_backend_option(morphology, "direct_polarization_precomputed"),
         )
 
     def _direct_generic_kernel_float16(self, cp):

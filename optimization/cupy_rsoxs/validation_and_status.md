@@ -51,6 +51,9 @@ If you need benchmark commands or optimization acceptance gates, use
   and physics matrix after lightweight host-vs-device parity coverage.
 - Host-resident coverage is still retained for backend-contract and staging
   behavior where it matters.
+- In host-resident float32 mode, anisotropic materials now use standard GPU
+  reusable staging during `A2`; the older CPU-side comparison branch has been
+  removed from the maintained and dev-harness surfaces.
 - Single-GPU execution remains the maintained parity target.
 
 ## Current Open Repo-Level Work

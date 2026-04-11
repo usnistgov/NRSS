@@ -495,21 +495,28 @@ def test_primary_backend_speed_comparison_rows_use_matching_legacy_baselines():
     """Ensure host rows use matching legacy startup baselines and device rows appear only on pre-warm rows."""
     from tests.validation.dev.core_shell_backend_performance.run_primary_backend_speed_comparison import (
         _build_row_records,
+        _cupy_case_key,
     )
 
     def make_summary(legacy_cold, legacy_warm, host_cold, host_warm, device):
         timing_cases = {}
         for lane in ("small", "medium", "large"):
-            for fragment in ("single_no_rotation", "single_rot_0_15_165"):
+            for fragment in (
+                "single_no_rotation",
+                "single_rot_0_15_165",
+                "triple_no_rotation",
+                "triple_limited_rotation",
+            ):
+                is_no_rotation = fragment.endswith("no_rotation")
                 timing_cases[f"core_shell_{lane}_{fragment}_host_cyrsoxs"] = {
                     "status": "ok",
-                    "primary_seconds": legacy_cold if fragment == "single_no_rotation" else legacy_warm,
+                    "primary_seconds": legacy_cold if is_no_rotation else legacy_warm,
                 }
-                timing_cases[f"core_shell_{lane}_{fragment}_host_tensor_coeff"] = {
+                timing_cases[_cupy_case_key(lane=lane, fragment=fragment, residency="host")] = {
                     "status": "ok",
-                    "primary_seconds": host_cold if fragment == "single_no_rotation" else host_warm,
+                    "primary_seconds": host_cold if is_no_rotation else host_warm,
                 }
-                timing_cases[f"core_shell_{lane}_{fragment}_device_tensor_coeff"] = {
+                timing_cases[_cupy_case_key(lane=lane, fragment=fragment, residency="device")] = {
                     "status": "ok",
                     "primary_seconds": device,
                 }
@@ -522,10 +529,14 @@ def test_primary_backend_speed_comparison_rows_use_matching_legacy_baselines():
         cupy_host_prewarm=make_summary(0.0, 0.0, 2.0, 4.0, 2.0),
     )
 
-    cold_no_rotation = rows[0]
-    cold_some_rotation = rows[1]
-    warm_no_rotation = rows[2]
-    warm_some_rotation = rows[3]
+    keyed = {
+        (row["lane"], row["startup"], row["energy_label"], row["rotation_label"]): row for row in rows
+    }
+
+    cold_no_rotation = keyed[("small", "cold", "single", "no rotation")]
+    cold_some_rotation = keyed[("small", "cold", "single", "some rotation (0,15,165)")]
+    warm_no_rotation = keyed[("small", "pre-warm", "single", "no rotation")]
+    warm_some_rotation = keyed[("small", "pre-warm", "single", "some rotation (0,15,165)")]
 
     assert cold_no_rotation["startup"] == "cold"
     assert cold_no_rotation["legacy_cyrsoxs_primary_seconds"] == 10.0
@@ -561,66 +572,72 @@ def test_comprehensive_backend_comparison_speedups_use_matching_legacy_baselines
 
     rows = [
         {
-            "comparison_key": "comprehensive__host__warm__cyrsoxs__no_rotation",
+            "comparison_key": "comprehensive__host__cold__single__cyrsoxs__no_rotation",
             "comparison_backend": "cyrsoxs",
             "comparison_residency": "host",
-            "comparison_startup_mode": "warm",
+            "comparison_startup_mode": "cold",
             "comparison_execution_path": "cyrsoxs",
+            "comparison_energy_key": "single",
             "comparison_rotation_key": "no_rotation",
             "comparison_rotation_label": "no rotation",
             "status": "ok",
             "primary_seconds": 10.0,
         },
         {
-            "comparison_key": "comprehensive__host__hot__cyrsoxs__no_rotation",
+            "comparison_key": "comprehensive__host__hot__single__cyrsoxs__no_rotation",
             "comparison_backend": "cyrsoxs",
             "comparison_residency": "host",
             "comparison_startup_mode": "hot",
             "comparison_execution_path": "cyrsoxs",
+            "comparison_energy_key": "single",
             "comparison_rotation_key": "no_rotation",
             "comparison_rotation_label": "no rotation",
             "status": "ok",
             "primary_seconds": 4.0,
         },
         {
-            "comparison_key": "comprehensive__host__warm__tensor_coeff__no_rotation",
+            "comparison_key": "comprehensive__host__cold__single__tensor_coeff__no_rotation",
             "comparison_backend": "cupy-rsoxs",
             "comparison_residency": "host",
-            "comparison_startup_mode": "warm",
+            "comparison_startup_mode": "cold",
             "comparison_execution_path": "tensor_coeff",
+            "comparison_energy_key": "single",
             "comparison_rotation_key": "no_rotation",
             "comparison_rotation_label": "no rotation",
             "status": "ok",
             "primary_seconds": 5.0,
         },
         {
-            "comparison_key": "comprehensive__host__hot__direct_polarization__no_rotation",
+            "comparison_key": "comprehensive__host__hot__single__direct_polarization__no_rotation",
             "comparison_backend": "cupy-rsoxs",
             "comparison_residency": "host",
             "comparison_startup_mode": "hot",
             "comparison_execution_path": "direct_polarization",
+            "comparison_energy_key": "single",
             "comparison_rotation_key": "no_rotation",
             "comparison_rotation_label": "no rotation",
             "status": "ok",
             "primary_seconds": 2.0,
         },
         {
-            "comparison_key": "comprehensive__device__steady__tensor_coeff__no_rotation",
+            "comparison_key": "comprehensive__device__steady__single__tensor_coeff__no_rotation",
             "comparison_backend": "cupy-rsoxs",
             "comparison_residency": "device",
             "comparison_startup_mode": "steady",
             "comparison_execution_path": "tensor_coeff",
+            "comparison_energy_key": "single",
             "comparison_rotation_key": "no_rotation",
             "comparison_rotation_label": "no rotation",
             "status": "ok",
             "primary_seconds": 2.5,
         },
         {
-            "comparison_key": "comprehensive__device__hot__direct_polarization__no_rotation",
+            "comparison_key": "comprehensive__device__hot__single__direct_polarization__no_rotation",
             "comparison_backend": "cupy-rsoxs",
             "comparison_residency": "device",
             "comparison_startup_mode": "hot",
             "comparison_execution_path": "direct_polarization",
+            "comparison_energy_key": "single",
             "comparison_rotation_key": "no_rotation",
             "comparison_rotation_label": "no rotation",
             "status": "ok",
@@ -632,26 +649,26 @@ def test_comprehensive_backend_comparison_speedups_use_matching_legacy_baselines
         row["comparison_key"]: row for row in _enrich_results_with_legacy_speedups(rows)
     }
 
-    host_warm = enriched["comprehensive__host__warm__tensor_coeff__no_rotation"]
-    assert host_warm["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__warm__cyrsoxs__no_rotation"
-    assert host_warm["comparison_cyrsoxs_baseline_startup_mode"] == "warm"
-    assert host_warm["comparison_cyrsoxs_primary_seconds"] == 10.0
-    assert host_warm["comparison_speedup_vs_cyrsoxs"] == 2.0
+    host_cold = enriched["comprehensive__host__cold__single__tensor_coeff__no_rotation"]
+    assert host_cold["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__cold__single__cyrsoxs__no_rotation"
+    assert host_cold["comparison_cyrsoxs_baseline_startup_mode"] == "cold"
+    assert host_cold["comparison_cyrsoxs_primary_seconds"] == 10.0
+    assert host_cold["comparison_speedup_vs_cyrsoxs"] == 2.0
 
-    host_hot = enriched["comprehensive__host__hot__direct_polarization__no_rotation"]
-    assert host_hot["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__hot__cyrsoxs__no_rotation"
+    host_hot = enriched["comprehensive__host__hot__single__direct_polarization__no_rotation"]
+    assert host_hot["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__hot__single__cyrsoxs__no_rotation"
     assert host_hot["comparison_cyrsoxs_baseline_startup_mode"] == "hot"
     assert host_hot["comparison_cyrsoxs_primary_seconds"] == 4.0
     assert host_hot["comparison_speedup_vs_cyrsoxs"] == 2.0
 
-    device_steady = enriched["comprehensive__device__steady__tensor_coeff__no_rotation"]
-    assert device_steady["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__warm__cyrsoxs__no_rotation"
-    assert device_steady["comparison_cyrsoxs_baseline_startup_mode"] == "warm"
-    assert device_steady["comparison_cyrsoxs_primary_seconds"] == 10.0
-    assert device_steady["comparison_speedup_vs_cyrsoxs"] == 4.0
+    device_steady = enriched["comprehensive__device__steady__single__tensor_coeff__no_rotation"]
+    assert device_steady["comparison_cyrsoxs_baseline_key"] is None
+    assert device_steady["comparison_cyrsoxs_baseline_startup_mode"] is None
+    assert device_steady["comparison_cyrsoxs_primary_seconds"] is None
+    assert device_steady["comparison_speedup_vs_cyrsoxs"] is None
 
-    device_hot = enriched["comprehensive__device__hot__direct_polarization__no_rotation"]
-    assert device_hot["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__hot__cyrsoxs__no_rotation"
+    device_hot = enriched["comprehensive__device__hot__single__direct_polarization__no_rotation"]
+    assert device_hot["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__hot__single__cyrsoxs__no_rotation"
     assert device_hot["comparison_cyrsoxs_baseline_startup_mode"] == "hot"
     assert device_hot["comparison_cyrsoxs_primary_seconds"] == 4.0
     assert device_hot["comparison_speedup_vs_cyrsoxs"] == 4.0

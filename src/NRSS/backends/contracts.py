@@ -73,6 +73,11 @@ _BACKEND_ARRAY_CONTRACTS = {
         ),
         "default_igor_shift_backend": "nvrtc",
         "default_direct_polarization_backend": "nvrtc",
+        "default_direct_isotropic_mode": None,
+        "supported_direct_isotropic_modes": (
+            None,
+            "cached_base",
+        ),
         "supported_rawkernel_backends": (
             "auto",
             "nvcc",
@@ -85,6 +90,7 @@ _BACKEND_ARRAY_CONTRACTS = {
             "kernel_preload_stage",
             "igor_shift_backend",
             "direct_polarization_backend",
+            "direct_isotropic_mode",
         ),
         "runtime_compute_dtype": "float32",
         "runtime_complex_dtype": "complex64",
@@ -163,6 +169,21 @@ def normalize_rawkernel_backend_name(backend: Any) -> str:
     aliases = {
         "": "nvrtc",
         "default": "nvrtc",
+    }
+    return aliases.get(cleaned, cleaned)
+
+
+def normalize_direct_isotropic_mode_name(mode: Any) -> str | None:
+    if mode is None:
+        return None
+
+    cleaned = str(mode).strip().lower()
+    aliases = {
+        "": None,
+        "none": None,
+        "off": None,
+        "default": None,
+        "cached-base": "cached_base",
     }
     return aliases.get(cleaned, cleaned)
 
@@ -312,6 +333,21 @@ def normalize_backend_options(
                 f"Supported values: {', '.join(spec.get('supported_rawkernel_backends', ('nvrtc',)))}."
             )
         normalized_options[option_name] = normalized_backend
+
+    if "direct_isotropic_mode" in spec["supported_backend_options"]:
+        direct_isotropic_mode = normalize_direct_isotropic_mode_name(
+            options.get("direct_isotropic_mode", spec.get("default_direct_isotropic_mode"))
+        )
+        if direct_isotropic_mode not in spec.get("supported_direct_isotropic_modes", (None,)):
+            supported_modes = tuple(
+                "None" if mode is None else mode
+                for mode in spec.get("supported_direct_isotropic_modes", (None,))
+            )
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support direct_isotropic_mode "
+                f"{direct_isotropic_mode!r}. Supported modes: {', '.join(supported_modes)}."
+            )
+        normalized_options["direct_isotropic_mode"] = direct_isotropic_mode
 
     return normalized_options
 

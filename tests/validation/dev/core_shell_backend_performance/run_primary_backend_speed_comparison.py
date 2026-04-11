@@ -57,6 +57,7 @@ CUPY_SCRIPT = (
 LANE_ORDER = ("small", "medium", "large")
 STARTUP_ORDER = ("cold", "pre-warm")
 ENERGY_ORDER = ("single", "triple")
+CUPY_ISOTROPIC_REPRESENTATION = "enum_contract"
 ROTATION_ORDER = (
     (
         "no rotation",
@@ -125,6 +126,8 @@ COMPONENT_SPECS = (
             "0:15:165",
             "--include-triple-no-rotation",
             "--include-triple-limited",
+            "--isotropic-material-representation",
+            CUPY_ISOTROPIC_REPRESENTATION,
         ),
     ),
     ComponentSpec(
@@ -141,6 +144,8 @@ COMPONENT_SPECS = (
             "0:15:165",
             "--include-triple-no-rotation",
             "--include-triple-limited",
+            "--isotropic-material-representation",
+            CUPY_ISOTROPIC_REPRESENTATION,
             "--cuda-prewarm",
             "before_prepare_inputs",
         ),
@@ -233,6 +238,15 @@ def _read_primary_seconds(summary: dict[str, Any], key: str) -> float:
     return float(summary["timing_cases"][key]["primary_seconds"])
 
 
+def _cupy_case_key(*, lane: str, fragment: str, residency: str) -> str:
+    suffix = (
+        ""
+        if CUPY_ISOTROPIC_REPRESENTATION == "legacy_zero_array"
+        else f"_{CUPY_ISOTROPIC_REPRESENTATION}"
+    )
+    return f"core_shell_{lane}_{fragment}_{residency}_tensor_coeff{suffix}"
+
+
 def _build_row_records(
     *,
     legacy_cold: dict[str, Any],
@@ -250,8 +264,8 @@ def _build_row_records(
                 for rotation_label, fragments, rotation_spec in ROTATION_ORDER:
                     fragment = fragments[energy_label]
                     legacy_key = f"core_shell_{lane}_{fragment}_host_cyrsoxs"
-                    host_key = f"core_shell_{lane}_{fragment}_host_tensor_coeff"
-                    device_key = f"core_shell_{lane}_{fragment}_device_tensor_coeff"
+                    host_key = _cupy_case_key(lane=lane, fragment=fragment, residency="host")
+                    device_key = _cupy_case_key(lane=lane, fragment=fragment, residency="device")
 
                     legacy_primary = _read_primary_seconds(legacy_summary, legacy_key)
                     host_primary = _read_primary_seconds(host_summary, host_key)
@@ -472,6 +486,7 @@ def run_comparison(args: argparse.Namespace) -> int:
             "startup_states": list(STARTUP_ORDER),
             "energy_panels": list(ENERGY_ORDER),
             "rotations": [label for label, _fragment, _spec in ROTATION_ORDER],
+            "cupy_isotropic_representation": CUPY_ISOTROPIC_REPRESENTATION,
             "device_rows_reported_on": "pre-warm only",
         },
         "component_runs": {
@@ -499,7 +514,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Principal cross-backend primary-time comparison for backend development. "
             "Runs the fixed single-energy and triple-energy CoreShell panel across "
             "legacy cyrsoxs, cupy-rsoxs host cold, cupy-rsoxs host pre-warm, and "
-            "cupy-rsoxs device, then writes a combined summary, TSV, and PNG table."
+            "cupy-rsoxs device, using the explicit isotropic enum contract for the "
+            "cupy-rsoxs lanes, then writes a combined summary, TSV, and PNG table."
         )
     )
     parser.add_argument(

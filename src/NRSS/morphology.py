@@ -340,6 +340,14 @@ class Morphology:
             - ``direct_polarization_backend``: RawKernel compiler selection for
               maintained direct-polarization kernels. Defaults to ``"nvrtc"``.
               Supported values are ``"auto"``, ``"nvcc"``, and ``"nvrtc"``.
+            - ``direct_isotropic_mode``: temporary opt-in direct-polarization
+              isotropic-path selector for ``execution_path="direct_polarization"``.
+              Defaults to ``None``, which keeps the maintained lower-memory
+              direct path. ``"cached_base"`` precomputes one isotropic base
+              field per energy and reuses it across the rotation loop; this can
+              improve direct-path speed on rotation-heavy lanes but increases
+              GPU memory relative to the default direct path. Supported values
+              are ``None`` and ``"cached_base"``.
         resident_mode : {"host", "device"} or None, default None
             Location of the authoritative morphology arrays. ``"cupy-rsoxs"``
             defaults to ``"host"`` and also supports ``"device"``.

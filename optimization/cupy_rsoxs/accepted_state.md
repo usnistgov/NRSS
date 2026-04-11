@@ -20,6 +20,12 @@ If you need benchmark commands or acceptance gates, go to `benchmarking_guide.md
 
 - Host-resident exact-zero `legacy_zero_array` materials now stage only `Vfrac`
   on both maintained execution paths.
+- Host-resident float32 anisotropic materials now use standard GPU reusable
+  staging in `A2` on both maintained execution paths:
+  - stage raw `Vfrac`, `S`, `theta`, `psi`,
+  - build `phi_a`, `sx`, `sy`, `sz` on GPU,
+  - drop raw staged `S`, `theta`, `psi`,
+  - keep `Vfrac + phi_a + sx + sy + sz` as the steady-state runtime layout.
 - Detector / projection geometry caching remains part of the accepted runtime.
 
 ### `tensor_coeff`
@@ -44,6 +50,9 @@ If you need benchmark commands or acceptance gates, go to `benchmarking_guide.md
 - `Segment C` uses in-place cuFFT plus in-place Igor-order swap.
 - Float32 direct-path isotropic work is fused into direct accumulation.
 - Host-resident legacy-zero runtime zero-field shortcut is accepted.
+- The current float32 direct-path reusable staging kernel still keeps `Vfrac`
+  for fused isotropic accumulation; anisotropic-only kernel splitting remains a
+  separate open optimization rather than part of the accepted state.
 
 ## Fast Approximation State
 

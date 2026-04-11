@@ -101,6 +101,7 @@ class ComparisonCase:
 
 
 BACKEND_BUCKET_ORDER = ("cyrsoxs", "tensor_coeff", "direct_polarization")
+CUPY_ISOTROPIC_REPRESENTATION = "enum_contract"
 
 
 def _sample_process_rss_mib(pid: int) -> float | None:
@@ -404,7 +405,7 @@ def _cupy_case(
             energies_ev=energies_ev,
             eangle_rotation=eangle_rotation,
             field_namespace=field_namespace,
-            isotropic_representation="legacy_zero_array",
+            isotropic_representation=CUPY_ISOTROPIC_REPRESENTATION,
             cuda_prewarm_mode=cuda_prewarm_mode,
             resident_mode=residency,
             input_policy="strict",
@@ -416,7 +417,8 @@ def _cupy_case(
                 "Comprehensive cross-backend comparison lane for the "
                 f"{size_label} {energy_label}-energy "
                 f"CoreShell benchmark under residency={residency}, startup_mode={startup_mode}, "
-                f"execution_path={execution_path}, z_collapse_mode={z_collapse_mode!r}."
+                f"execution_path={execution_path}, z_collapse_mode={z_collapse_mode!r}, "
+                f"isotropic_representation={CUPY_ISOTROPIC_REPRESENTATION}."
             ),
         ),
     )
@@ -1298,6 +1300,7 @@ def _write_human_report(path: Path, summary: dict[str, Any]) -> None:
             f"# Comprehensive Backend Comparison Report ({summary['label']})",
             "",
             f"{summary['size_label'].capitalize()} CoreShell cross-backend comparison.",
+            f"cupy-rsoxs lanes use isotropic_representation={summary['cupy_isotropic_representation']}.",
             "",
             (
                 "Optional z-collapse rows are included in this report."
@@ -1397,6 +1400,7 @@ def run_comparison(args: argparse.Namespace) -> int:
         "parallel_execution_enabled": multi_gpu_enabled,
         "parallel_bucket_order": list(BACKEND_BUCKET_ORDER),
         "size_label": args.size_label,
+        "cupy_isotropic_representation": CUPY_ISOTROPIC_REPRESENTATION,
         "single_energies_ev": list(CORE_SHELL_SINGLE_ENERGIES),
         "triple_energies_ev": list(CORE_SHELL_TRIPLE_ENERGIES),
         "include_z_collapse": bool(args.include_z_collapse),
