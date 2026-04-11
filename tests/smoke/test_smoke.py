@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
+import types
 from functools import lru_cache
 from pathlib import Path
 
@@ -35,6 +36,7 @@ from NRSS.backends import (
     resolve_backend_runtime_contract,
     UnknownBackendError,
 )
+from NRSS.backends.cupy_rsoxs import CupyRsoxsBackendRuntime
 from NRSS.morphology import Material, Morphology, OpticalConstants
 from NRSS.writer import write_config
 
@@ -708,6 +710,7 @@ def test_backend_registry_reports_known_backends():
     assert "execution_path" in get_backend_info("cupy-rsoxs").supported_backend_options
     assert "mixed_precision_mode" in get_backend_info("cupy-rsoxs").supported_backend_options
     assert "z_collapse_mode" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "energy_progress_bar" in get_backend_info("cupy-rsoxs").supported_backend_options
 
 
 @pytest.mark.backend_agnostic_contract
@@ -917,7 +920,9 @@ def _expected_cupy_backend_options(
     execution_path: str = "direct_polarization",
     mixed_precision_mode: str | None = None,
     z_collapse_mode: str | None = None,
-) -> dict[str, str | None]:
+    direct_isotropic_mode: str | None = None,
+    energy_progress_bar: bool = True,
+) -> dict[str, str | bool | None]:
     kernel_preload_stage = "off"
     igor_shift_backend = "nvrtc"
     if execution_path == "direct_polarization":
@@ -931,6 +936,8 @@ def _expected_cupy_backend_options(
         "kernel_preload_stage": kernel_preload_stage,
         "igor_shift_backend": igor_shift_backend,
         "direct_polarization_backend": "nvrtc",
+        "direct_isotropic_mode": direct_isotropic_mode,
+        "energy_progress_bar": energy_progress_bar,
     }
 
 
@@ -1033,6 +1040,172 @@ def test_cupy_backend_accepts_z_collapse_aliases_and_orthogonal_options():
     assert morph.backend_options == _expected_cupy_backend_options(
         execution_path="direct_polarization",
     )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_energy_progress_bar_backend_option():
+    """Ensure cupy-rsoxs normalizes the explicit energy progress bar surface."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"energy_progress_bar": "off"},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        energy_progress_bar=False,
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_unknown_energy_progress_bar_backend_option():
+    """Ensure cupy-rsoxs rejects unsupported energy_progress_bar values up front."""
+    with pytest.raises(BackendOptionError, match="does not support energy_progress_bar"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"energy_progress_bar": "definitely-not-valid"},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_energy_progress_bar_wrapper_uses_tqdm_when_enabled(monkeypatch):
+    """Ensure the energy-iterator wrapper enables tqdm only for the interactive opt-in path."""
+    runtime = CupyRsoxsBackendRuntime()
+    morphology = types.SimpleNamespace(backend_options={"energy_progress_bar": True})
+    stream = types.SimpleNamespace(
+        writes=[],
+        flush=lambda: None,
+        isatty=lambda: True,
+    )
+    stream.write = lambda text: stream.writes.append(text)
+    tqdm_calls: list[dict[str, object]] = []
+    progress_updates: list[int] = []
+    progress_closed: list[bool] = []
+    progress_postfixes: list[tuple[str, object]] = []
+
+    class _FakeProgressBar:
+        def set_postfix_str(self, text, refresh=False):
+            progress_postfixes.append((text, refresh))
+
+        def update(self, amount=1):
+            progress_updates.append(amount)
+
+        def close(self):
+            progress_closed.append(True)
+
+    def _fake_tqdm(**kwargs):
+        tqdm_calls.append(kwargs)
+        return _FakeProgressBar()
+
+    monkeypatch.setitem(sys.modules, "tqdm", types.SimpleNamespace(tqdm=_fake_tqdm))
+
+    with runtime._iter_completed_energies(
+        morphology,
+        (284.7, 285.0, 285.2),
+        stdout=True,
+        stderr=True,
+        stream=stream,
+    ) as iterator:
+        observed = list(iterator)
+
+    assert observed == [(0, 284.7), (1, 285.0), (2, 285.2)]
+    assert len(tqdm_calls) == 1
+    assert tqdm_calls[0]["ascii"] is True
+    assert tqdm_calls[0]["colour"] == "#7DF9FF"
+    assert tqdm_calls[0]["desc"] == "Energy"
+    assert tqdm_calls[0]["file"] is stream
+    assert tqdm_calls[0]["total"] == 3
+    assert progress_postfixes == [("284.7 eV", False), ("285.0 eV", False), ("285.2 eV", False)]
+    assert progress_updates == [1, 1, 1]
+    assert progress_closed == [True]
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_energy_progress_bar_wrapper_stays_disabled_when_streams_are_suppressed(monkeypatch):
+    """Ensure stream suppression disables the energy progress bar exactly like the opt-out."""
+    runtime = CupyRsoxsBackendRuntime()
+    morphology = types.SimpleNamespace(backend_options={"energy_progress_bar": True})
+    stream = types.SimpleNamespace(isatty=lambda: True)
+
+    def _fail_import(name):
+        raise AssertionError(f"Unexpected tqdm import: {name!r}")
+
+    monkeypatch.setattr(importlib, "import_module", _fail_import)
+
+    with runtime._iter_completed_energies(
+        morphology,
+        (284.7, 285.0, 285.2),
+        stdout=False,
+        stderr=False,
+        stream=stream,
+    ) as iterator:
+        observed = list(iterator)
+
+    assert observed == [(0, 284.7), (1, 285.0), (2, 285.2)]
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_energy_progress_bar_wrapper_uses_tqdm_auto_in_notebook_context(monkeypatch):
+    """Ensure notebook kernels use tqdm.auto when terminal TTY progress is unavailable."""
+    runtime = CupyRsoxsBackendRuntime()
+    morphology = types.SimpleNamespace(backend_options={"energy_progress_bar": True})
+    stream = types.SimpleNamespace(
+        writes=[],
+        flush=lambda: None,
+        isatty=lambda: False,
+    )
+    stream.write = lambda text: stream.writes.append(text)
+    auto_calls: list[dict[str, object]] = []
+    progress_updates: list[int] = []
+    progress_closed: list[bool] = []
+    progress_postfixes: list[tuple[str, object]] = []
+
+    class _FakeProgressBar:
+        def set_postfix_str(self, text, refresh=False):
+            progress_postfixes.append((text, refresh))
+
+        def update(self, amount=1):
+            progress_updates.append(amount)
+
+        def close(self):
+            progress_closed.append(True)
+
+    def _fake_import(name):
+        if name == "IPython":
+            return types.SimpleNamespace(get_ipython=lambda: object())
+        if name == "tqdm.auto":
+            return types.SimpleNamespace(
+                tqdm=lambda **kwargs: auto_calls.append(kwargs) or _FakeProgressBar()
+            )
+        raise AssertionError(f"Unexpected import request: {name!r}")
+
+    monkeypatch.setattr(importlib, "import_module", _fake_import)
+    monkeypatch.setitem(sys.modules, "ipykernel", types.SimpleNamespace())
+
+    with runtime._iter_completed_energies(
+        morphology,
+        (284.7, 285.0, 285.2),
+        stdout=True,
+        stderr=True,
+        stream=stream,
+    ) as iterator:
+        observed = list(iterator)
+
+    assert observed == [(0, 284.7), (1, 285.0), (2, 285.2)]
+    assert len(auto_calls) == 1
+    assert auto_calls[0]["desc"] == "Energy"
+    assert auto_calls[0]["file"] is stream
+    assert auto_calls[0]["total"] == 3
+    assert auto_calls[0]["unit"] == "energy"
+    assert progress_postfixes == [("284.7 eV", False), ("285.0 eV", False), ("285.2 eV", False)]
+    assert progress_updates == [1, 1, 1]
+    assert progress_closed == [True]
 
 
 @pytest.mark.backend_specific

@@ -348,6 +348,14 @@ class Morphology:
               improve direct-path speed on rotation-heavy lanes but increases
               GPU memory relative to the default direct path. Supported values
               are ``None`` and ``"cached_base"``.
+            - ``energy_progress_bar``: ``True`` by default.
+              Multi-energy terminal progress bar for ``cupy-rsoxs``.
+              Set ``backend_options={"energy_progress_bar": False}`` to opt
+              out if you want the legacy no-progress behavior.
+              NRSS shows the ASCII ``tqdm`` bar only when more than one energy
+              is requested, ``run(stdout=True, stderr=True)`` is used, and
+              stderr is attached to an interactive TTY. Any stdout or stderr
+              suppression behaves the same as disabling this option.
         resident_mode : {"host", "device"} or None, default None
             Location of the authoritative morphology arrays. ``"cupy-rsoxs"``
             defaults to ``"host"`` and also supports ``"device"``.
@@ -372,8 +380,9 @@ class Morphology:
         ``execution_path``, the normalized defaults include
         ``execution_path="direct_polarization"``,
         ``kernel_preload_stage="a1"``,
-        ``igor_shift_backend="nvcc"``, and
-        ``direct_polarization_backend="nvrtc"``.
+        ``igor_shift_backend="nvcc"``,
+        ``direct_polarization_backend="nvrtc"``, and
+        ``energy_progress_bar=True``.
         """
 
         self._numMaterial = numMaterial
@@ -1443,6 +1452,11 @@ class Material(OpticalConstants):
 
         This isotropic contract is semantic, not just shorthand for filling
         orientation arrays with zeros.
+
+        Runtime UI options such as the default multi-energy progress bar are
+        configured on :class:`Morphology`, not on :class:`Material`. To disable
+        the default ``cupy-rsoxs`` energy progress bar, construct the morphology
+        with ``backend_options={"energy_progress_bar": False}``.
         """
         self._owner_morphology = None
         self._explicit_isotropic_contract = False

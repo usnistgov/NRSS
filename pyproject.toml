@@ -28,6 +28,7 @@ dependencies = [
     "PyHyperScattering>=0.1.7",
     "scikit-image",
     "scipy",
+    "tqdm",
 ]
 dynamic = ["version"]
 

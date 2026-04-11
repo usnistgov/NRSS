@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 import gc
+import importlib
 import math
 import os
 import shutil
+import sys
 import time
 import warnings
 from typing import Any
@@ -267,7 +270,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         print_vec_info: bool = False,
         validate: bool = False,
     ):
-        del stdout, stderr, print_vec_info
+        del print_vec_info
 
         if validate:
             self.validate_all(morphology, quiet=True)
@@ -299,21 +302,27 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 ),
             )
 
-            for energy_index, energy in enumerate(energies):
-                projection = self._run_single_energy(
-                    morphology=morphology,
-                    runtime_materials=runtime_materials,
-                    energy=energy,
-                    cp=cp,
-                    ndimage=ndimage,
-                    window=window,
-                    recorder=recorder,
-                )
-                if result_data is None:
-                    result_shape = (len(energies), *projection.shape)
-                    result_data = cp.empty(result_shape, dtype=projection.dtype)
-                result_data[energy_index] = projection
-                del projection
+            with self._iter_completed_energies(
+                morphology,
+                energies,
+                stdout=stdout,
+                stderr=stderr,
+            ) as energy_iter:
+                for energy_index, energy in energy_iter:
+                    projection = self._run_single_energy(
+                        morphology=morphology,
+                        runtime_materials=runtime_materials,
+                        energy=energy,
+                        cp=cp,
+                        ndimage=ndimage,
+                        window=window,
+                        recorder=recorder,
+                    )
+                    if result_data is None:
+                        result_shape = (len(energies), *projection.shape)
+                        result_data = cp.empty(result_shape, dtype=projection.dtype)
+                    result_data[energy_index] = projection
+                    del projection
         finally:
             if window is not None:
                 del window
@@ -340,6 +349,140 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         if return_xarray:
             return result.to_xarray()
         return result
+
+    def _energy_progress_bar_enabled(
+        self,
+        morphology,
+        energies: tuple[float, ...],
+        *,
+        stdout: bool,
+        stderr: bool,
+        stream: Any | None = None,
+    ) -> bool:
+        if not bool(morphology.backend_options.get("energy_progress_bar", False)):
+            return False
+        if len(energies) <= 1:
+            return False
+        if not stdout:
+            return False
+        if not stderr:
+            return False
+        stream = sys.stderr if stream is None else stream
+        isatty = getattr(stream, "isatty", None)
+        if isatty is None:
+            return False
+        try:
+            return bool(isatty())
+        except Exception:
+            return False
+
+    def _notebook_progress_bar_enabled(
+        self,
+        morphology,
+        energies: tuple[float, ...],
+        *,
+        stdout: bool,
+        stderr: bool,
+        stream: Any | None = None,
+    ) -> bool:
+        if not bool(morphology.backend_options.get("energy_progress_bar", False)):
+            return False
+        if len(energies) <= 1:
+            return False
+        if not stdout:
+            return False
+        if not stderr:
+            return False
+        if self._energy_progress_bar_enabled(
+            morphology,
+            energies,
+            stdout=stdout,
+            stderr=stderr,
+            stream=stream,
+        ):
+            return False
+        if "ipykernel" not in sys.modules:
+            return False
+        try:
+            ipython = importlib.import_module("IPython")
+        except Exception:
+            return False
+        get_ipython = getattr(ipython, "get_ipython", None)
+        if get_ipython is None:
+            return False
+        try:
+            shell = get_ipython()
+        except Exception:
+            return False
+        return shell is not None
+
+    def _set_energy_progress_value(self, progress, energy: float) -> None:
+        set_postfix_str = getattr(progress, "set_postfix_str", None)
+        if set_postfix_str is None:
+            return
+        try:
+            set_postfix_str(f"{float(energy):.1f} eV", refresh=False)
+        except TypeError:
+            set_postfix_str(f"{float(energy):.1f} eV")
+
+    @contextmanager
+    def _iter_completed_energies(
+        self,
+        morphology,
+        energies: tuple[float, ...],
+        *,
+        stdout: bool,
+        stderr: bool,
+        stream: Any | None = None,
+    ):
+        progress = None
+        stream = sys.stderr if stream is None else stream
+        if self._energy_progress_bar_enabled(
+            morphology,
+            energies,
+            stdout=stdout,
+            stderr=stderr,
+            stream=stream,
+        ):
+            tqdm = importlib.import_module("tqdm").tqdm
+            progress = tqdm(
+                total=len(energies),
+                ascii=True,
+                colour="#7DF9FF",
+                desc="Energy",
+                file=stream,
+                unit="energy",
+            )
+        elif self._notebook_progress_bar_enabled(
+            morphology,
+            energies,
+            stdout=stdout,
+            stderr=stderr,
+            stream=stream,
+        ):
+            tqdm = importlib.import_module("tqdm.auto").tqdm
+            progress = tqdm(
+                total=len(energies),
+                desc="Energy",
+                file=stream,
+                unit="energy",
+            )
+
+        if progress is not None:
+            def wrapped():
+                for energy_index, energy in enumerate(energies):
+                    self._set_energy_progress_value(progress, energy)
+                    yield energy_index, energy
+                    progress.update(1)
+
+            iterator = wrapped()
+        else:
+            iterator = enumerate(energies)
+        try:
+            yield iterator
+        finally:
+            if progress is not None:
+                progress.close()
 
     def _assemble_and_retain_result(self, morphology, result_data, energies):
         result = CupyScatteringResult(

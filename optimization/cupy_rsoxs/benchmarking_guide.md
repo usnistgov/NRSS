@@ -15,6 +15,10 @@ If you only need the current state, use `accepted_state.md` instead.
 
 - Main timing harness:
   - `tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py`
+- Dedicated stderr/stdout-sensitive companion harness:
+  - `tests/validation/dev/cupy_rsoxs_optimization/run_energy_progress_bar_overhead.py`
+  - use this only for experiments whose behavior depends on terminal stream
+    settings, for example opt-in progress-bar overhead checks
 - Maintained `cupy-rsoxs` authority lanes should pass:
   - `--isotropic-material-representation enum_contract`
 - Treat `legacy_zero_array` as a compatibility / recheck surface, not the

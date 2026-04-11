@@ -155,6 +155,9 @@ class BenchmarkCase:
     timing_segments: tuple[str, ...] = ()
     create_cy_object: bool = True
     worker_warmup_runs: int = 0
+    run_stdout: bool = False
+    run_stderr: bool = False
+    force_stderr_tty: bool = False
     validation_baseline_name: str | None = None
     notes: str | None = None
 
@@ -1023,7 +1026,19 @@ def _run_case_once(
 
             morphology._set_private_backend_timing_segments(case.timing_segments)
 
-        backend_result = morphology.run(stdout=False, stderr=False, return_xarray=False)
+        original_stderr_isatty = None
+        if case.force_stderr_tty:
+            original_stderr_isatty = getattr(sys.stderr, "isatty", None)
+            setattr(sys.stderr, "isatty", lambda: True)
+        try:
+            backend_result = morphology.run(
+                stdout=case.run_stdout,
+                stderr=case.run_stderr,
+                return_xarray=False,
+            )
+        finally:
+            if original_stderr_isatty is not None:
+                setattr(sys.stderr, "isatty", original_stderr_isatty)
         _synchronize_cupy_default_stream()
 
         if collect_timing:
@@ -1081,6 +1096,9 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         "timing_boundary": PRIMARY_TIMING_BOUNDARY,
         "note": _case_note(case),
         "worker_warmup_runs_requested": int(case.worker_warmup_runs),
+        "run_stdout": bool(case.run_stdout),
+        "run_stderr": bool(case.run_stderr),
+        "force_stderr_tty": bool(case.force_stderr_tty),
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
         "gpu_bootstrap": _EARLY_GPU_BOOTSTRAP,
         "status": "error",

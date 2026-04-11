@@ -78,6 +78,7 @@ _BACKEND_ARRAY_CONTRACTS = {
             None,
             "cached_base",
         ),
+        "default_energy_progress_bar": True,
         "supported_rawkernel_backends": (
             "auto",
             "nvcc",
@@ -91,6 +92,7 @@ _BACKEND_ARRAY_CONTRACTS = {
             "igor_shift_backend",
             "direct_polarization_backend",
             "direct_isotropic_mode",
+            "energy_progress_bar",
         ),
         "runtime_compute_dtype": "float32",
         "runtime_complex_dtype": "complex64",
@@ -186,6 +188,34 @@ def normalize_direct_isotropic_mode_name(mode: Any) -> str | None:
         "cached-base": "cached_base",
     }
     return aliases.get(cleaned, cleaned)
+
+
+def normalize_energy_progress_bar_name(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+
+    cleaned = str(value).strip().lower()
+    aliases = {
+        "": False,
+        "0": False,
+        "1": True,
+        "default": False,
+        "false": False,
+        "none": False,
+        "no": False,
+        "off": False,
+        "on": True,
+        "true": True,
+        "yes": True,
+    }
+    if cleaned not in aliases:
+        raise BackendOptionError(
+            "Backend 'cupy-rsoxs' does not support energy_progress_bar="
+            f"{value!r}. Supported values: True, False, 'on', 'off'."
+        )
+    return aliases[cleaned]
 
 
 def normalize_resident_mode(
@@ -348,6 +378,11 @@ def normalize_backend_options(
                 f"{direct_isotropic_mode!r}. Supported modes: {', '.join(supported_modes)}."
             )
         normalized_options["direct_isotropic_mode"] = direct_isotropic_mode
+
+    if "energy_progress_bar" in spec["supported_backend_options"]:
+        normalized_options["energy_progress_bar"] = normalize_energy_progress_bar_name(
+            options.get("energy_progress_bar", spec.get("default_energy_progress_bar", False))
+        )
 
     return normalized_options
 
