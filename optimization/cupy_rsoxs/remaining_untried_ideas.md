@@ -96,8 +96,21 @@ Recommended next implementation:
 - For float32 `direct_polarization`, split anisotropic-material work into:
   - isotropic-only accumulation kernel using `Vfrac`,
   - anisotropic-precomputed kernel using only `phi_a`, `sx`, `sy`, `sz`.
-- Do not change device-resident behavior in the first pass.
 - Do not expand the first pass to half-input / mixed precision.
+
+Device-resident reusable-field precompute is now closed rather than deferred:
+
+- It was benchmarked on the requested HOT direct-path matrix for medium
+  CoreShell cases:
+  - single-energy and three-energy,
+  - no rotation and `EAngleRotation=[0,15,165]`.
+- Result:
+  - no speedup,
+  - slight slowdown across the exercised cases,
+  - modest runtime-memory increase from the extra persistent device allocations.
+- Decision:
+  - discontinue this device-resident reusable-precompute thread,
+  - do not reintroduce it without a materially different memory story.
 
 Recommended resume benchmark shape:
 

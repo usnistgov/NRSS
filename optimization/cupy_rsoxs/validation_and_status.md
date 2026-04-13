@@ -64,6 +64,18 @@ If you need benchmark commands or optimization acceptance gates, use
 - deeper memory instrumentation
 - GPU CI strategy and final gating matrix
 
+## Archived Experiment Note
+
+- Manual GPU graphics-clock thermal tuning was explored as a `cupy-rsoxs`
+  experiment and saved on branch `thermal-tuning-spike`.
+- Result summary: low requested graphics clocks do slow the workload, but the
+  tested medium `direct_polarization` long-run lane did not show a compelling
+  sustained-throughput benefit from practical fixed graphics-clock settings
+  over the default unlocked behavior.
+- The branch is retained so the harness/telemetry work can be revived and
+  rebased later if future GPU policy, telemetry, or memory-clock experiments
+  justify reopening the study.
+
 ## Fast Approximation Status
 
 - Expert-only `z_collapse_mode='mean'` exists on both maintained execution

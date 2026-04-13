@@ -27,6 +27,7 @@ historical question.
 | early detector-plane direct projection formulation | rejected | only the later materially different formulation was worth keeping |
 | memory-cleanup items `1-3` from April 6 | rejected | failed the direct-hot peak-memory gate on this environment |
 | bucketed material-loop follow-up after runtime zero-field shortcut | rejected | no extra memory win over the simpler accepted shortcut |
+| device-resident reusable-field precompute opt-in | closed | medium-model direct-path HOT checks showed no speedup, slight slowdown, and modest runtime-memory growth, so this branch was intentionally discontinued |
 
 ## Still Open
 
