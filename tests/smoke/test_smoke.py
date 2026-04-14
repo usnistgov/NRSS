@@ -3423,6 +3423,274 @@ def test_visualizer_two_material_outputs_and_summary_are_consistent(capsys, monk
         assert image.shape[2] == 4
 
 
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
+def test_visualizer_crops_before_plotting_and_only_requests_needed_fields(monkeypatch):
+    """Ensure slice rendering uses the cropped window and avoids unused effective fields."""
+    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
+
+    plotted_shapes = []
+    requested_fields = []
+    original_imshow = Axes.imshow
+    original_effective_field = Morphology._material_effective_field
+
+    def tracked_imshow(self, data, *args, **kwargs):
+        plotted_shapes.append(np.shape(data))
+        return original_imshow(self, data, *args, **kwargs)
+
+    def tracked_effective_field(self, material, field_name):
+        requested_fields.append(field_name)
+        return original_effective_field(self, material, field_name)
+
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+    monkeypatch.setattr(Axes, "imshow", tracked_imshow)
+    monkeypatch.setattr(Morphology, "_material_effective_field", tracked_effective_field)
+
+    shape = (1, 10, 20)
+    vfrac = np.zeros(shape, dtype=np.float32)
+    vfrac[:, 2:8, 4:16] = 1.0
+
+    mat = Material(
+        materialID=1,
+        Vfrac=vfrac,
+        S=np.zeros(shape, dtype=np.float32),
+        theta=np.zeros(shape, dtype=np.float32),
+        psi=np.zeros(shape, dtype=np.float32),
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    images = morph.visualize_materials(
+        z_slice=0,
+        subsample=18,
+        outputmat=[1],
+        outputplot=["vfrac"],
+        outputaxes=False,
+        runquiet=True,
+        batchMode=True,
+    )
+
+    assert len(images) == 1
+    assert requested_fields == ["Vfrac"]
+    assert plotted_shapes == [(10, 18)]
+
+
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
+def test_visualizer_closes_figures_after_show(monkeypatch):
+    """Ensure interactive visualization does not leave figures resident after display."""
+    import matplotlib.pyplot as plt
+
+    plt.close("all")
+    shown = []
+
+    def tracked_show(*args, **kwargs):
+        shown.append(tuple(plt.get_fignums()))
+
+    monkeypatch.setattr(plt, "show", tracked_show)
+
+    shape = (1, 8, 8)
+    zeros = np.zeros(shape, dtype=np.float32)
+    ones = np.ones(shape, dtype=np.float32)
+
+    mat = Material(
+        materialID=1,
+        Vfrac=ones,
+        S=0.5 * ones,
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    morph.visualize_materials(
+        z_slice=0,
+        subsample=8,
+        runquiet=False,
+        batchMode=False,
+    )
+
+    assert shown
+    assert plt.get_fignums() == []
+
+
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
+def test_visualizer_can_skip_histograms(monkeypatch):
+    """Ensure interactive visualization can suppress histogram panels explicitly."""
+    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
+
+    hist_calls = []
+    original_hist = Axes.hist
+
+    def tracked_hist(self, *args, **kwargs):
+        hist_calls.append(True)
+        return original_hist(self, *args, **kwargs)
+
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+    monkeypatch.setattr(Axes, "hist", tracked_hist)
+
+    shape = (1, 8, 8)
+    zeros = np.zeros(shape, dtype=np.float32)
+    ones = np.ones(shape, dtype=np.float32)
+
+    mat = Material(
+        materialID=1,
+        Vfrac=ones,
+        S=0.5 * ones,
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    morph.visualize_materials(
+        z_slice=0,
+        subsample=8,
+        runquiet=False,
+        batchMode=True,
+        histograms=False,
+    )
+
+    assert hist_calls == []
+
+
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
+def test_visualizer_histogram_auto_mode_samples_large_arrays(monkeypatch):
+    """Ensure histogram_mode='auto' samples when the volume exceeds the threshold."""
+    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
+
+    hist_lengths = []
+    original_hist = Axes.hist
+
+    def tracked_hist(self, values, *args, **kwargs):
+        hist_lengths.append(len(values))
+        return original_hist(self, values, *args, **kwargs)
+
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+    monkeypatch.setattr(Axes, "hist", tracked_hist)
+
+    shape = (1, 320, 320)
+    yy, xx = np.indices(shape[1:])
+    base = ((yy + xx) % 17).astype(np.float32) / 16.0
+    vfrac = base[None, :, :]
+    s_field = (0.5 * vfrac).astype(np.float32)
+    theta = np.zeros(shape, dtype=np.float32)
+    psi = np.zeros(shape, dtype=np.float32)
+
+    mat = Material(
+        materialID=1,
+        Vfrac=vfrac,
+        S=s_field,
+        theta=theta,
+        psi=psi,
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    morph.visualize_materials(
+        z_slice=0,
+        subsample=64,
+        runquiet=False,
+        batchMode=True,
+        histograms=True,
+        histogram_mode="auto",
+        histogram_sample_size=100_000,
+        histogram_sample_threshold=100_000,
+    )
+
+    assert hist_lengths == [100_000, 100_000, 100_000, 100_000]
+
+
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
+def test_visualizer_histogram_full_mode_uses_all_voxels(monkeypatch):
+    """Ensure histogram_mode='full' does not sample even above the auto threshold."""
+    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
+
+    hist_lengths = []
+    original_hist = Axes.hist
+
+    def tracked_hist(self, values, *args, **kwargs):
+        hist_lengths.append(len(values))
+        return original_hist(self, values, *args, **kwargs)
+
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+    monkeypatch.setattr(Axes, "hist", tracked_hist)
+
+    shape = (1, 320, 320)
+    ones = np.ones(shape, dtype=np.float32)
+    zeros = np.zeros(shape, dtype=np.float32)
+
+    mat = Material(
+        materialID=1,
+        Vfrac=ones,
+        S=0.5 * ones,
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    morph.visualize_materials(
+        z_slice=0,
+        subsample=64,
+        runquiet=False,
+        batchMode=True,
+        histograms=True,
+        histogram_mode="full",
+        histogram_sample_size=100_000,
+        histogram_sample_threshold=100_000,
+    )
+
+    assert hist_lengths == [102_400, 102_400, 102_400, 102_400]
+
+
 @lru_cache(maxsize=1)
 def _has_visible_gpu() -> bool:
     try:

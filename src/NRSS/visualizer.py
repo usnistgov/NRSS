@@ -7,6 +7,70 @@ import numpy as np
 import warnings
 import pathlib
 
+DEFAULT_NOTEBOOK_FIGSIZE = (9.1, 13.65)
+DEFAULT_NOTEBOOK_DPI = 240
+DEFAULT_HISTOGRAM_SAMPLE_SIZE = 100_000
+DEFAULT_HISTOGRAM_SAMPLE_THRESHOLD = 100_000
+
+
+def _resolve_figure_size():
+    rc_figsize = tuple(float(value) for value in matplotlib.rcParams.get("figure.figsize", []))
+    default_rc_figsize = tuple(
+        float(value) for value in matplotlib.rcParamsDefault.get("figure.figsize", [])
+    )
+    if rc_figsize and rc_figsize != default_rc_figsize:
+        return rc_figsize
+    return DEFAULT_NOTEBOOK_FIGSIZE
+
+
+def _compute_axis_window(axis_size: int, window_size: int, translate: int = None):
+    window_size = min(int(window_size), int(axis_size))
+    start = max(0, (axis_size - window_size) // 2)
+    if translate is not None:
+        start += int(translate)
+    start = min(max(0, start), axis_size - window_size)
+    end = start + window_size
+    return start, end
+
+
+def _is_cupy_array(array) -> bool:
+    return hasattr(array, "get") and array.__class__.__module__.startswith("cupy")
+
+
+def _histogram_values(
+    array,
+    mode: str,
+    sample_size: int,
+    sample_threshold: int,
+):
+    flat = array.ravel()
+    total_size = int(flat.size)
+
+    if mode not in {"auto", "full", "sample"}:
+        raise ValueError("histogram_mode must be one of 'auto', 'full', or 'sample'.")
+
+    use_sample = mode == "sample" or (mode == "auto" and total_size > int(sample_threshold))
+    selected_count = min(int(sample_size), total_size) if use_sample else total_size
+
+    if use_sample and selected_count < total_size:
+        if _is_cupy_array(flat):
+            import cupy as cp
+
+            rng = cp.random.default_rng(0)
+            sample_idx = rng.choice(total_size, size=selected_count, replace=False)
+            values = cp.asnumpy(flat[sample_idx])
+        else:
+            rng = np.random.default_rng(0)
+            sample_idx = rng.choice(total_size, size=selected_count, replace=False)
+            values = np.asarray(flat[sample_idx])
+        return values, True, selected_count
+
+    if _is_cupy_array(flat):
+        import cupy as cp
+
+        return cp.asnumpy(flat), False, total_size
+    return np.asarray(flat), False, total_size
+
 
 def morphology_visualizer(
     morphology,
@@ -27,7 +91,11 @@ def morphology_visualizer(
     runquiet: bool = False,
     batchMode: bool = False,
     plotstyle: str = "light",
-    dpi: int = 300,
+    dpi: int = DEFAULT_NOTEBOOK_DPI,
+    histograms: bool = True,
+    histogram_mode: str = "auto",
+    histogram_sample_size: int = DEFAULT_HISTOGRAM_SAMPLE_SIZE,
+    histogram_sample_threshold: int = DEFAULT_HISTOGRAM_SAMPLE_THRESHOLD,
     exportDir: str = None,
     exportParams: dict = None,
 ):
@@ -72,7 +140,19 @@ def morphology_visualizer(
         plotstyle : str
             Use a light or dark background for plots. 'dark' - dark, 'light' - light
         dpi : int
-            The dpi at which the plot is generated. Per-material plot dimensions are 8.5" x 12.75"
+            The dpi at which the plot is generated. The default figure size is 9.1" x 13.65"
+            unless overridden via Matplotlib rcParams.
+        histograms : bool
+            When True, include the four full-volume histogram panels in interactive display mode.
+        histogram_mode : str
+            Histogram calculation mode: 'full' always uses all voxels, 'sample' always uses a
+            sample, and 'auto' switches to sampling when the voxel count exceeds
+            histogram_sample_threshold.
+        histogram_sample_size : int
+            Number of voxels to use when histogram_mode resolves to sampled histograms.
+        histogram_sample_threshold : int
+            Voxel-count threshold above which histogram_mode='auto' switches to sampled
+            histograms.
         exportDir : str, optional
             if provided, export directory to save any generated figures into,
             by default, will respect dpi and save as png, use exportParams to override
@@ -89,7 +169,22 @@ def morphology_visualizer(
     rgb_return_list = []
 
     if subsample is None:
-        subsample = morphology.NumZYX[1]  # y dimension
+        subsample_y = morphology.NumZYX[1]
+        subsample_x = morphology.NumZYX[2]
+    else:
+        subsample_y = subsample
+        subsample_x = subsample
+
+    start_x, end_x = _compute_axis_window(
+        morphology.NumZYX[2],
+        subsample_x,
+        translate_x,
+    )
+    start_y, end_y = _compute_axis_window(
+        morphology.NumZYX[1],
+        subsample_y,
+        translate_y,
+    )
 
     if not runquiet:
         print(
@@ -106,8 +201,6 @@ def morphology_visualizer(
         )
         z_slice = morphology.NumZYX[0] - 1
 
-    #         if plotstyle == 'dark':
-    plt.style.use(style_dict[plotstyle])
     font = {
         "family": "sans-serif",
         "sans-serif": "DejaVu Sans",
@@ -115,79 +208,109 @@ def morphology_visualizer(
         "size": 8,
     }
 
-    rc("font", **font)
-
     cwdPath = pathlib.Path(__file__).resolve().parent
     psi_cmap = matplotlib.colors.ListedColormap(np.load(cwdPath / "cmap/infinitydouble_cmap.npy"))
+    requested_plots = set(outputplot or [])
+    figure_size = _resolve_figure_size()
 
-    backend_ = matplotlib.get_backend()
+    if histogram_sample_size <= 0:
+        raise ValueError("histogram_sample_size must be a positive integer.")
+    if histogram_sample_threshold <= 0:
+        raise ValueError("histogram_sample_threshold must be a positive integer.")
 
-    try:
-        if runquiet:
-            matplotlib.use("Agg")  # Prevent showing stuff
+    with plt.style.context(style_dict[plotstyle]), matplotlib.rc_context(
+        rc={
+            "font.family": "sans-serif",
+            "font.sans-serif": ["DejaVu Sans"],
+            "font.weight": "regular",
+            "font.size": 8,
+        }
+    ):
+        rc("font", **font)
 
         for i in range(1, morphology._numMaterial + 1):
             material = morphology.materials[i]
-            effective_fields = morphology._material_effective_fields(material)
-            vfrac = effective_fields["Vfrac"]
-            s_field = effective_fields["S"]
-            theta_field = effective_fields["theta"]
-            psi_field = effective_fields["psi"]
-            fig = plt.figure(figsize=(8.5, 12.75), dpi=dpi)
-            if runquiet == False:
-                print(
-                    f"Material {i} Vfrac. Min: {vfrac.min()} Max:"
-                    f" {vfrac.max()}"
-                )
-                print(
-                    f"Material {i} S. Min: {s_field.min()} Max:"
-                    f" {s_field.max()}"
-                )
-                print(
-                    f"Material {i} theta. Min: {theta_field.min()} Max:"
-                    f" {theta_field.max()}"
-                )
-                print(
-                    f"Material {i} psi. Min: {psi_field.min()} Max:"
-                    f" {psi_field.max()}"
-                )
+            show_full_summary = not runquiet
+            show_histograms = show_full_summary and histograms
+            return_material = outputmat is not None and i in outputmat
+            render_material = show_full_summary or return_material
 
-            if (theta_field.min() < 0) or (theta_field.max() > (np.pi)):
+            if not render_material:
+                continue
+
+            show_vfrac = show_full_summary or "vfrac" in requested_plots
+            show_s = show_full_summary or "S" in requested_plots
+            show_theta = show_full_summary or "theta" in requested_plots
+            show_psi = show_full_summary or "psi" in requested_plots
+            show_quiver = show_psi and add_quiver
+
+            field_cache = {}
+
+            def get_field(field_name):
+                if field_name not in field_cache:
+                    field_cache[field_name] = morphology._material_effective_field(material, field_name)
+                return field_cache[field_name]
+
+            vfrac = get_field("Vfrac") if (show_vfrac or show_theta or show_psi) else None
+            s_field = get_field("S") if (show_s or show_theta or show_psi) else None
+            theta_field = get_field("theta") if show_theta else None
+            psi_field = get_field("psi") if (show_psi or show_quiver) else None
+
+            if show_full_summary:
+                print(f"Material {i} Vfrac. Min: {vfrac.min()} Max: {vfrac.max()}")
+                print(f"Material {i} S. Min: {s_field.min()} Max: {s_field.max()}")
+                print(f"Material {i} theta. Min: {theta_field.min()} Max: {theta_field.max()}")
+                print(f"Material {i} psi. Min: {psi_field.min()} Max: {psi_field.max()}")
+
+            if theta_field is not None and (
+                (theta_field.min() < 0) or (theta_field.max() > np.pi)
+            ):
                 warnings.warn(
                     "Visualization expects theta to have bounds of [0,pi]. This model has theta"
                     " outside those bounds and visualization may be incorrect."
                 )
 
-            # run if you don't want runquiet or run if you've selected this material for output
-            if (runquiet is not True) or ((outputmat is not None) and (i in outputmat)):
-                gs = gridspec.GridSpec(
-                    nrows=5,
-                    ncols=2,
-                    figure=fig,
-                    width_ratios=[1, 1],
-                    height_ratios=[3, 1, 0.1, 3, 1],
-                    wspace=0.3,
-                    hspace=0.65,
-                )
-
-                start = int(morphology.NumZYX[1] / 2) - int(subsample / 2)
-                end = int(morphology.NumZYX[1] / 2) + int(subsample / 2)
-
-                if translate_x:
-                    start_x = max(0, start + translate_x)
-                    end_x = min(end + translate_x, morphology.NumZYX[1])
+            fig = plt.figure(figsize=figure_size, dpi=dpi)
+            try:
+                if show_histograms:
+                    gs = gridspec.GridSpec(
+                        nrows=5,
+                        ncols=2,
+                        figure=fig,
+                        width_ratios=[1, 1],
+                        height_ratios=[3, 1, 0.1, 3, 1],
+                        wspace=0.3,
+                        hspace=0.65,
+                    )
                 else:
-                    start_x = start
-                    end_x = end
+                    gs = gridspec.GridSpec(
+                        nrows=3,
+                        ncols=2,
+                        figure=fig,
+                        width_ratios=[1, 1],
+                        height_ratios=[3, 0.1, 3],
+                        wspace=0.3,
+                        hspace=0.4,
+                    )
 
-                if translate_y:
-                    start_y = max(0, start + translate_y)
-                    end_y = min(end + translate_y, morphology.NumZYX[1])
-                else:
-                    start_y = start
-                    end_y = end
+                vfrac_slice = None
+                s_slice = None
+                theta_slice = None
+                psi_slice = None
+                screen_mask = None
 
-                if (runquiet is not True) or ("vfrac" in outputplot):
+                if vfrac is not None:
+                    vfrac_slice = vfrac[z_slice, start_y:end_y, start_x:end_x]
+                if s_field is not None:
+                    s_slice = s_field[z_slice, start_y:end_y, start_x:end_x]
+                if theta_field is not None:
+                    theta_slice = theta_field[z_slice, start_y:end_y, start_x:end_x]
+                if psi_field is not None:
+                    psi_slice = psi_field[z_slice, start_y:end_y, start_x:end_x]
+                if screen_euler and (show_theta or show_psi):
+                    screen_mask = np.logical_or(vfrac_slice < 0.01, s_slice < 0.01)
+
+                if show_vfrac:
                     ax1 = plt.subplot(gs[0, 0])
                     if vfrac_range and (len(vfrac_range) >= i) and (len(vfrac_range[i - 1]) == 2):
                         norm = matplotlib.colors.Normalize(
@@ -202,7 +325,7 @@ def morphology_visualizer(
                         cmap = plt.get_cmap("winter")
 
                     Vfracplot = ax1.imshow(
-                        vfrac[z_slice, :, :],
+                        vfrac_slice,
                         cmap=cmap,
                         origin="lower",
                         interpolation="none",
@@ -211,14 +334,9 @@ def morphology_visualizer(
                     ax1.set_ylabel("Y index", labelpad=0)
                     ax1.set_xlabel("X index")
                     ax1.set_title(f"Mat {i} {material.name} Vfrac")
-                    ax1.set_xlim(start_x, end_x)
-                    ax1.set_ylim(start_y, end_y)
                     Vfrac_cbar = plt.colorbar(Vfracplot, ax=ax1, fraction=0.040)
-                    # Vfrac_cbar.set_label(
-                    #     "Vfrac: volume fraction", rotation=270, labelpad=22
-                    # )
 
-                if (runquiet is not True) or ("S" in outputplot):
+                if show_s:
                     ax2 = plt.subplot(gs[0, 1])
                     if S_range and (len(S_range) >= i) and (len(S_range[i - 1]) == 2):
                         norm = matplotlib.colors.Normalize(
@@ -233,7 +351,7 @@ def morphology_visualizer(
                         cmap = plt.get_cmap("nipy_spectral")
 
                     Splot = ax2.imshow(
-                        s_field[z_slice, :, :],
+                        s_slice,
                         cmap=cmap,
                         origin="lower",
                         interpolation="none",
@@ -242,64 +360,75 @@ def morphology_visualizer(
                     ax2.set_ylabel("Y index", labelpad=0)
                     ax2.set_xlabel("X index")
                     ax2.set_title(f"Mat {i} {material.name} S")
-                    ax2.set_xlim(start_x, end_x)
-                    ax2.set_ylim(start_y, end_y)
                     S_cbar = plt.colorbar(Splot, fraction=0.040)
-                    # S_cbar.set_label(
-                    #     "S: orientational order parameter", rotation=270, labelpad=22
-                    # )
 
-                # only do this if not runquiet; these plots are not outputted
-                if runquiet is not True:
+                if show_histograms:
+                    vfrac_hist, vfrac_sampled, vfrac_hist_count = _histogram_values(
+                        vfrac,
+                        histogram_mode,
+                        histogram_sample_size,
+                        histogram_sample_threshold,
+                    )
+                    s_hist, s_sampled, s_hist_count = _histogram_values(
+                        s_field,
+                        histogram_mode,
+                        histogram_sample_size,
+                        histogram_sample_threshold,
+                    )
+                    theta_hist, theta_sampled, theta_hist_count = _histogram_values(
+                        theta_field,
+                        histogram_mode,
+                        histogram_sample_size,
+                        histogram_sample_threshold,
+                    )
+                    psi_hist, psi_sampled, psi_hist_count = _histogram_values(
+                        psi_field,
+                        histogram_mode,
+                        histogram_sample_size,
+                        histogram_sample_threshold,
+                    )
+
                     ax3 = plt.subplot(gs[1, 0])
-                    ax3.hist(vfrac.flatten())
-                    ax3.set_title(f"Mat {i} {material.name} Vfrac")
+                    ax3.hist(vfrac_hist)
+                    vfrac_hist_title = f"Mat {i} {material.name} Vfrac"
+                    if vfrac_sampled:
+                        vfrac_hist_title += f" sampled ({vfrac_hist_count})"
+                    ax3.set_title(vfrac_hist_title)
                     ax3.set_xlim(left=0)
                     ax3.set_xlabel("Vfrac: volume fraction")
                     ax3.set_ylabel("num voxels")
                     ax3.set_yscale("log")
 
                     ax4 = plt.subplot(gs[1, 1])
-                    ax4.hist(s_field.flatten())
-                    ax4.set_title(f"Mat {i} {material.name} S")
+                    ax4.hist(s_hist)
+                    s_hist_title = f"Mat {i} {material.name} S"
+                    if s_sampled:
+                        s_hist_title += f" sampled ({s_hist_count})"
+                    ax4.set_title(s_hist_title)
                     ax4.set_xlim(left=0)
                     ax4.set_xlabel("S: orientational order parameter")
                     ax4.set_ylabel("num voxels")
                     ax4.set_yscale("log")
 
-                if (runquiet is not True) or ("theta" in outputplot):
-                    ax5 = plt.subplot(gs[3, 0])
+                if show_theta:
+                    theta_row = 3 if show_histograms else 2
+                    ax5 = plt.subplot(gs[theta_row, 0])
                     norm = matplotlib.colors.Normalize(vmin=0, vmax=np.pi, clip=False)
                     if screen_euler:
-                        thetaplot = ax5.imshow(
-                            np.ma.masked_array(
-                                theta_field[z_slice, :, :] % np.pi,
-                                np.logical_or(
-                                    vfrac[z_slice, :, :] < 0.01,
-                                    s_field[z_slice, :, :] < 0.01,
-                                ),
-                            ),
-                            cmap=plt.get_cmap("jet"),
-                            norm=norm,
-                            origin="lower",
-                            interpolation="none",
-                        )
-
+                        theta_image = np.ma.masked_array(theta_slice % np.pi, screen_mask)
                     else:
-                        thetaplot = ax5.imshow(
-                            theta_field[z_slice, :, :] % np.pi,
-                            cmap=plt.get_cmap("jet"),
-                            norm=norm,
-                            origin="lower",
-                            interpolation="none",
+                        theta_image = theta_slice % np.pi
+                    thetaplot = ax5.imshow(
+                        theta_image,
+                        cmap=plt.get_cmap("jet"),
+                        norm=norm,
+                        origin="lower",
+                        interpolation="none",
                     )
                     ax5.set_ylabel("Y index")
                     ax5.set_xlabel("X index")
                     ax5.set_title(f"Mat {i} {material.name} theta")
-                    ax5.set_xlim(start_x, end_x)
-                    ax5.set_ylim(start_y, end_y)
                     theta_cbar = plt.colorbar(thetaplot, fraction=0.040)
-                    # theta_cbar.set_label("theta in radians", rotation=270, labelpad=22)
 
                     ax5i = inset_axes(
                         ax5,
@@ -310,7 +439,6 @@ def morphology_visualizer(
                     )
 
                     ax5i.grid(False)
-                    # creates inset legend for orientation
                     azimuths_t = np.deg2rad(np.arange(-90, 90, 1))
                     zeniths_t = np.linspace(5, 10, 50)
                     values_t = np.mod(np.pi / 2 - azimuths_t, np.pi) * np.ones((50, 180))
@@ -327,9 +455,7 @@ def morphology_visualizer(
                     )
                     ax5i.pcolormesh(azimuths_t, zeniths_t, values_t, cmap=cm.jet, shading="auto")
                     ax5i.set_axis_off()
-                    ax5i.arrow(
-                        0, 0, 0, 4, width=0.005, head_width=0.2, head_length=0.6, lw=0.5
-                    )  # ,facecolor='k',edgecolor='k')
+                    ax5i.arrow(0, 0, 0, 4, width=0.005, head_width=0.2, head_length=0.6, lw=0.5)
                     ax5i.arrow(
                         np.pi / 2,
                         0,
@@ -339,145 +465,40 @@ def morphology_visualizer(
                         head_width=0.2,
                         head_length=0.6,
                         lw=0.5,
-                    )  # , facecolor='k',edgecolor='k')
+                    )
                     ax5i.text(2 * np.pi - np.deg2rad(40), 3.5, "X", fontsize=6)
                     ax5i.text(np.pi / 2 + np.deg2rad(40), 3.5, "Z", fontsize=6)
 
-                if (runquiet is not True) or ("psi" in outputplot):
-                    ax6 = plt.subplot(gs[3, 1])
+                if show_psi:
+                    psi_row = 3 if show_histograms else 2
+                    ax6 = plt.subplot(gs[psi_row, 1])
                     norm = matplotlib.colors.Normalize(vmin=0, vmax=2 * np.pi, clip=False)
+                    psi_phase = psi_slice % (2 * np.pi)
                     if screen_euler:
-                        screen_mask = np.logical_or(
-                            vfrac[z_slice, :, :] < 0.01,
-                            s_field[z_slice, :, :] < 0.01,
-                        )
-                        psiplot = ax6.imshow(
-                            np.ma.masked_array(
-                                psi_field[z_slice, :, :] % (2 * np.pi),
-                                screen_mask,
-                            ),
-                            cmap=psi_cmap,  # plt.get_cmap("hsv"),
-                            norm=norm,
-                            origin="lower",
-                            interpolation="none",
-                        )
-                        if add_quiver:
-                            screen_white = np.logical_or(
-                                screen_mask,
-                                (psi_field[z_slice, :, :] % (2 * np.pi)) > np.pi,
-                            )
-                            screen_black = np.logical_or(
-                                screen_mask,
-                                (psi_field[z_slice, :, :] % (2 * np.pi)) < np.pi,
-                            )
-                            sin_psi = np.sin(psi_field[z_slice, :, :])
-                            cos_psi = np.cos(psi_field[z_slice, :, :])
-                            len_scale = np.maximum(np.abs(sin_psi), np.abs(cos_psi))
-                            if quiver_bw:
-                                ax6.quiver(
-                                    np.ma.masked_array(
-                                        cos_psi / len_scale,
-                                        screen_white,
-                                    ),
-                                    np.ma.masked_array(
-                                        sin_psi / len_scale,
-                                        screen_white,
-                                    ),
-                                    angles="xy",
-                                    scale=1,
-                                    pivot="mid",
-                                    headaxislength=0,
-                                    headlength=0,
-                                    scale_units="xy",
-                                    color="white",
-                                )
-                            else:
-                                ax6.quiver(
-                                    np.ma.masked_array(
-                                        cos_psi / len_scale,
-                                        screen_white,
-                                    ),
-                                    np.ma.masked_array(
-                                        sin_psi / len_scale,
-                                        screen_white,
-                                    ),
-                                    np.ma.masked_array(
-                                        (psi_field[z_slice, :, :] + np.pi) % (2 * np.pi),
-                                        screen_white,
-                                    ),
-                                    cmap=psi_cmap,  # plt.get_cmap("hsv"),
-                                    norm=norm,
-                                    angles="xy",
-                                    scale=1,
-                                    pivot="mid",
-                                    headaxislength=0,
-                                    headlength=0,
-                                    scale_units="xy",
-                                )
-                            if quiver_bw:
-                                ax6.quiver(
-                                    np.ma.masked_array(
-                                        cos_psi / len_scale,
-                                        screen_black,
-                                    ),
-                                    np.ma.masked_array(
-                                        sin_psi / len_scale,
-                                        screen_black,
-                                    ),
-                                    angles="xy",
-                                    scale=1,
-                                    pivot="mid",
-                                    headaxislength=0,
-                                    headlength=0,
-                                    scale_units="xy",
-                                    color="black",
-                                )
-                            else:
-                                ax6.quiver(
-                                    np.ma.masked_array(
-                                        cos_psi / len_scale,
-                                        screen_black,
-                                    ),
-                                    np.ma.masked_array(
-                                        sin_psi / len_scale,
-                                        screen_black,
-                                    ),
-                                    np.ma.masked_array(
-                                        (psi_field[z_slice, :, :] + np.pi) % (2 * np.pi),
-                                        screen_black,
-                                    ),
-                                    cmap=psi_cmap,  # plt.get_cmap("hsv"),
-                                    norm=norm,
-                                    angles="xy",
-                                    scale=1,
-                                    pivot="mid",
-                                    headaxislength=0,
-                                    headlength=0,
-                                    scale_units="xy",
-                                )
+                        psi_image = np.ma.masked_array(psi_phase, screen_mask)
                     else:
-                        psiplot = ax6.imshow(
-                            psi_field[z_slice, :, :] % (2 * np.pi),
-                            cmap=psi_cmap,  # plt.get_cmap("hsv"),
-                            norm=norm,
-                            origin="lower",
-                            interpolation="none",
-                        )
-                        if add_quiver:
-                            screen_white = psi_field[z_slice, :, :] % (2 * np.pi) > np.pi
-                            screen_black = psi_field[z_slice, :, :] % (2 * np.pi) < np.pi
-                            sin_psi = np.sin(psi_field[z_slice, :, :])
-                            cos_psi = np.cos(psi_field[z_slice, :, :])
-                            len_scale = np.maximum(np.abs(sin_psi), np.abs(cos_psi))
+                        psi_image = psi_phase
+                    psiplot = ax6.imshow(
+                        psi_image,
+                        cmap=psi_cmap,
+                        norm=norm,
+                        origin="lower",
+                        interpolation="none",
+                    )
+                    if show_quiver:
+                        if screen_euler:
+                            screen_white = np.logical_or(screen_mask, psi_phase > np.pi)
+                            screen_black = np.logical_or(screen_mask, psi_phase < np.pi)
+                        else:
+                            screen_white = psi_phase > np.pi
+                            screen_black = psi_phase < np.pi
+                        sin_psi = np.sin(psi_slice)
+                        cos_psi = np.cos(psi_slice)
+                        len_scale = np.maximum(np.abs(sin_psi), np.abs(cos_psi))
+                        if quiver_bw:
                             ax6.quiver(
-                                np.ma.masked_array(
-                                    cos_psi / len_scale,
-                                    screen_white,
-                                ),
-                                np.ma.masked_array(
-                                    sin_psi / len_scale,
-                                    screen_white,
-                                ),
+                                np.ma.masked_array(cos_psi / len_scale, screen_white),
+                                np.ma.masked_array(sin_psi / len_scale, screen_white),
                                 angles="xy",
                                 scale=1,
                                 pivot="mid",
@@ -486,15 +507,24 @@ def morphology_visualizer(
                                 scale_units="xy",
                                 color="white",
                             )
+                        else:
                             ax6.quiver(
-                                np.ma.masked_array(
-                                    cos_psi / len_scale,
-                                    screen_black,
-                                ),
-                                np.ma.masked_array(
-                                    sin_psi / len_scale,
-                                    screen_black,
-                                ),
+                                np.ma.masked_array(cos_psi / len_scale, screen_white),
+                                np.ma.masked_array(sin_psi / len_scale, screen_white),
+                                np.ma.masked_array((psi_slice + np.pi) % (2 * np.pi), screen_white),
+                                cmap=psi_cmap,
+                                norm=norm,
+                                angles="xy",
+                                scale=1,
+                                pivot="mid",
+                                headaxislength=0,
+                                headlength=0,
+                                scale_units="xy",
+                            )
+                        if quiver_bw:
+                            ax6.quiver(
+                                np.ma.masked_array(cos_psi / len_scale, screen_black),
+                                np.ma.masked_array(sin_psi / len_scale, screen_black),
                                 angles="xy",
                                 scale=1,
                                 pivot="mid",
@@ -503,14 +533,25 @@ def morphology_visualizer(
                                 scale_units="xy",
                                 color="black",
                             )
+                        else:
+                            ax6.quiver(
+                                np.ma.masked_array(cos_psi / len_scale, screen_black),
+                                np.ma.masked_array(sin_psi / len_scale, screen_black),
+                                np.ma.masked_array((psi_slice + np.pi) % (2 * np.pi), screen_black),
+                                cmap=psi_cmap,
+                                norm=norm,
+                                angles="xy",
+                                scale=1,
+                                pivot="mid",
+                                headaxislength=0,
+                                headlength=0,
+                                scale_units="xy",
+                            )
 
                     ax6.set_ylabel("Y index")
                     ax6.set_xlabel("X index")
                     ax6.set_title(f"Mat {i} {material.name} psi")
-                    ax6.set_xlim(start_x, end_x)
-                    ax6.set_ylim(start_y, end_y)
                     psi_cbar = plt.colorbar(psiplot, fraction=0.040)
-                    # psi_cbar.set_label("psi in radians", labelpad=22)
                     ax4i = inset_axes(
                         ax6,
                         axes_class=matplotlib.projections.get_projection_class("polar"),
@@ -520,7 +561,6 @@ def morphology_visualizer(
                     )
 
                     ax4i.grid(False)
-                    # creates inset legend for orientation
                     azimuths = np.deg2rad(np.arange(0, 360, 1))
                     zeniths = np.linspace(5, 10, 50)
                     values = np.mod(azimuths, 2 * np.pi) * np.ones((50, 360))
@@ -537,9 +577,7 @@ def morphology_visualizer(
                     )
                     ax4i.pcolormesh(azimuths, zeniths, values, cmap=psi_cmap, shading="auto")
                     ax4i.set_axis_off()
-                    ax4i.arrow(
-                        0, 0, 0, 4, width=0.005, head_width=0.2, head_length=0.6, lw=0.5
-                    )  # ,facecolor='k',edgecolor='k')
+                    ax4i.arrow(0, 0, 0, 4, width=0.005, head_width=0.2, head_length=0.6, lw=0.5)
                     ax4i.arrow(
                         np.pi / 2,
                         0,
@@ -549,121 +587,118 @@ def morphology_visualizer(
                         head_width=0.2,
                         head_length=0.6,
                         lw=0.5,
-                    )  # ,facecolor='k',edgecolor='k')
+                    )
                     ax4i.text(2 * np.pi - np.deg2rad(40), 3.5, "X", fontsize=6)
                     ax4i.text(np.pi / 2 + np.deg2rad(40), 3.5, "Y", fontsize=6)
 
-                if runquiet is not True:
+                if show_histograms:
                     ax7 = plt.subplot(gs[4, 0])
-                    ax7.hist(theta_field.flatten())
-                    ax7.set_title(f"Mat {i} {material.name} theta")
+                    ax7.hist(theta_hist)
+                    theta_hist_title = f"Mat {i} {material.name} theta"
+                    if theta_sampled:
+                        theta_hist_title += f" sampled ({theta_hist_count})"
+                    ax7.set_title(theta_hist_title)
                     ax7.set_xlim(left=0)
                     ax7.set_xlabel("theta in radians")
                     ax7.set_ylabel("num voxels")
                     ax7.set_yscale("log")
 
                     ax8 = plt.subplot(gs[4, 1])
-                    ax8.hist(psi_field.flatten())
-                    ax8.set_title(f"Mat {i} {material.name} psi")
+                    ax8.hist(psi_hist)
+                    psi_hist_title = f"Mat {i} {material.name} psi"
+                    if psi_sampled:
+                        psi_hist_title += f" sampled ({psi_hist_count})"
+                    ax8.set_title(psi_hist_title)
                     ax8.set_xlim(left=0)
                     ax8.set_xlabel("psi in radians")
                     ax8.set_ylabel("num voxels")
                     ax8.set_yscale("log")
 
-            if runquiet is False:  # Show plot and/or export to file
-                # Exporting plots
-                if exportDir is not None:
-                    # Attempt to export image
+                if return_material:
+                    fig.canvas.draw()
+                    rgb_return = np.array(fig.canvas.buffer_rgba(), dtype=np.uint8)
+                    rgb_return = rgb_return.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+                    if "vfrac" in requested_plots:
+                        if outputaxes:
+                            fig_xl = ax1.get_tightbbox().intervalx[0].astype(int)
+                            fig_xr = Vfrac_cbar.ax.get_tightbbox().intervalx[1].astype(int)
+
+                            fig_yt = rgb_return.shape[0] - ax1.get_tightbbox().intervaly[1].astype(int)
+                            fig_yb = rgb_return.shape[0] - ax1.get_tightbbox().intervaly[0].astype(int)
+                        else:
+                            fig_yt = rgb_return.shape[0] - ax1.get_window_extent().intervaly[1].astype(
+                                int
+                            )
+                            fig_yb = rgb_return.shape[0] - ax1.get_window_extent().intervaly[0].astype(
+                                int
+                            )
+                            fig_xl = ax1.get_window_extent().intervalx[0].astype(int)
+                            fig_xr = ax1.get_window_extent().intervalx[1].astype(int)
+
+                        rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
+                    if "S" in requested_plots:
+                        if outputaxes:
+                            fig_yt = rgb_return.shape[0] - ax2.get_tightbbox().intervaly[1].astype(int)
+                            fig_yb = rgb_return.shape[0] - ax2.get_tightbbox().intervaly[0].astype(int)
+                            fig_xl = ax2.get_tightbbox().intervalx[0].astype(int)
+                            fig_xr = S_cbar.ax.get_tightbbox().intervalx[1].astype(int)
+                        else:
+                            fig_yt = rgb_return.shape[0] - ax2.get_window_extent().intervaly[1].astype(
+                                int
+                            )
+                            fig_yb = rgb_return.shape[0] - ax2.get_window_extent().intervaly[0].astype(
+                                int
+                            )
+                            fig_xl = ax2.get_window_extent().intervalx[0].astype(int)
+                            fig_xr = ax2.get_window_extent().intervalx[1].astype(int)
+                        rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
+                    if "theta" in requested_plots:
+                        if outputaxes:
+                            fig_yt = rgb_return.shape[0] - ax5.get_tightbbox().intervaly[1].astype(int)
+                            fig_yb = rgb_return.shape[0] - ax5.get_tightbbox().intervaly[0].astype(int)
+                            fig_xl = ax5.get_tightbbox().intervalx[0].astype(int)
+                            fig_xr = theta_cbar.ax.get_tightbbox().intervalx[1].astype(int)
+                        else:
+                            fig_yt = rgb_return.shape[0] - ax5.get_window_extent().intervaly[1].astype(
+                                int
+                            )
+                            fig_yb = rgb_return.shape[0] - ax5.get_window_extent().intervaly[0].astype(
+                                int
+                            )
+                            fig_xl = ax5.get_window_extent().intervalx[0].astype(int)
+                            fig_xr = ax5.get_window_extent().intervalx[1].astype(int)
+                        rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
+                    if "psi" in requested_plots:
+                        if outputaxes:
+                            fig_yt = rgb_return.shape[0] - ax6.get_tightbbox().intervaly[1].astype(int)
+                            fig_yb = rgb_return.shape[0] - ax6.get_tightbbox().intervaly[0].astype(int)
+                            fig_xl = ax6.get_tightbbox().intervalx[0].astype(int)
+                            fig_xr = psi_cbar.ax.get_tightbbox().intervalx[1].astype(int)
+                        else:
+                            fig_yt = rgb_return.shape[0] - ax6.get_window_extent().intervaly[1].astype(
+                                int
+                            )
+                            fig_yb = rgb_return.shape[0] - ax6.get_window_extent().intervaly[0].astype(
+                                int
+                            )
+                            fig_xl = ax6.get_window_extent().intervalx[0].astype(int)
+                            fig_xr = ax6.get_window_extent().intervalx[1].astype(int)
+                        rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
+
+                if show_full_summary and exportDir is not None:
                     outDir = pathlib.Path(exportDir)
                     outPath = outDir / f"Mat{i}_viz"
 
-                    if exportParams is None:  # No user provided kwargs
+                    if exportParams is None:
                         plt.savefig(fname=(str(outPath) + ".png"), dpi=dpi, format="png")
-                    else:  # Apply user provided kwargs
-                        # Grab format, if provided, else do png
+                    else:
                         format = exportParams.get("format", "png")
-                        plt.savefig(fname=(str(outPath) + f".{format}"), **exportParams)
-                if batchMode is True:  # Dont show plots, but do export them
-                    pass
-                else:
+                        savefig_params = dict(exportParams)
+                        savefig_params.pop("figsize", None)
+                        plt.savefig(fname=(str(outPath) + f".{format}"), **savefig_params)
+
+                if show_full_summary and not batchMode:
                     plt.show()
-
-            if outputmat and (i in outputmat):
-                fig.canvas.draw()
-                rgb_return = np.array(fig.canvas.buffer_rgba(), dtype=np.uint8)
-                rgb_return = rgb_return.reshape(fig.canvas.get_width_height()[::-1] + (4,))
-                if outputplot and ("vfrac" in outputplot):
-                    if outputaxes:
-                        fig_xl = ax1.get_tightbbox().intervalx[0].astype(int)
-                        fig_xr = Vfrac_cbar.ax.get_tightbbox().intervalx[1].astype(int)
-
-                        fig_yt = rgb_return.shape[0] - ax1.get_tightbbox().intervaly[1].astype(int)
-                        fig_yb = rgb_return.shape[0] - ax1.get_tightbbox().intervaly[0].astype(int)
-                    else:
-                        fig_yt = rgb_return.shape[0] - ax1.get_window_extent().intervaly[1].astype(
-                            int
-                        )
-                        fig_yb = rgb_return.shape[0] - ax1.get_window_extent().intervaly[0].astype(
-                            int
-                        )
-                        fig_xl = ax1.get_window_extent().intervalx[0].astype(int)
-                        fig_xr = ax1.get_window_extent().intervalx[1].astype(int)
-
-                    rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
-                if outputplot and "S" in outputplot:
-                    if outputaxes:
-                        fig_yt = rgb_return.shape[0] - ax2.get_tightbbox().intervaly[1].astype(int)
-                        fig_yb = rgb_return.shape[0] - ax2.get_tightbbox().intervaly[0].astype(int)
-                        fig_xl = ax2.get_tightbbox().intervalx[0].astype(int)
-                        fig_xr = S_cbar.ax.get_tightbbox().intervalx[1].astype(int)
-                    else:
-                        fig_yt = rgb_return.shape[0] - ax2.get_window_extent().intervaly[1].astype(
-                            int
-                        )
-                        fig_yb = rgb_return.shape[0] - ax2.get_window_extent().intervaly[0].astype(
-                            int
-                        )
-                        fig_xl = ax2.get_window_extent().intervalx[0].astype(int)
-                        fig_xr = ax2.get_window_extent().intervalx[1].astype(int)
-                    rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
-                if outputplot and "theta" in outputplot:
-                    if outputaxes:
-                        fig_yt = rgb_return.shape[0] - ax5.get_tightbbox().intervaly[1].astype(int)
-                        fig_yb = rgb_return.shape[0] - ax5.get_tightbbox().intervaly[0].astype(int)
-                        fig_xl = ax5.get_tightbbox().intervalx[0].astype(int)
-                        fig_xr = theta_cbar.ax.get_tightbbox().intervalx[1].astype(int)
-                    else:
-                        fig_yt = rgb_return.shape[0] - ax5.get_window_extent().intervaly[1].astype(
-                            int
-                        )
-                        fig_yb = rgb_return.shape[0] - ax5.get_window_extent().intervaly[0].astype(
-                            int
-                        )
-                        fig_xl = ax5.get_window_extent().intervalx[0].astype(int)
-                        fig_xr = ax5.get_window_extent().intervalx[1].astype(int)
-                    rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
-                if outputplot and "psi" in outputplot:
-                    if outputaxes:
-                        fig_yt = rgb_return.shape[0] - ax6.get_tightbbox().intervaly[1].astype(int)
-                        fig_yb = rgb_return.shape[0] - ax6.get_tightbbox().intervaly[0].astype(int)
-                        fig_xl = ax6.get_tightbbox().intervalx[0].astype(int)
-                        fig_xr = psi_cbar.ax.get_tightbbox().intervalx[1].astype(int)
-                    else:
-                        fig_yt = rgb_return.shape[0] - ax6.get_window_extent().intervaly[1].astype(
-                            int
-                        )
-                        fig_yb = rgb_return.shape[0] - ax6.get_window_extent().intervaly[0].astype(
-                            int
-                        )
-                        fig_xl = ax6.get_window_extent().intervalx[0].astype(int)
-                        fig_xr = ax6.get_window_extent().intervalx[1].astype(int)
-                    rgb_return_list.append(rgb_return[fig_yt:fig_yb, fig_xl:fig_xr])
-        if not runquiet:
-            plt.show()
-        plt.clf()
-        plt.close(fig)
-    finally:
-        # this code can hijack the backend and "agg" will not show figures, so this needs always to run, regardless of whether there are errors in the arguments.
-        matplotlib.rc_file_defaults()
-        matplotlib.use(backend_)
+            finally:
+                plt.close(fig)
     return rgb_return_list
