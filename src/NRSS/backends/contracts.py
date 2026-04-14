@@ -79,10 +79,16 @@ _BACKEND_ARRAY_CONTRACTS = {
             "cached_base",
         ),
         "default_energy_progress_bar": True,
+        "default_result_residency": "host",
+        "default_result_chunk_size": 1,
         "supported_rawkernel_backends": (
             "auto",
             "nvcc",
             "nvrtc",
+        ),
+        "supported_result_residencies": (
+            "host",
+            "device",
         ),
         "supported_backend_options": (
             "execution_path",
@@ -93,6 +99,8 @@ _BACKEND_ARRAY_CONTRACTS = {
             "direct_polarization_backend",
             "direct_isotropic_mode",
             "energy_progress_bar",
+            "result_residency",
+            "result_chunk_size",
         ),
         "runtime_compute_dtype": "float32",
         "runtime_complex_dtype": "complex64",
@@ -216,6 +224,41 @@ def normalize_energy_progress_bar_name(value: Any) -> bool:
             f"{value!r}. Supported values: True, False, 'on', 'off'."
         )
     return aliases[cleaned]
+
+
+def normalize_result_residency_name(value: Any) -> str:
+    if value is None:
+        return "host"
+
+    cleaned = str(value).strip().lower()
+    aliases = {
+        "": "host",
+        "cpu": "host",
+        "default": "host",
+        "gpu": "device",
+    }
+    return aliases.get(cleaned, cleaned)
+
+
+def normalize_result_chunk_size(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip().lower()
+        if cleaned in {"", "auto", "default", "none", "off"}:
+            return None
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise BackendOptionError(
+            "Backend 'cupy-rsoxs' result_chunk_size must be a positive integer "
+            "or one of: auto, default, none, off."
+        ) from exc
+    if normalized <= 0:
+        raise BackendOptionError(
+            "Backend 'cupy-rsoxs' result_chunk_size must be a positive integer."
+        )
+    return normalized
 
 
 def normalize_resident_mode(
@@ -383,6 +426,26 @@ def normalize_backend_options(
         normalized_options["energy_progress_bar"] = normalize_energy_progress_bar_name(
             options.get("energy_progress_bar", spec.get("default_energy_progress_bar", False))
         )
+
+    if "result_residency" in spec["supported_backend_options"]:
+        result_residency = normalize_result_residency_name(
+            options.get("result_residency", spec.get("default_result_residency", "host"))
+        )
+        if result_residency not in spec.get("supported_result_residencies", ("host",)):
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support result_residency "
+                f"{result_residency!r}. Supported values: "
+                f"{', '.join(spec.get('supported_result_residencies', ('host',)))}."
+            )
+        normalized_options["result_residency"] = result_residency
+
+    if "result_chunk_size" in spec["supported_backend_options"]:
+        result_chunk_size = normalize_result_chunk_size(
+            options.get("result_chunk_size", spec.get("default_result_chunk_size"))
+        )
+        if result_chunk_size is None:
+            result_chunk_size = int(spec.get("default_result_chunk_size", 1))
+        normalized_options["result_chunk_size"] = result_chunk_size
 
     return normalized_options
 

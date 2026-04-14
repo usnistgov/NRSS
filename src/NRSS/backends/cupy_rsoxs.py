@@ -227,9 +227,18 @@ class CupyScatteringResult:
         return self.data
 
     def to_xarray(self) -> xr.DataArray:
-        import cupy as cp
+        namespace = inspect_array(self.data)["namespace"]
+        if namespace == "numpy":
+            scattering_data = np.asarray(self.data)
+        elif namespace == "cupy":
+            import cupy as cp
 
-        scattering_data = cp.asnumpy(self.data)
+            scattering_data = cp.asnumpy(self.data)
+        else:
+            raise TypeError(
+                "cupy-rsoxs results require numpy or cupy storage, "
+                f"received namespace {namespace!r}."
+            )
         ny, nx = self.num_zyx[1:]
         d = self.phys_size
         qy = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(ny, d=d))
@@ -284,6 +293,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         self._update_kernel_reports(morphology)
 
         energies = tuple(float(energy) for energy in morphology.Energies)
+        result_residency = self._result_residency(morphology)
+        copy_stream = cp.cuda.Stream(non_blocking=True) if result_residency == "host" else None
+        pending_copy_done = None
+        pending_host_projection = None
+        chunk_buffers = None
+        chunk_size = None
+        active_chunk_buffer_index = 0
+        active_chunk_start = 0
+        active_chunk_fill = 0
         runtime_materials = recorder.measure("A2", lambda: self._runtime_material_views(morphology, cp))
         window = None
         result_data = None
@@ -320,10 +338,72 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     )
                     if result_data is None:
                         result_shape = (len(energies), *projection.shape)
-                        result_data = cp.empty(result_shape, dtype=projection.dtype)
-                    result_data[energy_index] = projection
-                    del projection
+                        if result_residency == "host":
+                            result_data = self._allocate_host_result_buffer(result_shape, projection.dtype)
+                            chunk_size = self._result_chunk_size(
+                                morphology,
+                                energy_count=len(energies),
+                            )
+                            if chunk_size > 1:
+                                chunk_buffers = (
+                                    cp.empty((chunk_size, *projection.shape), dtype=projection.dtype),
+                                    cp.empty((chunk_size, *projection.shape), dtype=projection.dtype),
+                                )
+                        else:
+                            result_data = cp.empty(result_shape, dtype=projection.dtype)
+                    if result_residency == "host":
+                        if int(chunk_size) == 1:
+                            if pending_copy_done is not None:
+                                pending_copy_done.synchronize()
+                                pending_copy_done = None
+                                if pending_host_projection is not None:
+                                    del pending_host_projection
+                                    pending_host_projection = None
+                            compute_done = cp.cuda.Event()
+                            compute_done.record()
+                            copy_stream.wait_event(compute_done)
+                            with copy_stream:
+                                projection.get(out=result_data[energy_index], blocking=False)
+                                pending_copy_done = cp.cuda.Event()
+                                pending_copy_done.record()
+                            pending_host_projection = projection
+                        else:
+                            chunk_buffer = chunk_buffers[active_chunk_buffer_index]
+                            chunk_buffer[active_chunk_fill] = projection
+                            active_chunk_fill += 1
+                            del projection
+                            if active_chunk_fill == chunk_buffer.shape[0] or energy_index == len(energies) - 1:
+                                chunk_stop = active_chunk_start + active_chunk_fill
+                                if pending_copy_done is not None:
+                                    pending_copy_done.synchronize()
+                                    pending_copy_done = None
+                                compute_done = cp.cuda.Event()
+                                compute_done.record()
+                                copy_stream.wait_event(compute_done)
+                                with copy_stream:
+                                    chunk_buffer[:active_chunk_fill].get(
+                                        out=result_data[active_chunk_start:chunk_stop],
+                                        blocking=False,
+                                    )
+                                    pending_copy_done = cp.cuda.Event()
+                                    pending_copy_done.record()
+                                active_chunk_start = chunk_stop
+                                active_chunk_fill = 0
+                                active_chunk_buffer_index = 1 - active_chunk_buffer_index
+                    else:
+                        result_data[energy_index] = projection
+                        del projection
         finally:
+            if pending_copy_done is not None:
+                pending_copy_done.synchronize()
+                pending_copy_done = None
+            if pending_host_projection is not None:
+                del pending_host_projection
+            if chunk_buffers is not None:
+                for chunk_buffer in chunk_buffers:
+                    del chunk_buffer
+            if copy_stream is not None:
+                copy_stream.synchronize()
             if window is not None:
                 del window
             del runtime_materials
@@ -349,6 +429,25 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         if return_xarray:
             return result.to_xarray()
         return result
+
+    def _result_residency(self, morphology) -> str:
+        return str(morphology.backend_options.get("result_residency", "host"))
+
+    def _result_chunk_size(
+        self,
+        morphology,
+        *,
+        energy_count: int,
+    ) -> int:
+        configured = morphology.backend_options.get("result_chunk_size")
+        if configured is None:
+            configured = 1
+        return max(1, min(int(configured), int(energy_count)))
+
+    def _allocate_host_result_buffer(self, shape, dtype):
+        from cupyx import empty_pinned
+
+        return empty_pinned(shape, dtype=dtype)
 
     def _energy_progress_bar_enabled(
         self,

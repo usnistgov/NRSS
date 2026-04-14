@@ -382,7 +382,9 @@ class Morphology:
         ``kernel_preload_stage="a1"``,
         ``igor_shift_backend="nvcc"``,
         ``direct_polarization_backend="nvrtc"``, and
-        ``energy_progress_bar=True``.
+        ``energy_progress_bar=True``, and
+        ``result_residency="host"``, and
+        ``result_chunk_size=1``.
         """
 
         self._numMaterial = numMaterial

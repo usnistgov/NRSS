@@ -711,6 +711,8 @@ def test_backend_registry_reports_known_backends():
     assert "mixed_precision_mode" in get_backend_info("cupy-rsoxs").supported_backend_options
     assert "z_collapse_mode" in get_backend_info("cupy-rsoxs").supported_backend_options
     assert "energy_progress_bar" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "result_residency" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "result_chunk_size" in get_backend_info("cupy-rsoxs").supported_backend_options
 
 
 @pytest.mark.backend_agnostic_contract
@@ -852,11 +854,15 @@ def test_cupy_backend_array_contract_defaults_to_host_resident_numpy():
     assert contract["options"]["execution_path"] == "direct_polarization"
     assert contract["options"]["mixed_precision_mode"] is None
     assert contract["options"]["z_collapse_mode"] is None
+    assert contract["options"]["result_residency"] == "host"
+    assert contract["options"]["result_chunk_size"] == 1
     assert runtime_contract["namespace"] == "cupy"
     assert runtime_contract["device"] == "gpu"
     assert runtime_contract["options"]["execution_path"] == "direct_polarization"
     assert runtime_contract["options"]["mixed_precision_mode"] is None
     assert runtime_contract["options"]["z_collapse_mode"] is None
+    assert runtime_contract["options"]["result_residency"] == "host"
+    assert runtime_contract["options"]["result_chunk_size"] == 1
     assert plan.target_namespace == "numpy"
     assert plan.target_device == "cpu"
     assert plan.transfer == "none"
@@ -922,7 +928,9 @@ def _expected_cupy_backend_options(
     z_collapse_mode: str | None = None,
     direct_isotropic_mode: str | None = None,
     energy_progress_bar: bool = True,
-) -> dict[str, str | bool | None]:
+    result_residency: str = "host",
+    result_chunk_size: int | None = 1,
+) -> dict[str, str | bool | int | None]:
     kernel_preload_stage = "off"
     igor_shift_backend = "nvrtc"
     if execution_path == "direct_polarization":
@@ -938,6 +946,8 @@ def _expected_cupy_backend_options(
         "direct_polarization_backend": "nvrtc",
         "direct_isotropic_mode": direct_isotropic_mode,
         "energy_progress_bar": energy_progress_bar,
+        "result_residency": result_residency,
+        "result_chunk_size": result_chunk_size,
     }
 
 
@@ -1055,6 +1065,84 @@ def test_cupy_backend_accepts_energy_progress_bar_backend_option():
     assert morph.backend_options == _expected_cupy_backend_options(
         energy_progress_bar=False,
     )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_result_residency_backend_option():
+    """Ensure cupy-rsoxs normalizes explicit result residency independently of morphology residency."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"result_residency": "gpu"},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        result_residency="device",
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_result_chunk_size_backend_option():
+    """Ensure cupy-rsoxs normalizes explicit result chunk sizing for host-backed results."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"result_chunk_size": 7},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        result_chunk_size=7,
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_result_chunk_size_auto_aliases():
+    """Ensure cupy-rsoxs accepts auto-like aliases for default chunk sizing."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"result_chunk_size": "auto"},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        result_chunk_size=1,
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_invalid_result_chunk_size_backend_option():
+    """Ensure cupy-rsoxs rejects unsupported result_chunk_size values up front."""
+    with pytest.raises(BackendOptionError, match="result_chunk_size must be a positive integer"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"result_chunk_size": 0},
+            create_cy_object=False,
+        )
+    with pytest.raises(BackendOptionError, match="result_chunk_size must be a positive integer"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"result_chunk_size": "definitely-not-valid"},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_unknown_result_residency_backend_option():
+    """Ensure cupy-rsoxs rejects unsupported result_residency values up front."""
+    with pytest.raises(BackendOptionError, match="does not support result_residency"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"result_residency": "definitely-not-valid"},
+            create_cy_object=False,
+        )
 
 
 @pytest.mark.backend_specific
@@ -1843,6 +1931,7 @@ def test_cupy_host_resident_runtime_stages_authoritative_numpy_fields_to_device(
         result = morph.run(stdout=False, stderr=False, return_xarray=False)
         cp.cuda.Stream.null.synchronize()
         assert list(result.to_backend_array().shape) == [1, 4, 4]
+        assert inspect_array(result.to_backend_array())["namespace"] == "numpy"
         assert morph.last_runtime_staging_report
         assert all(
             plan.target_namespace == "cupy"
@@ -1880,6 +1969,7 @@ def test_cupy_mixed_precision_host_runtime_stages_numpy_float16_fields_to_device
         result = morph.run(stdout=False, stderr=False, return_xarray=False)
         cp.cuda.Stream.null.synchronize()
         assert list(result.to_backend_array().shape) == [1, 16, 16]
+        assert inspect_array(result.to_backend_array())["namespace"] == "numpy"
         assert morph.last_runtime_staging_report
         assert all(
             plan.target_namespace == "cupy" and plan.target_dtype == "float16"
@@ -1915,6 +2005,7 @@ def test_cupy_host_resident_runtime_skips_orientation_staging_for_explicit_isotr
         result = morph.run(stdout=False, stderr=False, return_xarray=False)
         cp.cuda.Stream.null.synchronize()
         assert list(result.to_backend_array().shape) == [1, 16, 16]
+        assert inspect_array(result.to_backend_array())["namespace"] == "numpy"
         staged_fields = sorted(
             (plan.material_id, plan.field_name)
             for plan in morph.last_runtime_staging_report
@@ -1937,7 +2028,7 @@ def test_cupy_host_resident_runtime_skips_orientation_staging_for_explicit_isotr
 
 @pytest.mark.gpu
 def test_cupy_device_resident_runtime_skips_orientation_staging_for_explicit_isotropic_contract_materials():
-    """Ensure enum-backed isotropic materials also skip orientation staging in device-resident mode."""
+    """Ensure device-resident morphology can still default to host-backed results."""
     cp = _import_cupy_required()
     morph = None
     try:
@@ -1950,6 +2041,7 @@ def test_cupy_device_resident_runtime_skips_orientation_staging_for_explicit_iso
         result = morph.run(stdout=False, stderr=False, return_xarray=False)
         cp.cuda.Stream.null.synchronize()
         assert list(result.to_backend_array().shape) == [1, 16, 16]
+        assert inspect_array(result.to_backend_array())["namespace"] == "numpy"
         staged_fields = sorted(
             (plan.material_id, plan.field_name)
             for plan in morph.last_runtime_staging_report
@@ -1961,6 +2053,34 @@ def test_cupy_device_resident_runtime_skips_orientation_staging_for_explicit_iso
             for plan in morph.last_runtime_staging_report
             if plan.original_namespace != "missing"
         )
+    finally:
+        if morph is not None:
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
+@pytest.mark.gpu
+def test_cupy_result_residency_device_keeps_results_on_gpu_independent_of_morphology_residency():
+    """Ensure result_residency='device' preserves CuPy-backed results without requiring device-resident morphology."""
+    cp = _import_cupy_required()
+    morph = None
+    try:
+        morph = _build_two_material_isotropic_block_morphology(
+            backend="cupy-rsoxs",
+            backend_options={"result_residency": "device"},
+            resident_mode="host",
+            field_namespace="numpy",
+            isotropic_representation="legacy_zero_array",
+        )
+        result = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.Stream.null.synchronize()
+        assert list(result.to_backend_array().shape) == [1, 16, 16]
+        assert inspect_array(result.to_backend_array())["namespace"] == "cupy"
+        scattering = result.to_xarray()
+        assert scattering.shape == (1, 16, 16)
     finally:
         if morph is not None:
             try:
