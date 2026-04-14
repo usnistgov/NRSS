@@ -822,8 +822,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         )
 
     def _supports_runtime_zero_field_shortcut(self, morphology) -> bool:
-        if str(getattr(morphology, "resident_mode", "")) != "host":
-            return False
         return self._execution_path(morphology) in {"tensor_coeff", "direct_polarization"}
 
     def _uses_host_reusable_precompute(self, morphology) -> bool:

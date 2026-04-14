@@ -18,8 +18,15 @@ If you need benchmark commands or acceptance gates, go to `benchmarking_guide.md
 
 ### Shared
 
-- Host-resident exact-zero `legacy_zero_array` materials now stage only `Vfrac`
-  on both maintained execution paths.
+- Exact-zero `legacy_zero_array` materials now stage only `Vfrac` on both
+  maintained execution paths in both supported residency modes:
+  - `resident_mode='host'`
+  - `resident_mode='device'`
+- The device-resident runtime zero-field shortcut is a runtime-view
+  optimization only:
+  - authoritative `Material.S/theta/psi` fields remain concrete device arrays,
+  - the shortcut does not rewrite the material contract to the explicit
+    isotropic enum.
 - Host-resident float32 anisotropic materials now use standard GPU reusable
   staging in `A2` on both maintained execution paths:
   - stage raw `Vfrac`, `S`, `theta`, `psi`,
@@ -35,7 +42,6 @@ If you need benchmark commands or acceptance gates, go to `benchmarking_guide.md
   - aligned `x` / `y` families
 - Float32 `Segment B` uses fused isotropic accumulation rather than
   materializing a full-volume `isotropic_term` temporary.
-- Host-resident legacy-zero compatibility shortcut is accepted.
 
 ### `direct_polarization`
 
@@ -49,7 +55,6 @@ If you need benchmark commands or acceptance gates, go to `benchmarking_guide.md
   - `direct_polarization_backend='nvrtc'`
 - `Segment C` uses in-place cuFFT plus in-place Igor-order swap.
 - Float32 direct-path isotropic work is fused into direct accumulation.
-- Host-resident legacy-zero runtime zero-field shortcut is accepted.
 - The current float32 direct-path reusable staging kernel still keeps `Vfrac`
   for fused isotropic accumulation; anisotropic-only kernel splitting remains a
   separate open optimization rather than part of the accepted state.

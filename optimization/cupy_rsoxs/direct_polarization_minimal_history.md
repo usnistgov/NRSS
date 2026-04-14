@@ -14,7 +14,7 @@ historical question.
 | constructor-time preload plus mixed backend-family defaults | accepted | maintained direct-path defaults are `a1` preload, `igor_shift=nvcc`, `direct_polarization_generic=nvrtc` |
 | true in-place direct-path `Segment C` | accepted | cuFFT and Igor-order swap now operate in place |
 | fused float32 isotropic accumulation | accepted | removed the direct float32 isotropic cache-plus-temporary structure and lowered peak memory |
-| host-resident runtime zero-field shortcut for exact-zero legacy materials | accepted | host legacy-zero compatibility inputs stage only `Vfrac` and route through isotropic handling |
+| runtime zero-field shortcut for exact-zero legacy materials | accepted | exact-zero `legacy_zero_array` compatibility inputs now stage only `Vfrac` and route through isotropic handling in both supported residency modes, without rewriting the authoritative material contract |
 
 ## Rejected Or Closed
 

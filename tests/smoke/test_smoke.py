@@ -2039,18 +2039,27 @@ def test_cupy_host_resident_tensor_coeff_shortcuts_legacy_zero_array_fields():
 
 
 @pytest.mark.gpu
-def test_cupy_device_resident_tensor_coeff_keeps_staging_all_legacy_zero_array_fields():
-    """Ensure the tensor_coeff legacy-zero shortcut remains scoped to host-resident staging."""
+@pytest.mark.parametrize("execution_path", ["tensor_coeff", "direct_polarization"])
+def test_cupy_device_resident_legacy_zero_array_shortcuts_runtime_view_without_mutating_authoritative_fields(
+    execution_path,
+):
+    """Ensure device-resident legacy-zero materials use the isotropic runtime view without altering authoritative arrays."""
     cp = _import_cupy_required()
     morph = None
     try:
         morph = _build_two_material_isotropic_block_morphology(
             backend="cupy-rsoxs",
-            backend_options={"execution_path": "tensor_coeff"},
+            backend_options={"execution_path": execution_path},
             resident_mode="device",
             field_namespace="cupy",
             isotropic_representation="legacy_zero_array",
         )
+        for material in morph.materials.values():
+            assert material._explicit_isotropic_contract is False
+            for field_name in ("S", "theta", "psi"):
+                field = getattr(material, field_name)
+                assert inspect_array(field)["namespace"] == "cupy"
+                assert int(cp.count_nonzero(field).item()) == 0
         result = morph.run(stdout=False, stderr=False, return_xarray=False)
         cp.cuda.Stream.null.synchronize()
         assert list(result.to_backend_array().shape) == [1, 16, 16]
@@ -2059,16 +2068,18 @@ def test_cupy_device_resident_tensor_coeff_keeps_staging_all_legacy_zero_array_f
             for plan in morph.last_runtime_staging_report
             if plan.original_namespace != "missing"
         )
-        assert staged_fields == [
-            (1, "S"),
-            (1, "Vfrac"),
-            (1, "psi"),
-            (1, "theta"),
-            (2, "S"),
-            (2, "Vfrac"),
-            (2, "psi"),
-            (2, "theta"),
-        ]
+        assert staged_fields == [(1, "Vfrac"), (2, "Vfrac")]
+        assert all(
+            plan.transfer == "none"
+            for plan in morph.last_runtime_staging_report
+            if plan.original_namespace != "missing"
+        )
+        for material in morph.materials.values():
+            assert material._explicit_isotropic_contract is False
+            for field_name in ("S", "theta", "psi"):
+                field = getattr(material, field_name)
+                assert inspect_array(field)["namespace"] == "cupy"
+                assert int(cp.count_nonzero(field).item()) == 0
     finally:
         if morph is not None:
             try:
