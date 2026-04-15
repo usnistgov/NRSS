@@ -31,6 +31,7 @@ _CUPY_SEGMENT_MEASUREMENTS = {
     "E": "cuda_event",
     "F": "cuda_event",
 }
+_PYHYPER_RSOXS_ACCESSOR_STATUS: bool | None = None
 _HALF_BITS_TO_FLOAT_DEVICE_FUNCTION = r"""
 __device__ inline float nrss_half_bits_to_float(const unsigned short h) {
     const unsigned int sign = ((unsigned int)h & 0x8000u) << 16;
@@ -245,6 +246,26 @@ def _materialize_backend_array(data):
     )
 
 
+def _ensure_pyhyper_rsoxs_accessor_registered() -> None:
+    global _PYHYPER_RSOXS_ACCESSOR_STATUS
+
+    if _PYHYPER_RSOXS_ACCESSOR_STATUS is True:
+        return
+    if hasattr(xr.DataArray, "rsoxs"):
+        _PYHYPER_RSOXS_ACCESSOR_STATUS = True
+        return
+    if _PYHYPER_RSOXS_ACCESSOR_STATUS is False:
+        return
+
+    try:
+        importlib.import_module("PyHyperScattering.RSoXS")
+    except ImportError:
+        _PYHYPER_RSOXS_ACCESSOR_STATUS = False
+        return
+
+    _PYHYPER_RSOXS_ACCESSOR_STATUS = hasattr(xr.DataArray, "rsoxs")
+
+
 @dataclass
 class CupyScatteringResult:
     data: Any
@@ -289,6 +310,7 @@ class CupyIntegratedResult:
         return self.data
 
     def to_xarray(self) -> xr.DataArray:
+        _ensure_pyhyper_rsoxs_accessor_registered()
         reduced_data = _materialize_backend_array(self.data)
         coords: dict[str, Any] = {
             "energy": list(self.energies),
@@ -348,12 +370,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         energies = tuple(float(energy) for energy in morphology.Energies)
         result_residency = self._result_residency(morphology)
         result_layout = self._result_layout(morphology)
+        chunk_size = self._result_chunk_size(
+            morphology,
+            energy_count=len(energies),
+        )
         copy_stream = cp.cuda.Stream(non_blocking=True) if result_residency == "host" else None
         pending_copy_done = None
         pending_host_projection = None
         chunk_buffers = None
         integrated_chunk_buffers = None
-        chunk_size = None
         integration_plan = None
         active_chunk_buffer_index = 0
         active_chunk_start = 0
@@ -374,6 +399,12 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     cp,
                     shape_override=self._segment_c_shape_override(morphology),
                 ),
+            )
+            self._emit_result_streaming_summary(
+                stdout=stdout,
+                result_residency=result_residency,
+                chunk_size=chunk_size,
+                result_layout=result_layout,
             )
 
             with self._iter_completed_energies(
@@ -408,10 +439,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                             result_dtype = projection.dtype
                         if result_residency == "host":
                             result_data = self._allocate_host_result_buffer(result_shape, result_dtype)
-                            chunk_size = self._result_chunk_size(
-                                morphology,
-                                energy_count=len(energies),
-                            )
                             if chunk_size > 1:
                                 if result_layout == "integrated":
                                     chunk_buffers = (
@@ -599,6 +626,22 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         from cupyx import empty_pinned
 
         return empty_pinned(shape, dtype=dtype)
+
+    def _emit_result_streaming_summary(
+        self,
+        *,
+        stdout: bool,
+        result_residency: str,
+        chunk_size: int,
+        result_layout: str,
+    ) -> None:
+        if not stdout:
+            return
+        print(
+            f"Result streaming: mode={result_residency}, chunk={int(chunk_size)}, layout={result_layout}.",
+            file=sys.stdout,
+            flush=True,
+        )
 
     def _integrated_result_plan(
         self,

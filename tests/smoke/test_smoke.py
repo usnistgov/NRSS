@@ -11,6 +11,7 @@ import h5py
 import numpy as np
 import pytest
 import NRSS.backends.registry as backend_registry
+import NRSS.backends.cupy_rsoxs as cupy_rsoxs_module
 
 from tests.path_matrix import ComputationPath
 
@@ -36,7 +37,7 @@ from NRSS.backends import (
     resolve_backend_runtime_contract,
     UnknownBackendError,
 )
-from NRSS.backends.cupy_rsoxs import CupyRsoxsBackendRuntime
+from NRSS.backends.cupy_rsoxs import CupyIntegratedResult, CupyRsoxsBackendRuntime
 from NRSS.morphology import Material, Morphology, OpticalConstants
 from NRSS.writer import write_config
 
@@ -1268,6 +1269,131 @@ def test_cupy_energy_progress_bar_wrapper_stays_disabled_when_streams_are_suppre
         observed = list(iterator)
 
     assert observed == [(0, 284.7), (1, 285.0), (2, 285.2)]
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_result_streaming_summary_reports_mode_chunk_and_layout(capsys):
+    """Ensure the pre-loop stdout summary reports result streaming settings exactly once."""
+    runtime = CupyRsoxsBackendRuntime()
+    runtime._emit_result_streaming_summary(
+        stdout=True,
+        result_residency="host",
+        chunk_size=3,
+        result_layout="integrated",
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == "Result streaming: mode=host, chunk=3, layout=integrated.\n"
+    assert captured.err == ""
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_result_streaming_summary_respects_stdout_suppression(capsys):
+    """Ensure the pre-loop summary stays silent when stdout output is disabled."""
+    runtime = CupyRsoxsBackendRuntime()
+    runtime._emit_result_streaming_summary(
+        stdout=False,
+        result_residency="device",
+        chunk_size=1,
+        result_layout="detector",
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_rsoxs_accessor_registration_imports_only_once_after_success(monkeypatch):
+    """Ensure successful accessor registration is cached after the first import."""
+    monkeypatch.setattr(cupy_rsoxs_module, "_PYHYPER_RSOXS_ACCESSOR_STATUS", None)
+
+    class _FakeDataArray:
+        pass
+
+    fake_xr = types.SimpleNamespace(DataArray=_FakeDataArray)
+    monkeypatch.setattr(cupy_rsoxs_module, "xr", fake_xr)
+
+    imports: list[str] = []
+
+    original_import_module = cupy_rsoxs_module.importlib.import_module
+
+    def _fake_import_module(name):
+        imports.append(name)
+        if name != "PyHyperScattering.RSoXS":
+            return original_import_module(name)
+        _FakeDataArray.rsoxs = property(lambda self: None)
+        return types.SimpleNamespace()
+
+    monkeypatch.setattr(cupy_rsoxs_module.importlib, "import_module", _fake_import_module)
+
+    cupy_rsoxs_module._ensure_pyhyper_rsoxs_accessor_registered()
+    cupy_rsoxs_module._ensure_pyhyper_rsoxs_accessor_registered()
+
+    assert imports == ["PyHyperScattering.RSoXS"]
+    assert hasattr(_FakeDataArray, "rsoxs")
+    assert cupy_rsoxs_module._PYHYPER_RSOXS_ACCESSOR_STATUS is True
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_rsoxs_accessor_registration_caches_missing_import(monkeypatch):
+    """Ensure failed accessor imports are cached and not retried."""
+    monkeypatch.setattr(cupy_rsoxs_module, "_PYHYPER_RSOXS_ACCESSOR_STATUS", None)
+
+    class _FakeDataArray:
+        pass
+
+    fake_xr = types.SimpleNamespace(DataArray=_FakeDataArray)
+    monkeypatch.setattr(cupy_rsoxs_module, "xr", fake_xr)
+
+    imports: list[str] = []
+
+    original_import_module = cupy_rsoxs_module.importlib.import_module
+
+    def _fake_import_module(name):
+        imports.append(name)
+        if name == "PyHyperScattering.RSoXS":
+            raise ImportError("missing for test")
+        return original_import_module(name)
+
+    monkeypatch.setattr(cupy_rsoxs_module.importlib, "import_module", _fake_import_module)
+
+    cupy_rsoxs_module._ensure_pyhyper_rsoxs_accessor_registered()
+    cupy_rsoxs_module._ensure_pyhyper_rsoxs_accessor_registered()
+
+    assert imports == ["PyHyperScattering.RSoXS"]
+    assert not hasattr(_FakeDataArray, "rsoxs")
+    assert cupy_rsoxs_module._PYHYPER_RSOXS_ACCESSOR_STATUS is False
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_integrated_to_xarray_calls_accessor_registration_helper(monkeypatch):
+    """Ensure integrated xarray conversion runs the lazy accessor-registration hook."""
+    calls: list[str] = []
+
+    def _fake_ensure():
+        calls.append("called")
+
+    monkeypatch.setattr(cupy_rsoxs_module, "_ensure_pyhyper_rsoxs_accessor_registered", _fake_ensure)
+
+    result = CupyIntegratedResult(
+        data=np.ones((1, 360, 4), dtype=np.float32),
+        energies=(285.0,),
+        q=np.arange(4, dtype=np.float64),
+        chi=np.linspace(-179.5, 179.5, 360, dtype=np.float64),
+        attrs={"source_integrator": "cupy-rsoxs", "integration_compatibility": "NRSSIntegrator"},
+    )
+
+    converted = result.to_xarray()
+
+    assert calls == ["called"]
+    assert converted.dims == ("energy", "chi", "q")
+    assert converted.attrs["integration_compatibility"] == "NRSSIntegrator"
 
 
 @pytest.mark.backend_specific
