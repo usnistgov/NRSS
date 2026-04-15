@@ -216,6 +216,35 @@ def require_cupy_modules():
     return cp, ndimage
 
 
+@dataclass(frozen=True)
+class _IntegratedResultPlan:
+    result_shape: tuple[int, int, int]
+    center: tuple[float, float]
+    radius: float
+    chi: np.ndarray
+    q: np.ndarray
+    q_perp: np.ndarray | None
+    q_abs: np.ndarray | None
+    attrs: dict[str, Any]
+    needs_common_q_interpolation: bool
+    device_q_axes: Any | None = None
+    device_q_common: Any | None = None
+
+
+def _materialize_backend_array(data):
+    namespace = inspect_array(data)["namespace"]
+    if namespace == "numpy":
+        return np.asarray(data)
+    if namespace == "cupy":
+        import cupy as cp
+
+        return cp.asnumpy(data)
+    raise TypeError(
+        "cupy-rsoxs results require numpy or cupy storage, "
+        f"received namespace {namespace!r}."
+    )
+
+
 @dataclass
 class CupyScatteringResult:
     data: Any
@@ -227,18 +256,7 @@ class CupyScatteringResult:
         return self.data
 
     def to_xarray(self) -> xr.DataArray:
-        namespace = inspect_array(self.data)["namespace"]
-        if namespace == "numpy":
-            scattering_data = np.asarray(self.data)
-        elif namespace == "cupy":
-            import cupy as cp
-
-            scattering_data = cp.asnumpy(self.data)
-        else:
-            raise TypeError(
-                "cupy-rsoxs results require numpy or cupy storage, "
-                f"received namespace {namespace!r}."
-            )
+        scattering_data = _materialize_backend_array(self.data)
         ny, nx = self.num_zyx[1:]
         d = self.phys_size
         qy = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(ny, d=d))
@@ -251,6 +269,41 @@ class CupyScatteringResult:
                 "phys_size_nm": float(self.phys_size),
                 "z_dim": int(self.num_zyx[0]),
             },
+        )
+
+    def release(self):
+        self.data = None
+
+
+@dataclass
+class CupyIntegratedResult:
+    data: Any
+    energies: tuple[float, ...]
+    q: np.ndarray
+    chi: np.ndarray
+    attrs: dict[str, Any]
+    q_perp: np.ndarray | None = None
+    q_abs: np.ndarray | None = None
+
+    def to_backend_array(self):
+        return self.data
+
+    def to_xarray(self) -> xr.DataArray:
+        reduced_data = _materialize_backend_array(self.data)
+        coords: dict[str, Any] = {
+            "energy": list(self.energies),
+            "chi": self.chi,
+            "q": self.q,
+        }
+        if self.q_perp is not None:
+            coords["q_perp"] = ("q", self.q_perp)
+        if self.q_abs is not None:
+            coords["q_abs"] = (("energy", "q"), self.q_abs)
+        return xr.DataArray(
+            reduced_data,
+            dims=["energy", "chi", "q"],
+            coords=coords,
+            attrs=dict(self.attrs),
         )
 
     def release(self):
@@ -294,11 +347,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
         energies = tuple(float(energy) for energy in morphology.Energies)
         result_residency = self._result_residency(morphology)
+        result_layout = self._result_layout(morphology)
         copy_stream = cp.cuda.Stream(non_blocking=True) if result_residency == "host" else None
         pending_copy_done = None
         pending_host_projection = None
         chunk_buffers = None
+        integrated_chunk_buffers = None
         chunk_size = None
+        integration_plan = None
         active_chunk_buffer_index = 0
         active_chunk_start = 0
         active_chunk_fill = 0
@@ -336,22 +392,110 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                         window=window,
                         recorder=recorder,
                     )
+                    if integration_plan is None and result_layout == "integrated":
+                        integration_plan = self._integrated_result_plan(
+                            morphology=morphology,
+                            projection_shape=projection.shape,
+                            energies=energies,
+                            cp=cp,
+                        )
                     if result_data is None:
-                        result_shape = (len(energies), *projection.shape)
+                        if result_layout == "integrated":
+                            result_shape = integration_plan.result_shape
+                            result_dtype = np.float64
+                        else:
+                            result_shape = (len(energies), *projection.shape)
+                            result_dtype = projection.dtype
                         if result_residency == "host":
-                            result_data = self._allocate_host_result_buffer(result_shape, projection.dtype)
+                            result_data = self._allocate_host_result_buffer(result_shape, result_dtype)
                             chunk_size = self._result_chunk_size(
                                 morphology,
                                 energy_count=len(energies),
                             )
                             if chunk_size > 1:
-                                chunk_buffers = (
-                                    cp.empty((chunk_size, *projection.shape), dtype=projection.dtype),
-                                    cp.empty((chunk_size, *projection.shape), dtype=projection.dtype),
-                                )
+                                if result_layout == "integrated":
+                                    chunk_buffers = (
+                                        cp.empty((chunk_size, *projection.shape), dtype=projection.dtype),
+                                        cp.empty((chunk_size, *projection.shape), dtype=projection.dtype),
+                                    )
+                                    integrated_chunk_buffers = (
+                                        cp.empty((chunk_size, *result_shape[1:]), dtype=cp.float64),
+                                        cp.empty((chunk_size, *result_shape[1:]), dtype=cp.float64),
+                                    )
+                                else:
+                                    chunk_buffers = (
+                                        cp.empty((chunk_size, *projection.shape), dtype=projection.dtype),
+                                        cp.empty((chunk_size, *projection.shape), dtype=projection.dtype),
+                                    )
                         else:
-                            result_data = cp.empty(result_shape, dtype=projection.dtype)
-                    if result_residency == "host":
+                            if result_layout == "integrated":
+                                result_data = cp.empty(result_shape, dtype=cp.float64)
+                            else:
+                                result_data = cp.empty(result_shape, dtype=projection.dtype)
+                    if result_layout == "integrated":
+                        if result_residency == "host":
+                            if int(chunk_size) == 1:
+                                if pending_copy_done is not None:
+                                    pending_copy_done.synchronize()
+                                    pending_copy_done = None
+                                    if pending_host_projection is not None:
+                                        del pending_host_projection
+                                        pending_host_projection = None
+                                integrated_projection = self._integrate_projection_chunk(
+                                    projection[None, ...],
+                                    energy_start=energy_index,
+                                    integration_plan=integration_plan,
+                                    cp=cp,
+                                )[0]
+                                del projection
+                                compute_done = cp.cuda.Event()
+                                compute_done.record()
+                                copy_stream.wait_event(compute_done)
+                                with copy_stream:
+                                    integrated_projection.get(out=result_data[energy_index], blocking=False)
+                                    pending_copy_done = cp.cuda.Event()
+                                    pending_copy_done.record()
+                                pending_host_projection = integrated_projection
+                            else:
+                                chunk_buffer = chunk_buffers[active_chunk_buffer_index]
+                                integrated_chunk_buffer = integrated_chunk_buffers[active_chunk_buffer_index]
+                                chunk_buffer[active_chunk_fill] = projection
+                                active_chunk_fill += 1
+                                del projection
+                                if active_chunk_fill == chunk_buffer.shape[0] or energy_index == len(energies) - 1:
+                                    chunk_stop = active_chunk_start + active_chunk_fill
+                                    if pending_copy_done is not None:
+                                        pending_copy_done.synchronize()
+                                        pending_copy_done = None
+                                    self._integrate_projection_chunk(
+                                        chunk_buffer[:active_chunk_fill],
+                                        energy_start=active_chunk_start,
+                                        integration_plan=integration_plan,
+                                        cp=cp,
+                                        out=integrated_chunk_buffer[:active_chunk_fill],
+                                    )
+                                    compute_done = cp.cuda.Event()
+                                    compute_done.record()
+                                    copy_stream.wait_event(compute_done)
+                                    with copy_stream:
+                                        integrated_chunk_buffer[:active_chunk_fill].get(
+                                            out=result_data[active_chunk_start:chunk_stop],
+                                            blocking=False,
+                                        )
+                                        pending_copy_done = cp.cuda.Event()
+                                        pending_copy_done.record()
+                                    active_chunk_start = chunk_stop
+                                    active_chunk_fill = 0
+                                    active_chunk_buffer_index = 1 - active_chunk_buffer_index
+                        else:
+                            result_data[energy_index] = self._integrate_projection_chunk(
+                                projection[None, ...],
+                                energy_start=energy_index,
+                                integration_plan=integration_plan,
+                                cp=cp,
+                            )[0]
+                            del projection
+                    elif result_residency == "host":
                         if int(chunk_size) == 1:
                             if pending_copy_done is not None:
                                 pending_copy_done.synchronize()
@@ -402,6 +546,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             if chunk_buffers is not None:
                 for chunk_buffer in chunk_buffers:
                     del chunk_buffer
+            if integrated_chunk_buffers is not None:
+                for integrated_chunk_buffer in integrated_chunk_buffers:
+                    del integrated_chunk_buffer
             if copy_stream is not None:
                 copy_stream.synchronize()
             if window is not None:
@@ -413,6 +560,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 morphology=morphology,
                 result_data=result_data,
                 energies=energies,
+                integration_plan=integration_plan,
             ),
         )
         segment_seconds, segment_measurements, measurement = recorder.finalize()
@@ -433,6 +581,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
     def _result_residency(self, morphology) -> str:
         return str(morphology.backend_options.get("result_residency", "host"))
 
+    def _result_layout(self, morphology) -> str:
+        return str(morphology.backend_options.get("result_layout", "detector"))
+
     def _result_chunk_size(
         self,
         morphology,
@@ -448,6 +599,241 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         from cupyx import empty_pinned
 
         return empty_pinned(shape, dtype=dtype)
+
+    def _integrated_result_plan(
+        self,
+        *,
+        morphology,
+        projection_shape: tuple[int, int],
+        energies: tuple[float, ...],
+        cp,
+    ) -> _IntegratedResultPlan:
+        qy, qx = self._detector_q_axes(morphology, projection_shape)
+        center = (
+            self._axis_center_from_q_axis(qy),
+            self._axis_center_from_q_axis(qx),
+        )
+        radius = float(
+            np.sqrt((projection_shape[0] - center[0]) ** 2 + (projection_shape[1] - center[1]) ** 2)
+        )
+        q_count = int(np.ceil(radius))
+        if q_count <= 0:
+            raise ValueError(f"Integrated result computed a non-positive polar radius {radius!r}.")
+
+        chi = np.linspace(-179.5, 179.5, 360, dtype=np.float64)
+        q_perp = self._q_perp_axis_from_detector_axes(qx, qy, q_count)
+        z_dim = int(morphology.NumZYX[0])
+        nrss_semantic_mode = "2d_reciprocal_plane" if z_dim == 1 else "3d_detector_aware"
+        attrs: dict[str, Any] = {
+            "radial_semantics": "q_perp" if z_dim == 1 else "q_abs_detector_corrected",
+            "source_integrator": "cupy-rsoxs",
+            "integration_compatibility": "NRSSIntegrator",
+            "nrss_semantic_mode": nrss_semantic_mode,
+            "phys_size_nm": float(morphology.PhysSize),
+            "z_dim": z_dim,
+            "shape_zyx": tuple(int(v) for v in morphology.NumZYX),
+        }
+        if energies:
+            attrs["energy_ev"] = float(energies[0])
+
+        q = q_perp
+        q_perp_coord = None
+        q_abs = None
+        needs_common_q_interpolation = False
+        device_q_axes = None
+        device_q_common = None
+
+        if nrss_semantic_mode == "3d_detector_aware":
+            q_axes = self._detector_corrected_q_batch(q_perp, np.asarray(energies, dtype=np.float64))
+            if len(energies) == 1:
+                q = np.asarray(q_axes[0], dtype=np.float64)
+                if not np.allclose(q, q_perp, atol=0.0, rtol=0.0):
+                    q_perp_coord = q_perp
+            else:
+                q_common = self._shared_q_grid(q_axes)
+                q_abs = np.asarray(q_axes, dtype=np.float64)
+                attrs.pop("energy_ev", None)
+                if q_common is not None:
+                    q = q_common
+                    attrs["radial_coordinate_mode"] = "shared_q_grid_interpolated"
+                    attrs["q_axis_note"] = (
+                        "The q dimension is a shared detector-corrected q grid spanning the overlap "
+                        "of all slices. Exact per-slice q values before interpolation remain in q_abs."
+                    )
+                    needs_common_q_interpolation = True
+                    device_q_axes = cp.asarray(q_abs)
+                    device_q_common = cp.asarray(q_common)
+                else:
+                    q = np.arange(q_perp.size, dtype=np.int64)
+                    q_perp_coord = q_perp
+                    attrs["radial_coordinate_mode"] = "per_slice_q_abs"
+                    attrs["q_axis_note"] = (
+                        "The q dimension indexes radial bins. Exact detector-corrected q values are "
+                        "stored in the q_abs coordinate."
+                    )
+
+        return _IntegratedResultPlan(
+            result_shape=(len(energies), chi.size, q.size),
+            center=center,
+            radius=radius,
+            chi=chi,
+            q=np.asarray(q),
+            q_perp=None if q_perp_coord is None else np.asarray(q_perp_coord),
+            q_abs=None if q_abs is None else np.asarray(q_abs),
+            attrs=attrs,
+            needs_common_q_interpolation=needs_common_q_interpolation,
+            device_q_axes=device_q_axes,
+            device_q_common=device_q_common,
+        )
+
+    @staticmethod
+    def _axis_center_from_q_axis(axis: np.ndarray) -> float:
+        return float(np.interp(0.0, np.asarray(axis, dtype=np.float64), np.arange(len(axis), dtype=np.float64)))
+
+    @staticmethod
+    def _detector_q_axes(morphology, projection_shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+        del projection_shape
+        ny, nx = (int(morphology.NumZYX[1]), int(morphology.NumZYX[2]))
+        d = float(morphology.PhysSize)
+        qy = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(ny, d=d))
+        qx = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(nx, d=d))
+        return qy, qx
+
+    @staticmethod
+    def _q_perp_axis_from_detector_axes(qx: np.ndarray, qy: np.ndarray, n_points: int) -> np.ndarray:
+        q = np.sqrt(qy[:, None] ** 2 + qx[None, :] ** 2)
+        return np.linspace(0.0, float(np.nanmax(q)), int(n_points), dtype=np.float64)
+
+    @staticmethod
+    def _detector_corrected_q_batch(q_perp_axis: np.ndarray, energies: np.ndarray) -> np.ndarray:
+        q_perp_axis = np.asarray(q_perp_axis, dtype=np.float64)[None, :]
+        energy_ev = np.asarray(energies, dtype=np.float64).reshape(-1, 1)
+        wavelength_nm = 1239.84197 / energy_ev
+        k = 2.0 * np.pi / wavelength_nm
+        val = k * k - q_perp_axis * q_perp_axis
+        valid = val >= 0.0
+        qz = -k + np.sqrt(val, where=valid, out=np.full_like(val, np.nan, dtype=np.float64))
+        q = np.full_like(val, np.nan, dtype=np.float64)
+        q_perp_broadcast = np.broadcast_to(q_perp_axis, val.shape)
+        q[valid] = np.sqrt(q_perp_broadcast[valid] * q_perp_broadcast[valid] + qz[valid] * qz[valid])
+        return q
+
+    @staticmethod
+    def _shared_q_grid(q_axes: np.ndarray) -> np.ndarray | None:
+        lower_bounds = []
+        upper_bounds = []
+        n_points = None
+        for axis in np.asarray(q_axes, dtype=np.float64):
+            finite = axis[np.isfinite(axis)]
+            if finite.size < 2:
+                return None
+            lower_bounds.append(float(np.min(finite)))
+            upper_bounds.append(float(np.max(finite)))
+            n_points = axis.size if n_points is None else min(n_points, axis.size)
+
+        q_min = max(lower_bounds)
+        q_max = min(upper_bounds)
+        if not np.isfinite(q_min) or not np.isfinite(q_max) or q_max <= q_min or n_points is None or n_points < 2:
+            return None
+        return np.linspace(q_min, q_max, int(n_points), dtype=np.float64)
+
+    def _integrate_projection_chunk(
+        self,
+        projections,
+        *,
+        energy_start: int,
+        integration_plan: _IntegratedResultPlan,
+        cp,
+        out=None,
+    ):
+        reduced = self._warp_polar_batched_xp(
+            projections,
+            center=integration_plan.center,
+            radius=integration_plan.radius,
+            xp=cp,
+        )
+        if integration_plan.needs_common_q_interpolation:
+            q_axes = integration_plan.device_q_axes[energy_start : energy_start + reduced.shape[0]]
+            reduced = self._interp_chunk_to_common_q_cupy(
+                reduced,
+                q_axes=q_axes,
+                q_common=integration_plan.device_q_common,
+                cp=cp,
+            )
+        if out is not None:
+            out[...] = reduced
+            return out
+        return reduced
+
+    @staticmethod
+    def _interp_chunk_to_common_q_cupy(values, *, q_axes, q_common, cp):
+        output = cp.full((values.shape[0], values.shape[1], q_common.size), cp.nan, dtype=values.dtype)
+        for image_index in range(values.shape[0]):
+            q_axis = q_axes[image_index]
+            valid = cp.isfinite(q_axis)
+            q_valid = q_axis[valid]
+            if int(q_valid.size) < 2:
+                continue
+            increasing = cp.concatenate(
+                (cp.asarray([True]), cp.diff(q_valid) > 0)
+            )
+            q_valid = q_valid[increasing]
+            if int(q_valid.size) < 2:
+                continue
+            slice_values = values[image_index][:, valid][:, increasing]
+            for chi_index in range(values.shape[1]):
+                output[image_index, chi_index, :] = cp.interp(
+                    q_common,
+                    q_valid,
+                    slice_values[chi_index],
+                    left=cp.nan,
+                    right=cp.nan,
+                )
+        return output
+
+    @staticmethod
+    def _warp_polar_batched_xp(values, *, center, radius, xp):
+        values = xp.asarray(values)
+        n_images, n_rows, n_cols = values.shape
+        n_theta = 360
+        n_radius = int(np.ceil(radius))
+        if n_radius <= 0:
+            raise ValueError(f"Integrated result computed a non-positive polar radius {radius!r}.")
+
+        center_row, center_col = center
+        theta = xp.deg2rad(xp.arange(n_theta, dtype=xp.float64))
+        radial = xp.arange(n_radius, dtype=xp.float64) * (float(radius) / n_radius)
+        radial_grid, theta_grid = xp.meshgrid(radial, theta)
+
+        row_coords = radial_grid * xp.sin(theta_grid) + center_row
+        col_coords = radial_grid * xp.cos(theta_grid) + center_col
+
+        row0 = xp.floor(row_coords).astype(xp.int64)
+        col0 = xp.floor(col_coords).astype(xp.int64)
+        row1 = row0 + 1
+        col1 = col0 + 1
+
+        row_weight = row_coords - row0
+        col_weight = col_coords - col0
+
+        def sample(row_idx, col_idx):
+            valid = (row_idx >= 0) & (row_idx < n_rows) & (col_idx >= 0) & (col_idx < n_cols)
+            row_clip = xp.clip(row_idx, 0, n_rows - 1)
+            col_clip = xp.clip(col_idx, 0, n_cols - 1)
+            sampled = values[:, row_clip, col_clip]
+            return sampled * valid[None, :, :]
+
+        top_left = sample(row0, col0)
+        top_right = sample(row0, col1)
+        bottom_left = sample(row1, col0)
+        bottom_right = sample(row1, col1)
+
+        return (
+            top_left * (1.0 - row_weight)[None, :, :] * (1.0 - col_weight)[None, :, :]
+            + top_right * (1.0 - row_weight)[None, :, :] * col_weight[None, :, :]
+            + bottom_left * row_weight[None, :, :] * (1.0 - col_weight)[None, :, :]
+            + bottom_right * row_weight[None, :, :] * col_weight[None, :, :]
+        )
 
     def _energy_progress_bar_enabled(
         self,
@@ -583,13 +969,24 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             if progress is not None:
                 progress.close()
 
-    def _assemble_and_retain_result(self, morphology, result_data, energies):
-        result = CupyScatteringResult(
-            data=result_data,
-            energies=energies,
-            phys_size=float(morphology.PhysSize),
-            num_zyx=tuple(int(v) for v in morphology.NumZYX),
-        )
+    def _assemble_and_retain_result(self, morphology, result_data, energies, integration_plan=None):
+        if integration_plan is None:
+            result = CupyScatteringResult(
+                data=result_data,
+                energies=energies,
+                phys_size=float(morphology.PhysSize),
+                num_zyx=tuple(int(v) for v in morphology.NumZYX),
+            )
+        else:
+            result = CupyIntegratedResult(
+                data=result_data,
+                energies=energies,
+                q=integration_plan.q,
+                chi=integration_plan.chi,
+                attrs=integration_plan.attrs,
+                q_perp=integration_plan.q_perp,
+                q_abs=integration_plan.q_abs,
+            )
         morphology._backend_result = result
         morphology.scatteringPattern = result
         self._update_kernel_reports(morphology)

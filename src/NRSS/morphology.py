@@ -356,6 +356,31 @@ class Morphology:
               is requested, ``run(stdout=True, stderr=True)`` is used, and
               stderr is attached to an interactive TTY. Any stdout or stderr
               suppression behaves the same as disabling this option.
+            - ``result_residency``: ``"host"`` (default) or ``"device"``.
+              Controls where the retained simulation result buffer lives after
+              the run completes. ``"host"`` keeps the result contract
+              NumPy-backed and uses pinned host memory plus asynchronous device
+              to host copies while the energy loop is still running.
+              ``"device"`` retains the final result as a CuPy array on the GPU.
+              This option affects result storage only; it does not change the
+              authoritative morphology-array ``resident_mode`` contract.
+            - ``result_chunk_size``: positive integer, default ``1``.
+              Host-streaming chunk size for ``result_residency="host"``.
+              ``1`` copies one completed energy slice at a time. Values larger
+              than ``1`` use double-buffered CuPy staging chunks and stream
+              completed chunks asynchronously to pinned host memory. The value
+              is clamped to the number of requested energies. This option has
+              no effect for ``result_residency="device"``.
+            - ``result_layout``: ``"detector"`` (default) or ``"integrated"``.
+              Controls whether ``morph.run()`` retains raw detector panels
+              ``(energy, qy, qx)`` or opt-in integrated output
+              ``(energy, chi, q)``. ``"detector"`` preserves the historical raw
+              scattering contract. ``"integrated"`` performs the polar remesh
+              inside ``cupy-rsoxs`` and returns output compatible with the
+              maintained ``NRSSIntegrator`` semantics. In ``"integrated"``
+              mode, the reduction stays on GPU until the final requested result
+              buffer is streamed or retained, and ``result_chunk_size`` applies
+              to integrated chunks rather than raw detector images.
         resident_mode : {"host", "device"} or None, default None
             Location of the authoritative morphology arrays. ``"cupy-rsoxs"``
             defaults to ``"host"`` and also supports ``"device"``.
@@ -382,9 +407,10 @@ class Morphology:
         ``kernel_preload_stage="a1"``,
         ``igor_shift_backend="nvcc"``,
         ``direct_polarization_backend="nvrtc"``, and
-        ``energy_progress_bar=True``, and
-        ``result_residency="host"``, and
-        ``result_chunk_size=1``.
+        ``energy_progress_bar=True``,
+        ``result_residency="host"``,
+        ``result_chunk_size=1``, and
+        ``result_layout="detector"``.
         """
 
         self._numMaterial = numMaterial

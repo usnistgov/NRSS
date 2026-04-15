@@ -81,6 +81,7 @@ _BACKEND_ARRAY_CONTRACTS = {
         "default_energy_progress_bar": True,
         "default_result_residency": "host",
         "default_result_chunk_size": 1,
+        "default_result_layout": "detector",
         "supported_rawkernel_backends": (
             "auto",
             "nvcc",
@@ -89,6 +90,10 @@ _BACKEND_ARRAY_CONTRACTS = {
         "supported_result_residencies": (
             "host",
             "device",
+        ),
+        "supported_result_layouts": (
+            "detector",
+            "integrated",
         ),
         "supported_backend_options": (
             "execution_path",
@@ -101,6 +106,7 @@ _BACKEND_ARRAY_CONTRACTS = {
             "energy_progress_bar",
             "result_residency",
             "result_chunk_size",
+            "result_layout",
         ),
         "runtime_compute_dtype": "float32",
         "runtime_complex_dtype": "complex64",
@@ -259,6 +265,24 @@ def normalize_result_chunk_size(value: Any) -> int | None:
             "Backend 'cupy-rsoxs' result_chunk_size must be a positive integer."
         )
     return normalized
+
+
+def normalize_result_layout_name(value: Any) -> str:
+    if value is None:
+        return "detector"
+
+    cleaned = str(value).strip().lower()
+    aliases = {
+        "": "detector",
+        "default": "detector",
+        "raw": "detector",
+        "scattering": "detector",
+        "detector": "detector",
+        "integrated": "integrated",
+        "reduced": "integrated",
+        "polar": "integrated",
+    }
+    return aliases.get(cleaned, cleaned)
 
 
 def normalize_resident_mode(
@@ -446,6 +470,18 @@ def normalize_backend_options(
         if result_chunk_size is None:
             result_chunk_size = int(spec.get("default_result_chunk_size", 1))
         normalized_options["result_chunk_size"] = result_chunk_size
+
+    if "result_layout" in spec["supported_backend_options"]:
+        result_layout = normalize_result_layout_name(
+            options.get("result_layout", spec.get("default_result_layout", "detector"))
+        )
+        if result_layout not in spec.get("supported_result_layouts", ("detector",)):
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support result_layout "
+                f"{result_layout!r}. Supported values: "
+                f"{', '.join(spec.get('supported_result_layouts', ('detector',)))}."
+            )
+        normalized_options["result_layout"] = result_layout
 
     return normalized_options
 

@@ -713,6 +713,7 @@ def test_backend_registry_reports_known_backends():
     assert "energy_progress_bar" in get_backend_info("cupy-rsoxs").supported_backend_options
     assert "result_residency" in get_backend_info("cupy-rsoxs").supported_backend_options
     assert "result_chunk_size" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "result_layout" in get_backend_info("cupy-rsoxs").supported_backend_options
 
 
 @pytest.mark.backend_agnostic_contract
@@ -856,6 +857,7 @@ def test_cupy_backend_array_contract_defaults_to_host_resident_numpy():
     assert contract["options"]["z_collapse_mode"] is None
     assert contract["options"]["result_residency"] == "host"
     assert contract["options"]["result_chunk_size"] == 1
+    assert contract["options"]["result_layout"] == "detector"
     assert runtime_contract["namespace"] == "cupy"
     assert runtime_contract["device"] == "gpu"
     assert runtime_contract["options"]["execution_path"] == "direct_polarization"
@@ -863,6 +865,7 @@ def test_cupy_backend_array_contract_defaults_to_host_resident_numpy():
     assert runtime_contract["options"]["z_collapse_mode"] is None
     assert runtime_contract["options"]["result_residency"] == "host"
     assert runtime_contract["options"]["result_chunk_size"] == 1
+    assert runtime_contract["options"]["result_layout"] == "detector"
     assert plan.target_namespace == "numpy"
     assert plan.target_device == "cpu"
     assert plan.transfer == "none"
@@ -930,6 +933,7 @@ def _expected_cupy_backend_options(
     energy_progress_bar: bool = True,
     result_residency: str = "host",
     result_chunk_size: int | None = 1,
+    result_layout: str = "detector",
 ) -> dict[str, str | bool | int | None]:
     kernel_preload_stage = "off"
     igor_shift_backend = "nvrtc"
@@ -948,6 +952,7 @@ def _expected_cupy_backend_options(
         "energy_progress_bar": energy_progress_bar,
         "result_residency": result_residency,
         "result_chunk_size": result_chunk_size,
+        "result_layout": result_layout,
     }
 
 
@@ -1114,6 +1119,21 @@ def test_cupy_backend_accepts_result_chunk_size_auto_aliases():
 
 @pytest.mark.backend_specific
 @pytest.mark.cpu
+def test_cupy_backend_accepts_integrated_result_layout_backend_option():
+    """Ensure cupy-rsoxs normalizes opt-in integrated output layout selection."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"result_layout": "integrated"},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        result_layout="integrated",
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
 def test_cupy_backend_rejects_invalid_result_chunk_size_backend_option():
     """Ensure cupy-rsoxs rejects unsupported result_chunk_size values up front."""
     with pytest.raises(BackendOptionError, match="result_chunk_size must be a positive integer"):
@@ -1128,6 +1148,19 @@ def test_cupy_backend_rejects_invalid_result_chunk_size_backend_option():
             1,
             backend="cupy-rsoxs",
             backend_options={"result_chunk_size": "definitely-not-valid"},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_unknown_result_layout_backend_option():
+    """Ensure cupy-rsoxs rejects unsupported integrated-output layout values up front."""
+    with pytest.raises(BackendOptionError, match="does not support result_layout"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"result_layout": "definitely-not-valid"},
             create_cy_object=False,
         )
 
@@ -4087,6 +4120,55 @@ def _assert_scattering_similarity(
     assert float(abs_diff.max()) <= max_abs_max
 
 
+def _assert_integrated_remesh_parity(candidate, reference) -> None:
+    assert candidate.dims == reference.dims
+    assert candidate.sizes == reference.sizes
+
+    for coord_name in ("energy", "chi", "q"):
+        np.testing.assert_allclose(
+            np.asarray(candidate.coords[coord_name].values),
+            np.asarray(reference.coords[coord_name].values),
+            rtol=0.0,
+            atol=1e-12,
+            equal_nan=True,
+        )
+
+    if "q_perp" in reference.coords:
+        assert "q_perp" in candidate.coords
+        np.testing.assert_allclose(
+            np.asarray(candidate.coords["q_perp"].values),
+            np.asarray(reference.coords["q_perp"].values),
+            rtol=0.0,
+            atol=1e-12,
+            equal_nan=True,
+        )
+    else:
+        assert "q_perp" not in candidate.coords
+
+    if "q_abs" in reference.coords:
+        assert "q_abs" in candidate.coords
+        np.testing.assert_allclose(
+            np.asarray(candidate.coords["q_abs"].values),
+            np.asarray(reference.coords["q_abs"].values),
+            rtol=0.0,
+            atol=1e-12,
+            equal_nan=True,
+        )
+    else:
+        assert "q_abs" not in candidate.coords
+
+    for attr_name in ("radial_semantics", "nrss_semantic_mode", "radial_coordinate_mode", "q_axis_note"):
+        assert candidate.attrs.get(attr_name) == reference.attrs.get(attr_name)
+
+    np.testing.assert_allclose(
+        np.asarray(candidate.values),
+        np.asarray(reference.values),
+        rtol=1e-6,
+        atol=1e-9,
+        equal_nan=True,
+    )
+
+
 def _build_two_material_asymmetric_lobed_morphology(
     energies: list[float],
     eangle_rotation: list[float],
@@ -4269,6 +4351,71 @@ def test_pyhyperscattering_integrator_to_xarray_smoke(nrss_path: ComputationPath
     # The tiny remesh path can pick up a thin NaN fringe at the edge; keep this
     # as a broad sanity check rather than a tight determinism threshold.
     assert float(np.isfinite(remeshed_vals).mean()) >= 0.89
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff", "cupy_direct_polarization")
+def test_cupy_internal_integrated_result_matches_nrssintegrator_multi_energy_smoke(
+    nrss_path: ComputationPath,
+):
+    """Validate 3-energy internal GPU integration against the maintained raw->NRSSIntegrator workflow."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for internal integration parity smoke test.")
+
+    from PyHyperScattering.NRSSIntegrator import NRSSIntegrator
+
+    energies = [285.0, 286.0, 287.0]
+    reference_morph = None
+    integrated_morph = None
+    try:
+        base_backend_options = dict(nrss_path.backend_options)
+        reference_morph = _build_two_material_sphere_morphology(
+            energies=energies,
+            shape=(32, 32, 32),
+            backend=nrss_path.backend,
+            backend_options={**base_backend_options, "result_chunk_size": 2},
+            resident_mode=nrss_path.resident_mode,
+            input_policy="strict",
+            ownership_policy=nrss_path.ownership_policy,
+            field_namespace=nrss_path.field_namespace,
+        )
+        raw = reference_morph.run(stdout=False, stderr=False, return_xarray=True)
+        reference = NRSSIntegrator(
+            force_np_backend=True,
+            use_chunked_processing=False,
+        ).integrateImageStack(raw)
+
+        integrated_morph = _build_two_material_sphere_morphology(
+            energies=energies,
+            shape=(32, 32, 32),
+            backend=nrss_path.backend,
+            backend_options={
+                **base_backend_options,
+                "result_chunk_size": 2,
+                "result_layout": "integrated",
+            },
+            resident_mode=nrss_path.resident_mode,
+            input_policy="strict",
+            ownership_policy=nrss_path.ownership_policy,
+            field_namespace=nrss_path.field_namespace,
+        )
+        candidate = integrated_morph.run(stdout=False, stderr=False, return_xarray=True)
+
+        assert candidate.attrs["source_integrator"] == "cupy-rsoxs"
+        assert candidate.attrs["integration_compatibility"] == "NRSSIntegrator"
+        _assert_integrated_remesh_parity(candidate, reference)
+    finally:
+        if reference_morph is not None:
+            try:
+                reference_morph.release_runtime()
+            except Exception:
+                pass
+        if integrated_morph is not None:
+            try:
+                integrated_morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
 
 
 @pytest.mark.gpu
