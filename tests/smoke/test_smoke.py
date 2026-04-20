@@ -10,6 +10,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
+import xarray as xr
 import NRSS.backends.registry as backend_registry
 import NRSS.backends.cupy_rsoxs as cupy_rsoxs_module
 
@@ -37,7 +38,12 @@ from NRSS.backends import (
     resolve_backend_runtime_contract,
     UnknownBackendError,
 )
-from NRSS.backends.cupy_rsoxs import CupyIntegratedResult, CupyRsoxsBackendRuntime
+from NRSS.backends.cupy_rsoxs import (
+    CupyIntegratedIntensityResult,
+    CupyIntegratedResult,
+    CupyObservableDatasetResult,
+    CupyRsoxsBackendRuntime,
+)
 from NRSS.morphology import Material, Morphology, OpticalConstants
 from NRSS.writer import write_config
 
@@ -715,6 +721,7 @@ def test_backend_registry_reports_known_backends():
     assert "result_residency" in get_backend_info("cupy-rsoxs").supported_backend_options
     assert "result_chunk_size" in get_backend_info("cupy-rsoxs").supported_backend_options
     assert "result_layout" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "total_chi_wedge_deg" in get_backend_info("cupy-rsoxs").supported_backend_options
 
 
 @pytest.mark.backend_agnostic_contract
@@ -859,6 +866,7 @@ def test_cupy_backend_array_contract_defaults_to_host_resident_numpy():
     assert contract["options"]["result_residency"] == "host"
     assert contract["options"]["result_chunk_size"] == 1
     assert contract["options"]["result_layout"] == "detector"
+    assert contract["options"]["total_chi_wedge_deg"] == 90.0
     assert runtime_contract["namespace"] == "cupy"
     assert runtime_contract["device"] == "gpu"
     assert runtime_contract["options"]["execution_path"] == "direct_polarization"
@@ -867,6 +875,7 @@ def test_cupy_backend_array_contract_defaults_to_host_resident_numpy():
     assert runtime_contract["options"]["result_residency"] == "host"
     assert runtime_contract["options"]["result_chunk_size"] == 1
     assert runtime_contract["options"]["result_layout"] == "detector"
+    assert runtime_contract["options"]["total_chi_wedge_deg"] == 90.0
     assert plan.target_namespace == "numpy"
     assert plan.target_device == "cpu"
     assert plan.transfer == "none"
@@ -935,7 +944,8 @@ def _expected_cupy_backend_options(
     result_residency: str = "host",
     result_chunk_size: int | None = 1,
     result_layout: str = "detector",
-) -> dict[str, str | bool | int | None]:
+    total_chi_wedge_deg: float = 90.0,
+) -> dict[str, str | bool | int | float | None]:
     kernel_preload_stage = "off"
     igor_shift_backend = "nvrtc"
     if execution_path == "direct_polarization":
@@ -954,6 +964,7 @@ def _expected_cupy_backend_options(
         "result_residency": result_residency,
         "result_chunk_size": result_chunk_size,
         "result_layout": result_layout,
+        "total_chi_wedge_deg": total_chi_wedge_deg,
     }
 
 
@@ -1135,6 +1146,48 @@ def test_cupy_backend_accepts_integrated_result_layout_backend_option():
 
 @pytest.mark.backend_specific
 @pytest.mark.cpu
+@pytest.mark.parametrize(
+    ("requested_layout", "expected_layout"),
+    [
+        ("i_only", "i_only"),
+        ("i", "i_only"),
+        ("i_para_i_perp", "i_para_i_perp"),
+        ("i_a", "i_a"),
+    ],
+)
+def test_cupy_backend_accepts_observable_result_layout_backend_options(
+    requested_layout: str,
+    expected_layout: str,
+):
+    """Ensure cupy-rsoxs normalizes the maintained observable result layouts."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"result_layout": requested_layout},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        result_layout=expected_layout,
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_total_chi_wedge_backend_option():
+    """Ensure cupy-rsoxs normalizes the maintained chi-sector width option."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"total_chi_wedge_deg": 60},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        total_chi_wedge_deg=60.0,
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
 def test_cupy_backend_rejects_invalid_result_chunk_size_backend_option():
     """Ensure cupy-rsoxs rejects unsupported result_chunk_size values up front."""
     with pytest.raises(BackendOptionError, match="result_chunk_size must be a positive integer"):
@@ -1162,6 +1215,20 @@ def test_cupy_backend_rejects_unknown_result_layout_backend_option():
             1,
             backend="cupy-rsoxs",
             backend_options={"result_layout": "definitely-not-valid"},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+@pytest.mark.parametrize("invalid_value", (0, -1, 181, "not-a-number"))
+def test_cupy_backend_rejects_invalid_total_chi_wedge_backend_option(invalid_value):
+    """Ensure cupy-rsoxs rejects out-of-range chi-sector widths up front."""
+    with pytest.raises(BackendOptionError, match="total_chi_wedge_deg"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"total_chi_wedge_deg": invalid_value},
             create_cy_object=False,
         )
 
@@ -1394,6 +1461,45 @@ def test_cupy_integrated_to_xarray_calls_accessor_registration_helper(monkeypatc
     assert calls == ["called"]
     assert converted.dims == ("energy", "chi", "q")
     assert converted.attrs["integration_compatibility"] == "NRSSIntegrator"
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_i_only_result_to_xarray_returns_q_energy_dataarray():
+    """Ensure the chi-averaged observable wrapper exposes a DataArray with q/energy coords."""
+    result = CupyIntegratedIntensityResult(
+        data=np.ones((2, 4), dtype=np.float64),
+        energies=(285.0, 286.0),
+        q=np.arange(4, dtype=np.float64),
+        attrs={"source_integrator": "cupy-rsoxs", "result_layout": "i_only"},
+        q_perp=np.arange(4, dtype=np.float64) * 0.1,
+    )
+
+    converted = result.to_xarray()
+
+    assert converted.dims == ("energy", "q")
+    assert "q_perp" in converted.coords
+    assert converted.attrs["result_layout"] == "i_only"
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_observable_dataset_result_to_xarray_returns_dataset():
+    """Ensure multi-channel observable layouts are wrapped as an xarray Dataset."""
+    result = CupyObservableDatasetResult(
+        data=np.ones((2, 2, 4), dtype=np.float64),
+        energies=(285.0, 286.0),
+        channel_names=("I_para", "I_perp"),
+        q=np.arange(4, dtype=np.float64),
+        attrs={"source_integrator": "cupy-rsoxs", "result_layout": "i_para_i_perp"},
+    )
+
+    converted = result.to_xarray()
+
+    assert isinstance(converted, xr.Dataset)
+    assert set(converted.data_vars) == {"I_para", "I_perp"}
+    assert converted["I_para"].dims == ("energy", "q")
+    assert converted.attrs["result_layout"] == "i_para_i_perp"
 
 
 @pytest.mark.backend_specific
@@ -4295,6 +4401,73 @@ def _assert_integrated_remesh_parity(candidate, reference) -> None:
     )
 
 
+def _weighted_nanmean_over_chi_numpy(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    finite = np.isfinite(values)
+    safe_values = np.where(finite, values, 0.0)
+    finite_weights = finite.astype(np.float64)
+    if weights.ndim == 1:
+        numerator = np.tensordot(safe_values, weights, axes=([1], [0]))
+        denominator = np.tensordot(finite_weights, weights, axes=([1], [0]))
+    else:
+        numerator = np.moveaxis(np.tensordot(safe_values, weights, axes=([1], [1])), -1, 1)
+        denominator = np.moveaxis(np.tensordot(finite_weights, weights, axes=([1], [1])), -1, 1)
+    averaged = np.full_like(numerator, np.nan, dtype=np.float64)
+    valid = denominator > 0
+    averaged[valid] = numerator[valid] / denominator[valid]
+    return averaged
+
+
+def _reference_observable_reductions(
+    remeshed: xr.DataArray,
+    *,
+    total_chi_wedge_deg: float,
+) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:
+    runtime = CupyRsoxsBackendRuntime()
+    values = np.asarray(remeshed.values, dtype=np.float64)
+    q = np.asarray(remeshed.coords["q"].values, dtype=np.float64)
+    energy = np.asarray(remeshed.coords["energy"].values, dtype=np.float64)
+    attrs = dict(remeshed.attrs)
+
+    all_chi = _weighted_nanmean_over_chi_numpy(values, np.ones(values.shape[1], dtype=np.float64))
+    sector_weights = runtime._sector_mean_weights(
+        np.asarray(remeshed.coords["chi"].values, dtype=np.float64),
+        total_chi_wedge_deg,
+    )
+    sectors = _weighted_nanmean_over_chi_numpy(values, sector_weights)
+    i_para = xr.DataArray(
+        sectors[:, 0, :],
+        dims=("energy", "q"),
+        coords={"energy": energy, "q": q},
+        attrs=dict(attrs),
+    )
+    i_perp = xr.DataArray(
+        sectors[:, 1, :],
+        dims=("energy", "q"),
+        coords={"energy": energy, "q": q},
+        attrs=dict(attrs),
+    )
+    i_mean = xr.DataArray(
+        all_chi,
+        dims=("energy", "q"),
+        coords={"energy": energy, "q": q},
+        attrs=dict(attrs),
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        anisotropy = (i_para - i_perp) / (i_para + i_perp)
+    return i_mean, i_para, i_perp, anisotropy
+
+
+def _symmetrize_opposite_chi(remeshed: xr.DataArray) -> xr.DataArray:
+    values = np.asarray(remeshed.values, dtype=np.float64)
+    symmetrized = 0.5 * (values + np.roll(values, values.shape[1] // 2, axis=1))
+    return xr.DataArray(
+        symmetrized,
+        dims=remeshed.dims,
+        coords={name: coord for name, coord in remeshed.coords.items()},
+        attrs=dict(remeshed.attrs),
+    )
+
+
 def _build_two_material_asymmetric_lobed_morphology(
     energies: list[float],
     eangle_rotation: list[float],
@@ -4484,15 +4657,19 @@ def test_pyhyperscattering_integrator_to_xarray_smoke(nrss_path: ComputationPath
 def test_cupy_internal_integrated_result_matches_nrssintegrator_multi_energy_smoke(
     nrss_path: ComputationPath,
 ):
-    """Validate 3-energy internal GPU integration against the maintained raw->NRSSIntegrator workflow."""
+    """Validate maintained reduced-result layouts against the raw->NRSSIntegrator workflow."""
     if not _has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for internal integration parity smoke test.")
 
     from PyHyperScattering.NRSSIntegrator import NRSSIntegrator
 
     energies = [285.0, 286.0, 287.0]
+    total_chi_wedge_deg = 90.0
     reference_morph = None
     integrated_morph = None
+    i_only_morph = None
+    i_para_i_perp_morph = None
+    i_a_morph = None
     try:
         base_backend_options = dict(nrss_path.backend_options)
         reference_morph = _build_two_material_sphere_morphology(
@@ -4510,6 +4687,13 @@ def test_cupy_internal_integrated_result_matches_nrssintegrator_multi_energy_smo
             force_np_backend=True,
             use_chunked_processing=False,
         ).integrateImageStack(raw)
+        reference_i, reference_i_para, reference_i_perp, reference_a = _reference_observable_reductions(
+            reference,
+            total_chi_wedge_deg=total_chi_wedge_deg,
+        )
+        reference_a_pyhyper = _symmetrize_opposite_chi(reference).rsoxs.AR(
+            chi_width=total_chi_wedge_deg / 2.0
+        )
 
         integrated_morph = _build_two_material_sphere_morphology(
             energies=energies,
@@ -4530,6 +4714,108 @@ def test_cupy_internal_integrated_result_matches_nrssintegrator_multi_energy_smo
         assert candidate.attrs["source_integrator"] == "cupy-rsoxs"
         assert candidate.attrs["integration_compatibility"] == "NRSSIntegrator"
         _assert_integrated_remesh_parity(candidate, reference)
+
+        i_only_morph = _build_two_material_sphere_morphology(
+            energies=energies,
+            shape=(32, 32, 32),
+            backend=nrss_path.backend,
+            backend_options={
+                **base_backend_options,
+                "result_chunk_size": 2,
+                "result_layout": "i_only",
+                "total_chi_wedge_deg": total_chi_wedge_deg,
+            },
+            resident_mode=nrss_path.resident_mode,
+            input_policy="strict",
+            ownership_policy=nrss_path.ownership_policy,
+            field_namespace=nrss_path.field_namespace,
+        )
+        i_only_candidate = i_only_morph.run(stdout=False, stderr=False, return_xarray=True)
+
+        assert isinstance(i_only_candidate, xr.DataArray)
+        assert i_only_candidate.dims == ("energy", "q")
+        np.testing.assert_allclose(
+            np.asarray(i_only_candidate.values),
+            np.asarray(reference_i.values),
+            rtol=1e-6,
+            atol=1e-9,
+            equal_nan=True,
+        )
+
+        i_para_i_perp_morph = _build_two_material_sphere_morphology(
+            energies=energies,
+            shape=(32, 32, 32),
+            backend=nrss_path.backend,
+            backend_options={
+                **base_backend_options,
+                "result_chunk_size": 2,
+                "result_layout": "i_para_i_perp",
+                "total_chi_wedge_deg": total_chi_wedge_deg,
+            },
+            resident_mode=nrss_path.resident_mode,
+            input_policy="strict",
+            ownership_policy=nrss_path.ownership_policy,
+            field_namespace=nrss_path.field_namespace,
+        )
+        i_para_i_perp_candidate = i_para_i_perp_morph.run(stdout=False, stderr=False, return_xarray=True)
+
+        assert isinstance(i_para_i_perp_candidate, xr.Dataset)
+        assert set(i_para_i_perp_candidate.data_vars) == {"I_para", "I_perp"}
+        np.testing.assert_allclose(
+            np.asarray(i_para_i_perp_candidate["I_para"].values),
+            np.asarray(reference_i_para.values),
+            rtol=1e-6,
+            atol=1e-9,
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            np.asarray(i_para_i_perp_candidate["I_perp"].values),
+            np.asarray(reference_i_perp.values),
+            rtol=1e-6,
+            atol=1e-9,
+            equal_nan=True,
+        )
+
+        i_a_morph = _build_two_material_sphere_morphology(
+            energies=energies,
+            shape=(32, 32, 32),
+            backend=nrss_path.backend,
+            backend_options={
+                **base_backend_options,
+                "result_chunk_size": 2,
+                "result_layout": "i_a",
+                "total_chi_wedge_deg": total_chi_wedge_deg,
+            },
+            resident_mode=nrss_path.resident_mode,
+            input_policy="strict",
+            ownership_policy=nrss_path.ownership_policy,
+            field_namespace=nrss_path.field_namespace,
+        )
+        i_a_candidate = i_a_morph.run(stdout=False, stderr=False, return_xarray=True)
+
+        assert isinstance(i_a_candidate, xr.Dataset)
+        assert set(i_a_candidate.data_vars) == {"I", "A"}
+        np.testing.assert_allclose(
+            np.asarray(i_a_candidate["I"].values),
+            np.asarray(reference_i.values),
+            rtol=1e-6,
+            atol=1e-9,
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            np.asarray(i_a_candidate["A"].values),
+            np.asarray(reference_a.values),
+            rtol=1e-6,
+            atol=1e-9,
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            np.asarray(i_a_candidate["A"].values),
+            np.asarray(reference_a_pyhyper.values),
+            rtol=1e-6,
+            atol=1e-9,
+            equal_nan=True,
+        )
     finally:
         if reference_morph is not None:
             try:
@@ -4539,6 +4825,21 @@ def test_cupy_internal_integrated_result_matches_nrssintegrator_multi_energy_smo
         if integrated_morph is not None:
             try:
                 integrated_morph.release_runtime()
+            except Exception:
+                pass
+        if i_only_morph is not None:
+            try:
+                i_only_morph.release_runtime()
+            except Exception:
+                pass
+        if i_para_i_perp_morph is not None:
+            try:
+                i_para_i_perp_morph.release_runtime()
+            except Exception:
+                pass
+        if i_a_morph is not None:
+            try:
+                i_a_morph.release_runtime()
             except Exception:
                 pass
         _release_cupy_memory()

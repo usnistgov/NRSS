@@ -371,16 +371,33 @@ class Morphology:
               completed chunks asynchronously to pinned host memory. The value
               is clamped to the number of requested energies. This option has
               no effect for ``result_residency="device"``.
-            - ``result_layout``: ``"detector"`` (default) or ``"integrated"``.
+            - ``result_layout``: ``"detector"`` (default), ``"integrated"``,
+              ``"i_only"``, ``"i_para_i_perp"``, or ``"i_a"``.
               Controls whether ``morph.run()`` retains raw detector panels
-              ``(energy, qy, qx)`` or opt-in integrated output
-              ``(energy, chi, q)``. ``"detector"`` preserves the historical raw
-              scattering contract. ``"integrated"`` performs the polar remesh
-              inside ``cupy-rsoxs`` and returns output compatible with the
-              maintained ``NRSSIntegrator`` semantics. In ``"integrated"``
-              mode, the reduction stays on GPU until the final requested result
-              buffer is streamed or retained, and ``result_chunk_size`` applies
-              to integrated chunks rather than raw detector images.
+              ``(energy, qy, qx)``, integrated output ``(energy, chi, q)``, a
+              chi-averaged intensity ``(energy, q)``, or multi-channel reduced
+              observables packaged as an xarray ``Dataset``. ``"detector"``
+              preserves the historical raw scattering contract.
+              ``"integrated"`` performs the polar remesh inside
+              ``cupy-rsoxs`` and returns output compatible with the maintained
+              ``NRSSIntegrator`` semantics as an ``xarray.DataArray`` with
+              dims ``(energy, chi, q)``. ``"i_only"`` returns the weighted
+              mean across all chi as an ``xarray.DataArray`` with dims
+              ``(energy, q)``. ``"i_para_i_perp"`` returns an
+              ``xarray.Dataset`` with ``I_para`` and ``I_perp`` data variables,
+              each indexed by ``(energy, q)``. ``"i_a"`` returns an
+              ``xarray.Dataset`` with chi-averaged ``I`` and anisotropy ``A``
+              data variables, each indexed by ``(energy, q)``.
+              For all non-``"detector"`` layouts, the reduction stays on GPU
+              until the final requested result buffer is streamed or retained,
+              and ``result_chunk_size`` applies to reduced chunks rather than
+              raw detector images.
+            - ``total_chi_wedge_deg``: float in ``(0, 180]``, default ``90``.
+              Total angular width for the parallel/perpendicular sector
+              reductions used by ``result_layout="i_para_i_perp"`` and
+              ``result_layout="i_a"``. The wedge handling uses weighted chi-bin
+              edge overlap on the GPU so sector boundaries remain balanced even
+              when the requested width lands on bin edges.
         resident_mode : {"host", "device"} or None, default None
             Location of the authoritative morphology arrays. ``"cupy-rsoxs"``
             defaults to ``"host"`` and also supports ``"device"``.
@@ -410,7 +427,8 @@ class Morphology:
         ``energy_progress_bar=True``,
         ``result_residency="host"``,
         ``result_chunk_size=1``, and
-        ``result_layout="detector"``.
+        ``result_layout="detector"``, and
+        ``total_chi_wedge_deg=90.0``.
         """
 
         self._numMaterial = numMaterial

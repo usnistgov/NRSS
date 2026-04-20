@@ -82,6 +82,7 @@ _BACKEND_ARRAY_CONTRACTS = {
         "default_result_residency": "host",
         "default_result_chunk_size": 1,
         "default_result_layout": "detector",
+        "default_total_chi_wedge_deg": 90.0,
         "supported_rawkernel_backends": (
             "auto",
             "nvcc",
@@ -94,6 +95,9 @@ _BACKEND_ARRAY_CONTRACTS = {
         "supported_result_layouts": (
             "detector",
             "integrated",
+            "i_only",
+            "i_para_i_perp",
+            "i_a",
         ),
         "supported_backend_options": (
             "execution_path",
@@ -107,6 +111,7 @@ _BACKEND_ARRAY_CONTRACTS = {
             "result_residency",
             "result_chunk_size",
             "result_layout",
+            "total_chi_wedge_deg",
         ),
         "runtime_compute_dtype": "float32",
         "runtime_complex_dtype": "complex64",
@@ -281,8 +286,33 @@ def normalize_result_layout_name(value: Any) -> str:
         "integrated": "integrated",
         "reduced": "integrated",
         "polar": "integrated",
+        "i-only": "i_only",
+        "i_only": "i_only",
+        "i": "i_only",
+        "i-para-i-perp": "i_para_i_perp",
+        "i_para_i_perp": "i_para_i_perp",
+        "ipara_iperp": "i_para_i_perp",
+        "i-and-a": "i_a",
+        "i_a": "i_a",
+        "ia": "i_a",
     }
     return aliases.get(cleaned, cleaned)
+
+
+def normalize_total_chi_wedge_deg(value: Any) -> float:
+    if value is None:
+        return 90.0
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise BackendOptionError(
+            "Backend 'cupy-rsoxs' total_chi_wedge_deg must be a finite float in (0, 180]."
+        ) from exc
+    if not np.isfinite(normalized) or normalized <= 0.0 or normalized > 180.0:
+        raise BackendOptionError(
+            "Backend 'cupy-rsoxs' total_chi_wedge_deg must be a finite float in (0, 180]."
+        )
+    return normalized
 
 
 def normalize_resident_mode(
@@ -482,6 +512,11 @@ def normalize_backend_options(
                 f"{', '.join(spec.get('supported_result_layouts', ('detector',)))}."
             )
         normalized_options["result_layout"] = result_layout
+
+    if "total_chi_wedge_deg" in spec["supported_backend_options"]:
+        normalized_options["total_chi_wedge_deg"] = normalize_total_chi_wedge_deg(
+            options.get("total_chi_wedge_deg", spec.get("default_total_chi_wedge_deg", 90.0))
+        )
 
     return normalized_options
 

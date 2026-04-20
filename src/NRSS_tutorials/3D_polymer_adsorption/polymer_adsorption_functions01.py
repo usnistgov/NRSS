@@ -30,7 +30,7 @@ class EulerStyle(Enum):
     """
     creates extraordindary index orientation that is tangential to the core particle center and longitudinal such that all orientations are not parallel to the XY plane except at the north and south poles
     """
-def adsorbed_polymer_morphology(args):
+def adsorbed_polymer_morphology(args, *, backend=None, backend_options=None):
     """
     Generates a morphology object for an adsorbed polymer on a sphere.
 
@@ -46,6 +46,11 @@ def adsorbed_polymer_morphology(args):
             - "energies" (list): A list of energies for the model.
             - "oc_polymer" (object): The opt_constants object for the polymer.
             - "oc_particle" (object): The opt_constants object for the particle.
+        backend (str or None, optional): Preferred NRSS backend to construct on
+            the morphology object. Defaults to ``None`` so NRSS resolves the
+            maintained default backend.
+        backend_options (dict or None, optional): Backend options forwarded to
+            the ``Morphology`` constructor. Defaults to ``None``.
 
     Returns:
         morph (Morphology): A Morphology object representing the adsorbed polymer on a sphere.
@@ -131,6 +136,8 @@ def adsorbed_polymer_morphology(args):
         # complex tensors for this 512x1024x1024 morphology and exhausts GPU
         # memory before reduction.
         # backend="cyrsoxs",
+        backend=backend,
+        backend_options=backend_options,
     )
     # the return statement is what the function delivers as an output
     return morph

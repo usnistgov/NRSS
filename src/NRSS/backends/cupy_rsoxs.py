@@ -218,8 +218,9 @@ def require_cupy_modules():
 
 
 @dataclass(frozen=True)
-class _IntegratedResultPlan:
-    result_shape: tuple[int, int, int]
+class _ReducedResultPlan:
+    result_layout: str
+    result_shape: tuple[int, ...]
     center: tuple[float, float]
     radius: float
     chi: np.ndarray
@@ -230,6 +231,10 @@ class _IntegratedResultPlan:
     needs_common_q_interpolation: bool
     device_q_axes: Any | None = None
     device_q_common: Any | None = None
+    channel_names: tuple[str, ...] = ()
+    total_chi_wedge_deg: float | None = None
+    device_all_chi_weights: Any | None = None
+    device_sector_weights: Any | None = None
 
 
 def _materialize_backend_array(data):
@@ -332,6 +337,76 @@ class CupyIntegratedResult:
         self.data = None
 
 
+@dataclass
+class CupyIntegratedIntensityResult:
+    data: Any
+    energies: tuple[float, ...]
+    q: np.ndarray
+    attrs: dict[str, Any]
+    q_perp: np.ndarray | None = None
+    q_abs: np.ndarray | None = None
+
+    def to_backend_array(self):
+        return self.data
+
+    def to_xarray(self) -> xr.DataArray:
+        reduced_data = _materialize_backend_array(self.data)
+        coords: dict[str, Any] = {
+            "energy": list(self.energies),
+            "q": self.q,
+        }
+        if self.q_perp is not None:
+            coords["q_perp"] = ("q", self.q_perp)
+        if self.q_abs is not None:
+            coords["q_abs"] = (("energy", "q"), self.q_abs)
+        return xr.DataArray(
+            reduced_data,
+            dims=["energy", "q"],
+            coords=coords,
+            attrs=dict(self.attrs),
+        )
+
+    def release(self):
+        self.data = None
+
+
+@dataclass
+class CupyObservableDatasetResult:
+    data: Any
+    energies: tuple[float, ...]
+    channel_names: tuple[str, ...]
+    q: np.ndarray
+    attrs: dict[str, Any]
+    q_perp: np.ndarray | None = None
+    q_abs: np.ndarray | None = None
+
+    def to_backend_array(self):
+        return self.data
+
+    def to_xarray(self) -> xr.Dataset:
+        reduced_data = _materialize_backend_array(self.data)
+        coords: dict[str, Any] = {
+            "energy": list(self.energies),
+            "q": self.q,
+        }
+        if self.q_perp is not None:
+            coords["q_perp"] = ("q", self.q_perp)
+        if self.q_abs is not None:
+            coords["q_abs"] = (("energy", "q"), self.q_abs)
+        data_vars = {
+            channel_name: (("energy", "q"), reduced_data[:, channel_index, :])
+            for channel_index, channel_name in enumerate(self.channel_names)
+        }
+        return xr.Dataset(
+            data_vars=data_vars,
+            coords=coords,
+            attrs=dict(self.attrs),
+        )
+
+    def release(self):
+        self.data = None
+
+
 class CupyRsoxsBackendRuntime(BackendRuntime):
     name = "cupy-rsoxs"
 
@@ -379,7 +454,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         pending_host_projection = None
         chunk_buffers = None
         integrated_chunk_buffers = None
-        integration_plan = None
+        reduced_chunk_buffers = None
+        reduction_plan = None
         active_chunk_buffer_index = 0
         active_chunk_start = 0
         active_chunk_fill = 0
@@ -423,16 +499,17 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                         window=window,
                         recorder=recorder,
                     )
-                    if integration_plan is None and result_layout == "integrated":
-                        integration_plan = self._integrated_result_plan(
+                    if reduction_plan is None and self._uses_reduced_result_layout(result_layout):
+                        reduction_plan = self._reduced_result_plan(
                             morphology=morphology,
                             projection_shape=projection.shape,
                             energies=energies,
                             cp=cp,
+                            result_layout=result_layout,
                         )
                     if result_data is None:
-                        if result_layout == "integrated":
-                            result_shape = integration_plan.result_shape
+                        if self._uses_reduced_result_layout(result_layout):
+                            result_shape = reduction_plan.result_shape
                             result_dtype = np.float64
                         else:
                             result_shape = (len(energies), *projection.shape)
@@ -440,26 +517,37 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                         if result_residency == "host":
                             result_data = self._allocate_host_result_buffer(result_shape, result_dtype)
                             if chunk_size > 1:
-                                if result_layout == "integrated":
+                                if self._uses_reduced_result_layout(result_layout):
                                     chunk_buffers = (
                                         cp.empty((chunk_size, *projection.shape), dtype=projection.dtype),
                                         cp.empty((chunk_size, *projection.shape), dtype=projection.dtype),
                                     )
                                     integrated_chunk_buffers = (
-                                        cp.empty((chunk_size, *result_shape[1:]), dtype=cp.float64),
-                                        cp.empty((chunk_size, *result_shape[1:]), dtype=cp.float64),
+                                        cp.empty(
+                                            (chunk_size, reduction_plan.chi.size, reduction_plan.q.size),
+                                            dtype=cp.float64,
+                                        ),
+                                        cp.empty(
+                                            (chunk_size, reduction_plan.chi.size, reduction_plan.q.size),
+                                            dtype=cp.float64,
+                                        ),
                                     )
+                                    if result_layout != "integrated":
+                                        reduced_chunk_buffers = (
+                                            cp.empty((chunk_size, *result_shape[1:]), dtype=cp.float64),
+                                            cp.empty((chunk_size, *result_shape[1:]), dtype=cp.float64),
+                                        )
                                 else:
                                     chunk_buffers = (
                                         cp.empty((chunk_size, *projection.shape), dtype=projection.dtype),
                                         cp.empty((chunk_size, *projection.shape), dtype=projection.dtype),
                                     )
                         else:
-                            if result_layout == "integrated":
+                            if self._uses_reduced_result_layout(result_layout):
                                 result_data = cp.empty(result_shape, dtype=cp.float64)
                             else:
                                 result_data = cp.empty(result_shape, dtype=projection.dtype)
-                    if result_layout == "integrated":
+                    if self._uses_reduced_result_layout(result_layout):
                         if result_residency == "host":
                             if int(chunk_size) == 1:
                                 if pending_copy_done is not None:
@@ -471,18 +559,27 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                                 integrated_projection = self._integrate_projection_chunk(
                                     projection[None, ...],
                                     energy_start=energy_index,
-                                    integration_plan=integration_plan,
+                                    reduction_plan=reduction_plan,
                                     cp=cp,
                                 )[0]
                                 del projection
+                                if result_layout != "integrated":
+                                    reduced_projection = self._reduce_integrated_chunk_for_layout(
+                                        integrated_projection[None, ...],
+                                        reduction_plan=reduction_plan,
+                                        cp=cp,
+                                    )[0]
+                                    del integrated_projection
+                                else:
+                                    reduced_projection = integrated_projection
                                 compute_done = cp.cuda.Event()
                                 compute_done.record()
                                 copy_stream.wait_event(compute_done)
                                 with copy_stream:
-                                    integrated_projection.get(out=result_data[energy_index], blocking=False)
+                                    reduced_projection.get(out=result_data[energy_index], blocking=False)
                                     pending_copy_done = cp.cuda.Event()
                                     pending_copy_done.record()
-                                pending_host_projection = integrated_projection
+                                pending_host_projection = reduced_projection
                             else:
                                 chunk_buffer = chunk_buffers[active_chunk_buffer_index]
                                 integrated_chunk_buffer = integrated_chunk_buffers[active_chunk_buffer_index]
@@ -497,15 +594,25 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                                     self._integrate_projection_chunk(
                                         chunk_buffer[:active_chunk_fill],
                                         energy_start=active_chunk_start,
-                                        integration_plan=integration_plan,
+                                        reduction_plan=reduction_plan,
                                         cp=cp,
                                         out=integrated_chunk_buffer[:active_chunk_fill],
                                     )
+                                    chunk_to_copy = integrated_chunk_buffer[:active_chunk_fill]
+                                    if result_layout != "integrated":
+                                        reduced_chunk_buffer = reduced_chunk_buffers[active_chunk_buffer_index]
+                                        self._reduce_integrated_chunk_for_layout(
+                                            integrated_chunk_buffer[:active_chunk_fill],
+                                            reduction_plan=reduction_plan,
+                                            cp=cp,
+                                            out=reduced_chunk_buffer[:active_chunk_fill],
+                                        )
+                                        chunk_to_copy = reduced_chunk_buffer[:active_chunk_fill]
                                     compute_done = cp.cuda.Event()
                                     compute_done.record()
                                     copy_stream.wait_event(compute_done)
                                     with copy_stream:
-                                        integrated_chunk_buffer[:active_chunk_fill].get(
+                                        chunk_to_copy.get(
                                             out=result_data[active_chunk_start:chunk_stop],
                                             blocking=False,
                                         )
@@ -515,13 +622,22 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                                     active_chunk_fill = 0
                                     active_chunk_buffer_index = 1 - active_chunk_buffer_index
                         else:
-                            result_data[energy_index] = self._integrate_projection_chunk(
+                            integrated_projection = self._integrate_projection_chunk(
                                 projection[None, ...],
                                 energy_start=energy_index,
-                                integration_plan=integration_plan,
+                                reduction_plan=reduction_plan,
                                 cp=cp,
                             )[0]
+                            if result_layout == "integrated":
+                                result_data[energy_index] = integrated_projection
+                            else:
+                                result_data[energy_index] = self._reduce_integrated_chunk_for_layout(
+                                    integrated_projection[None, ...],
+                                    reduction_plan=reduction_plan,
+                                    cp=cp,
+                                )[0]
                             del projection
+                            del integrated_projection
                     elif result_residency == "host":
                         if int(chunk_size) == 1:
                             if pending_copy_done is not None:
@@ -576,6 +692,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             if integrated_chunk_buffers is not None:
                 for integrated_chunk_buffer in integrated_chunk_buffers:
                     del integrated_chunk_buffer
+            if reduced_chunk_buffers is not None:
+                for reduced_chunk_buffer in reduced_chunk_buffers:
+                    del reduced_chunk_buffer
             if copy_stream is not None:
                 copy_stream.synchronize()
             if window is not None:
@@ -587,7 +706,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 morphology=morphology,
                 result_data=result_data,
                 energies=energies,
-                integration_plan=integration_plan,
+                reduction_plan=reduction_plan,
             ),
         )
         segment_seconds, segment_measurements, measurement = recorder.finalize()
@@ -610,6 +729,13 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
     def _result_layout(self, morphology) -> str:
         return str(morphology.backend_options.get("result_layout", "detector"))
+
+    @staticmethod
+    def _uses_reduced_result_layout(result_layout: str) -> bool:
+        return result_layout != "detector"
+
+    def _total_chi_wedge_deg(self, morphology) -> float:
+        return float(morphology.backend_options.get("total_chi_wedge_deg", 90.0))
 
     def _result_chunk_size(
         self,
@@ -643,14 +769,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             flush=True,
         )
 
-    def _integrated_result_plan(
+    def _reduced_result_plan(
         self,
         *,
         morphology,
         projection_shape: tuple[int, int],
         energies: tuple[float, ...],
         cp,
-    ) -> _IntegratedResultPlan:
+        result_layout: str,
+    ) -> _ReducedResultPlan:
         qy, qx = self._detector_q_axes(morphology, projection_shape)
         center = (
             self._axis_center_from_q_axis(qy),
@@ -675,6 +802,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             "phys_size_nm": float(morphology.PhysSize),
             "z_dim": z_dim,
             "shape_zyx": tuple(int(v) for v in morphology.NumZYX),
+            "result_layout": result_layout,
         }
         if energies:
             attrs["energy_ev"] = float(energies[0])
@@ -715,8 +843,43 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                         "stored in the q_abs coordinate."
                     )
 
-        return _IntegratedResultPlan(
-            result_shape=(len(energies), chi.size, q.size),
+        total_chi_wedge_deg = None
+        device_all_chi_weights = None
+        device_sector_weights = None
+        channel_names: tuple[str, ...] = ()
+        if result_layout == "integrated":
+            result_shape = (len(energies), chi.size, q.size)
+        elif result_layout == "i_only":
+            result_shape = (len(energies), q.size)
+            attrs["chi_reduction"] = "full_circle_weighted_mean"
+            device_all_chi_weights = cp.asarray(np.ones(chi.size, dtype=np.float64))
+        elif result_layout == "i_para_i_perp":
+            total_chi_wedge_deg = self._total_chi_wedge_deg(morphology)
+            channel_names = ("I_para", "I_perp")
+            attrs["chi_reduction"] = "sector_edge_overlap_weighted_mean"
+            attrs["total_chi_wedge_deg"] = total_chi_wedge_deg
+            result_shape = (len(energies), len(channel_names), q.size)
+            device_sector_weights = cp.asarray(
+                self._sector_mean_weights(chi, total_chi_wedge_deg),
+                dtype=cp.float64,
+            )
+        elif result_layout == "i_a":
+            total_chi_wedge_deg = self._total_chi_wedge_deg(morphology)
+            channel_names = ("I", "A")
+            attrs["chi_reduction"] = "mixed_full_circle_and_sector_edge_overlap"
+            attrs["total_chi_wedge_deg"] = total_chi_wedge_deg
+            result_shape = (len(energies), len(channel_names), q.size)
+            device_all_chi_weights = cp.asarray(np.ones(chi.size, dtype=np.float64))
+            device_sector_weights = cp.asarray(
+                self._sector_mean_weights(chi, total_chi_wedge_deg),
+                dtype=cp.float64,
+            )
+        else:
+            raise ValueError(f"Unsupported reduced result layout {result_layout!r}.")
+
+        return _ReducedResultPlan(
+            result_layout=result_layout,
+            result_shape=result_shape,
             center=center,
             radius=radius,
             chi=chi,
@@ -727,6 +890,10 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             needs_common_q_interpolation=needs_common_q_interpolation,
             device_q_axes=device_q_axes,
             device_q_common=device_q_common,
+            channel_names=channel_names,
+            total_chi_wedge_deg=total_chi_wedge_deg,
+            device_all_chi_weights=device_all_chi_weights,
+            device_sector_weights=device_sector_weights,
         )
 
     @staticmethod
@@ -785,28 +952,153 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         projections,
         *,
         energy_start: int,
-        integration_plan: _IntegratedResultPlan,
+        reduction_plan: _ReducedResultPlan,
         cp,
         out=None,
     ):
         reduced = self._warp_polar_batched_xp(
             projections,
-            center=integration_plan.center,
-            radius=integration_plan.radius,
+            center=reduction_plan.center,
+            radius=reduction_plan.radius,
             xp=cp,
         )
-        if integration_plan.needs_common_q_interpolation:
-            q_axes = integration_plan.device_q_axes[energy_start : energy_start + reduced.shape[0]]
+        if reduction_plan.needs_common_q_interpolation:
+            q_axes = reduction_plan.device_q_axes[energy_start : energy_start + reduced.shape[0]]
             reduced = self._interp_chunk_to_common_q_cupy(
                 reduced,
                 q_axes=q_axes,
-                q_common=integration_plan.device_q_common,
+                q_common=reduction_plan.device_q_common,
                 cp=cp,
             )
         if out is not None:
             out[...] = reduced
             return out
         return reduced
+
+    def _reduce_integrated_chunk_for_layout(
+        self,
+        reduced,
+        *,
+        reduction_plan: _ReducedResultPlan,
+        cp,
+        out=None,
+    ):
+        result_layout = reduction_plan.result_layout
+        if result_layout == "integrated":
+            if out is not None:
+                out[...] = reduced
+                return out
+            return reduced
+
+        if result_layout == "i_only":
+            final = self._weighted_nanmean_over_chi(
+                reduced,
+                weights=reduction_plan.device_all_chi_weights,
+                cp=cp,
+            )
+        elif result_layout == "i_para_i_perp":
+            final = self._weighted_nanmean_over_chi(
+                reduced,
+                weights=reduction_plan.device_sector_weights,
+                cp=cp,
+            )
+        elif result_layout == "i_a":
+            i_mean = self._weighted_nanmean_over_chi(
+                reduced,
+                weights=reduction_plan.device_all_chi_weights,
+                cp=cp,
+            )
+            sectors = self._weighted_nanmean_over_chi(
+                reduced,
+                weights=reduction_plan.device_sector_weights,
+                cp=cp,
+            )
+            i_para = sectors[:, 0, :]
+            i_perp = sectors[:, 1, :]
+            denom = i_para + i_perp
+            anisotropy = cp.full_like(i_para, cp.nan)
+            valid = cp.isfinite(i_para) & cp.isfinite(i_perp) & cp.isfinite(denom) & (denom != 0)
+            anisotropy[valid] = (i_para[valid] - i_perp[valid]) / denom[valid]
+            final = cp.stack((i_mean, anisotropy), axis=1)
+        else:
+            raise ValueError(f"Unsupported reduced result layout {result_layout!r}.")
+
+        if out is not None:
+            out[...] = final
+            return out
+        return final
+
+    @staticmethod
+    def _weighted_nanmean_over_chi(values, *, weights, cp):
+        values = cp.asarray(values)
+        weights = cp.asarray(weights, dtype=values.dtype)
+        finite = cp.isfinite(values)
+        safe_values = cp.where(finite, values, 0)
+        finite_weights = finite.astype(values.dtype)
+
+        if weights.ndim == 1:
+            numerator = cp.tensordot(safe_values, weights, axes=([1], [0]))
+            denominator = cp.tensordot(finite_weights, weights, axes=([1], [0]))
+        elif weights.ndim == 2:
+            numerator = cp.moveaxis(cp.tensordot(safe_values, weights, axes=([1], [1])), -1, 1)
+            denominator = cp.moveaxis(cp.tensordot(finite_weights, weights, axes=([1], [1])), -1, 1)
+        else:
+            raise ValueError(f"Weighted chi mean expects 1D or 2D weights, received {weights.ndim}D.")
+
+        averaged = cp.full_like(numerator, cp.nan)
+        valid = denominator > 0
+        averaged[valid] = numerator[valid] / denominator[valid]
+        return averaged
+
+    @classmethod
+    def _sector_mean_weights(cls, chi: np.ndarray, total_chi_wedge_deg: float) -> np.ndarray:
+        half_width = float(total_chi_wedge_deg) / 2.0
+        parallel_intervals = (
+            (-half_width, half_width),
+            (180.0 - half_width, 180.0 + half_width),
+        )
+        perpendicular_intervals = (
+            (90.0 - half_width, 90.0 + half_width),
+            (270.0 - half_width, 270.0 + half_width),
+        )
+        return np.stack(
+            (
+                cls._circular_interval_weights(chi, parallel_intervals),
+                cls._circular_interval_weights(chi, perpendicular_intervals),
+            ),
+            axis=0,
+        )
+
+    @staticmethod
+    def _circular_interval_weights(
+        chi: np.ndarray,
+        intervals: tuple[tuple[float, float], ...],
+    ) -> np.ndarray:
+        centers = np.asarray(chi, dtype=np.float64)
+        if centers.ndim != 1 or centers.size < 1:
+            raise ValueError("Chi coordinates must be a non-empty 1D array.")
+        if centers.size == 1:
+            step = 360.0
+        else:
+            step = float(np.diff(centers).mean())
+        base_start = float(centers[0] - step / 2.0)
+        base_end = float(centers[-1] + step / 2.0)
+        edges = np.linspace(base_start, base_end, centers.size + 1, dtype=np.float64)
+        weights = np.zeros(centers.size, dtype=np.float64)
+
+        for start, stop in intervals:
+            start = float(start)
+            stop = float(stop)
+            if stop < start:
+                start, stop = stop, start
+            for shift in (-360.0, 0.0, 360.0):
+                shifted_start = start + shift
+                shifted_stop = stop + shift
+                overlap_start = np.maximum(edges[:-1], shifted_start)
+                overlap_stop = np.minimum(edges[1:], shifted_stop)
+                weights += np.clip(overlap_stop - overlap_start, 0.0, None)
+
+        return weights / step
 
     @staticmethod
     def _interp_chunk_to_common_q_cupy(values, *, q_axes, q_common, cp):
@@ -1012,23 +1304,42 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             if progress is not None:
                 progress.close()
 
-    def _assemble_and_retain_result(self, morphology, result_data, energies, integration_plan=None):
-        if integration_plan is None:
+    def _assemble_and_retain_result(self, morphology, result_data, energies, reduction_plan=None):
+        if reduction_plan is None:
             result = CupyScatteringResult(
                 data=result_data,
                 energies=energies,
                 phys_size=float(morphology.PhysSize),
                 num_zyx=tuple(int(v) for v in morphology.NumZYX),
             )
-        else:
+        elif reduction_plan.result_layout == "integrated":
             result = CupyIntegratedResult(
                 data=result_data,
                 energies=energies,
-                q=integration_plan.q,
-                chi=integration_plan.chi,
-                attrs=integration_plan.attrs,
-                q_perp=integration_plan.q_perp,
-                q_abs=integration_plan.q_abs,
+                q=reduction_plan.q,
+                chi=reduction_plan.chi,
+                attrs=reduction_plan.attrs,
+                q_perp=reduction_plan.q_perp,
+                q_abs=reduction_plan.q_abs,
+            )
+        elif reduction_plan.result_layout == "i_only":
+            result = CupyIntegratedIntensityResult(
+                data=result_data,
+                energies=energies,
+                q=reduction_plan.q,
+                attrs=reduction_plan.attrs,
+                q_perp=reduction_plan.q_perp,
+                q_abs=reduction_plan.q_abs,
+            )
+        else:
+            result = CupyObservableDatasetResult(
+                data=result_data,
+                energies=energies,
+                channel_names=reduction_plan.channel_names,
+                q=reduction_plan.q,
+                attrs=reduction_plan.attrs,
+                q_perp=reduction_plan.q_perp,
+                q_abs=reduction_plan.q_abs,
             )
         morphology._backend_result = result
         morphology.scatteringPattern = result
