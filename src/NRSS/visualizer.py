@@ -72,12 +72,125 @@ def _histogram_values(
     return np.asarray(flat), False, total_size
 
 
+def _resolve_slice_plane(num_zyx, z_slice, y_slice, x_slice):
+    requested = {
+        "xy": z_slice if (y_slice is None and x_slice is None) else None,
+        "xz": y_slice,
+        "yz": x_slice,
+    }
+    selected = [(plane, index) for plane, index in requested.items() if index is not None]
+
+    if len(selected) > 1:
+        raise ValueError("Specify at most one of z_slice, y_slice, or x_slice.")
+
+    if not selected:
+        plane = "xy"
+        index = 0
+    else:
+        plane, index = selected[0]
+
+    axis_name = {"xy": "z_slice", "xz": "y_slice", "yz": "x_slice"}[plane]
+    axis_index = {"xy": 0, "xz": 1, "yz": 2}[plane]
+    axis_size = int(num_zyx[axis_index])
+
+    if index < 0:
+        warnings.warn(
+            f"{axis_name} of {index} is less than 0. Using {axis_name} = 0 instead."
+        )
+        index = 0
+    if index > axis_size - 1:
+        warnings.warn(
+            f"{axis_name} of {index} is greater than the maximum index of {axis_size - 1}."
+            f" Using {axis_name} = {axis_size - 1} instead."
+        )
+        index = axis_size - 1
+
+    return plane, int(index)
+
+
+def _plane_display_config(num_zyx, plane, subsample, translate_x, translate_y):
+    if plane == "xy":
+        vertical_axis = 1
+        horizontal_axis = 2
+        vertical_label = "Y index"
+        horizontal_label = "X index"
+    elif plane == "xz":
+        vertical_axis = 0
+        horizontal_axis = 2
+        vertical_label = "Z index"
+        horizontal_label = "X index"
+    else:
+        vertical_axis = 0
+        horizontal_axis = 1
+        vertical_label = "Z index"
+        horizontal_label = "Y index"
+
+    if subsample is None:
+        vertical_window = int(num_zyx[vertical_axis])
+        horizontal_window = int(num_zyx[horizontal_axis])
+    else:
+        vertical_window = int(subsample)
+        horizontal_window = int(subsample)
+
+    vertical_start, vertical_end = _compute_axis_window(
+        num_zyx[vertical_axis],
+        vertical_window,
+        translate_y,
+    )
+    horizontal_start, horizontal_end = _compute_axis_window(
+        num_zyx[horizontal_axis],
+        horizontal_window,
+        translate_x,
+    )
+
+    return {
+        "plane": plane,
+        "vertical_axis": vertical_axis,
+        "horizontal_axis": horizontal_axis,
+        "vertical_label": vertical_label,
+        "horizontal_label": horizontal_label,
+        "vertical_start": vertical_start,
+        "vertical_end": vertical_end,
+        "horizontal_start": horizontal_start,
+        "horizontal_end": horizontal_end,
+    }
+
+
+def _extract_plane_slice(array, plane, slice_index, display_config):
+    vertical_start = display_config["vertical_start"]
+    vertical_end = display_config["vertical_end"]
+    horizontal_start = display_config["horizontal_start"]
+    horizontal_end = display_config["horizontal_end"]
+
+    if plane == "xy":
+        return array[slice_index, vertical_start:vertical_end, horizontal_start:horizontal_end]
+    if plane == "xz":
+        return array[vertical_start:vertical_end, slice_index, horizontal_start:horizontal_end]
+    return array[vertical_start:vertical_end, horizontal_start:horizontal_end, slice_index]
+
+
+def _crop_slice_to_square(slice_array):
+    height, width = slice_array.shape[:2]
+    if height == width:
+        return slice_array
+    if width > height:
+        start_x = (width - height) // 2
+        end_x = start_x + height
+        return slice_array[:, start_x:end_x]
+    start_y = (height - width) // 2
+    end_y = start_y + width
+    return slice_array[start_y:end_y, :]
+
+
 def morphology_visualizer(
     morphology,
     z_slice: int = 0,
+    y_slice: int = None,
+    x_slice: int = None,
     subsample: int = None,
     translate_x: int = None,
     translate_y: int = None,
+    vertical_slice_aspect: str = "full",
     screen_euler: bool = True,
     screen_euler_vfrac: float = 0.05,
     screen_euler_s: float = 0.05,
@@ -108,13 +221,27 @@ def morphology_visualizer(
     ----------
 
         z_slice : int
-            Which z-slice of the array to plot.
+            Which z-slice of the array to plot for an XY view. Mutually exclusive with
+            y_slice and x_slice.
+        y_slice : int
+            Which y-slice of the array to plot for an XZ view. Mutually exclusive with
+            z_slice and x_slice.
+        x_slice : int
+            Which x-slice of the array to plot for a YZ view. Mutually exclusive with
+            z_slice and y_slice.
         subsample : int
-            Number of voxels to display in X and Y
+            Number of voxels to display along the horizontal and vertical axes of the
+            selected plane.
         translate_x : int
-            Number of voxels to translate image in x; meant for use with subsample
+            Number of voxels to translate the displayed window along the horizontal axis
+            of the selected plane; meant for use with subsample.
         translate_y : int
-            Number of voxels to translate image in y; meant for use with subsample
+            Number of voxels to translate the displayed window along the vertical axis
+            of the selected plane; meant for use with subsample.
+        vertical_slice_aspect : str
+            Aspect handling for XZ and YZ views. Use 'full' to preserve the full returned
+            panel including its original colorbar-inclusive width, or 'square' to center-crop
+            the slice data to a square before plotting. XY views ignore this option.
         screen_euler : bool
             Suppress visualization of euler angles where vfrac < screen_euler_vfrac or S < screen_euler_s; intended to hilight edges
             screen_euler_vfrac : float
@@ -172,23 +299,16 @@ def morphology_visualizer(
 
     rgb_return_list = []
 
-    if subsample is None:
-        subsample_y = morphology.NumZYX[1]
-        subsample_x = morphology.NumZYX[2]
-    else:
-        subsample_y = subsample
-        subsample_x = subsample
-
-    start_x, end_x = _compute_axis_window(
-        morphology.NumZYX[2],
-        subsample_x,
+    plane, slice_index = _resolve_slice_plane(morphology.NumZYX, z_slice, y_slice, x_slice)
+    display_config = _plane_display_config(
+        morphology.NumZYX,
+        plane,
+        subsample,
         translate_x,
-    )
-    start_y, end_y = _compute_axis_window(
-        morphology.NumZYX[1],
-        subsample_y,
         translate_y,
     )
+    plane_name = {"xy": "XY", "xz": "XZ", "yz": "YZ"}[plane]
+    slice_label = {"xy": "z_slice", "xz": "y_slice", "yz": "x_slice"}[plane]
 
     if not runquiet:
         print(
@@ -196,14 +316,8 @@ def morphology_visualizer(
             f" {morphology.NumZYX[2]}"
         )
         print(f"Number of Materials: {morphology._numMaterial}")
+        print(f"Viewing {plane_name} plane at {slice_label} = {slice_index}")
         print("")
-
-    if z_slice > (morphology.NumZYX[0] - 1):
-        warnings.warn(
-            f"z_slice of {z_slice} is greater than the maximum index of {morphology.NumZYX[0]-1}."
-            f" Using z_slice = {morphology.NumZYX[0]-1} instead."
-        )
-        z_slice = morphology.NumZYX[0] - 1
 
     font = {
         "family": "sans-serif",
@@ -221,6 +335,8 @@ def morphology_visualizer(
         raise ValueError("histogram_sample_size must be a positive integer.")
     if histogram_sample_threshold <= 0:
         raise ValueError("histogram_sample_threshold must be a positive integer.")
+    if vertical_slice_aspect not in {"full", "square"}:
+        raise ValueError("vertical_slice_aspect must be one of 'full' or 'square'.")
 
     with plt.style.context(style_dict[plotstyle]), matplotlib.rc_context(
         rc={
@@ -247,6 +363,9 @@ def morphology_visualizer(
             show_theta = show_full_summary or "theta" in requested_plots
             show_psi = show_full_summary or "psi" in requested_plots
             show_quiver = show_psi and add_quiver
+
+            if show_quiver and plane != "xy":
+                raise ValueError("add_quiver is only supported for XY views selected with z_slice.")
 
             field_cache = {}
 
@@ -304,13 +423,22 @@ def morphology_visualizer(
                 screen_mask = None
 
                 if vfrac is not None:
-                    vfrac_slice = vfrac[z_slice, start_y:end_y, start_x:end_x]
+                    vfrac_slice = _extract_plane_slice(vfrac, plane, slice_index, display_config)
                 if s_field is not None:
-                    s_slice = s_field[z_slice, start_y:end_y, start_x:end_x]
+                    s_slice = _extract_plane_slice(s_field, plane, slice_index, display_config)
                 if theta_field is not None:
-                    theta_slice = theta_field[z_slice, start_y:end_y, start_x:end_x]
+                    theta_slice = _extract_plane_slice(theta_field, plane, slice_index, display_config)
                 if psi_field is not None:
-                    psi_slice = psi_field[z_slice, start_y:end_y, start_x:end_x]
+                    psi_slice = _extract_plane_slice(psi_field, plane, slice_index, display_config)
+                if plane != "xy" and vertical_slice_aspect == "square":
+                    if vfrac_slice is not None:
+                        vfrac_slice = _crop_slice_to_square(vfrac_slice)
+                    if s_slice is not None:
+                        s_slice = _crop_slice_to_square(s_slice)
+                    if theta_slice is not None:
+                        theta_slice = _crop_slice_to_square(theta_slice)
+                    if psi_slice is not None:
+                        psi_slice = _crop_slice_to_square(psi_slice)
                 if screen_euler and (show_theta or show_psi):
                     screen_mask = np.logical_or(
                         vfrac_slice < screen_euler_vfrac,
@@ -338,9 +466,9 @@ def morphology_visualizer(
                         interpolation="none",
                         norm=norm,
                     )
-                    ax1.set_ylabel("Y index", labelpad=0)
-                    ax1.set_xlabel("X index")
-                    ax1.set_title(f"Mat {i} {material.name} Vfrac")
+                    ax1.set_ylabel(display_config["vertical_label"], labelpad=0)
+                    ax1.set_xlabel(display_config["horizontal_label"])
+                    ax1.set_title(f"Mat {i} {material.name} Vfrac ({plane_name})")
                     Vfrac_cbar = plt.colorbar(Vfracplot, ax=ax1, fraction=0.040)
 
                 if show_s:
@@ -364,9 +492,9 @@ def morphology_visualizer(
                         interpolation="none",
                         norm=norm,
                     )
-                    ax2.set_ylabel("Y index", labelpad=0)
-                    ax2.set_xlabel("X index")
-                    ax2.set_title(f"Mat {i} {material.name} S")
+                    ax2.set_ylabel(display_config["vertical_label"], labelpad=0)
+                    ax2.set_xlabel(display_config["horizontal_label"])
+                    ax2.set_title(f"Mat {i} {material.name} S ({plane_name})")
                     S_cbar = plt.colorbar(Splot, fraction=0.040)
 
                 if show_histograms:
@@ -432,9 +560,9 @@ def morphology_visualizer(
                         origin="lower",
                         interpolation="none",
                     )
-                    ax5.set_ylabel("Y index")
-                    ax5.set_xlabel("X index")
-                    ax5.set_title(f"Mat {i} {material.name} theta")
+                    ax5.set_ylabel(display_config["vertical_label"])
+                    ax5.set_xlabel(display_config["horizontal_label"])
+                    ax5.set_title(f"Mat {i} {material.name} theta ({plane_name})")
                     theta_cbar = plt.colorbar(thetaplot, fraction=0.040)
 
                     ax5i = inset_axes(
@@ -555,9 +683,9 @@ def morphology_visualizer(
                                 scale_units="xy",
                             )
 
-                    ax6.set_ylabel("Y index")
-                    ax6.set_xlabel("X index")
-                    ax6.set_title(f"Mat {i} {material.name} psi")
+                    ax6.set_ylabel(display_config["vertical_label"])
+                    ax6.set_xlabel(display_config["horizontal_label"])
+                    ax6.set_title(f"Mat {i} {material.name} psi ({plane_name})")
                     psi_cbar = plt.colorbar(psiplot, fraction=0.040)
                     ax4i = inset_axes(
                         ax6,

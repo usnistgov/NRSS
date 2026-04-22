@@ -3871,6 +3871,158 @@ def test_visualizer_crops_before_plotting_and_only_requests_needed_fields(monkey
 
 @pytest.mark.backend_agnostic_contract
 @pytest.mark.cpu
+def test_visualizer_supports_xz_slices(monkeypatch):
+    """Ensure y_slice renders an XZ plane with the expected cropped shape."""
+    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
+
+    plotted_shapes = []
+    requested_fields = []
+    original_imshow = Axes.imshow
+    original_effective_field = Morphology._material_effective_field
+
+    def tracked_imshow(self, data, *args, **kwargs):
+        plotted_shapes.append(np.shape(data))
+        return original_imshow(self, data, *args, **kwargs)
+
+    def tracked_effective_field(self, material, field_name):
+        requested_fields.append(field_name)
+        return original_effective_field(self, material, field_name)
+
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+    monkeypatch.setattr(Axes, "imshow", tracked_imshow)
+    monkeypatch.setattr(Morphology, "_material_effective_field", tracked_effective_field)
+
+    shape = (12, 10, 20)
+    vfrac = np.zeros(shape, dtype=np.float32)
+    vfrac[2:10, :, 4:16] = 1.0
+
+    mat = Material(
+        materialID=1,
+        Vfrac=vfrac,
+        S=np.zeros(shape, dtype=np.float32),
+        theta=np.zeros(shape, dtype=np.float32),
+        psi=np.zeros(shape, dtype=np.float32),
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    images = morph.visualize_materials(
+        y_slice=5,
+        subsample=18,
+        outputmat=[1],
+        outputplot=["vfrac"],
+        outputaxes=False,
+        runquiet=True,
+        batchMode=True,
+    )
+
+    assert len(images) == 1
+    assert requested_fields == ["Vfrac"]
+    assert plotted_shapes == [(12, 18)]
+
+
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
+def test_visualizer_supports_yz_slices(monkeypatch):
+    """Ensure x_slice renders a YZ plane with the expected cropped shape."""
+    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
+
+    plotted_shapes = []
+    requested_fields = []
+    original_imshow = Axes.imshow
+    original_effective_field = Morphology._material_effective_field
+
+    def tracked_imshow(self, data, *args, **kwargs):
+        plotted_shapes.append(np.shape(data))
+        return original_imshow(self, data, *args, **kwargs)
+
+    def tracked_effective_field(self, material, field_name):
+        requested_fields.append(field_name)
+        return original_effective_field(self, material, field_name)
+
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+    monkeypatch.setattr(Axes, "imshow", tracked_imshow)
+    monkeypatch.setattr(Morphology, "_material_effective_field", tracked_effective_field)
+
+    shape = (12, 10, 20)
+    vfrac = np.zeros(shape, dtype=np.float32)
+    vfrac[2:10, 1:9, :] = 1.0
+
+    mat = Material(
+        materialID=1,
+        Vfrac=vfrac,
+        S=np.zeros(shape, dtype=np.float32),
+        theta=np.zeros(shape, dtype=np.float32),
+        psi=np.zeros(shape, dtype=np.float32),
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    images = morph.visualize_materials(
+        x_slice=10,
+        subsample=10,
+        outputmat=[1],
+        outputplot=["vfrac"],
+        outputaxes=False,
+        runquiet=True,
+        batchMode=True,
+    )
+
+    assert len(images) == 1
+    assert requested_fields == ["Vfrac"]
+    assert plotted_shapes == [(10, 10)]
+
+
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
+def test_visualizer_rejects_multiple_slice_axes():
+    """Ensure callers cannot request multiple orthogonal slice axes at once."""
+    shape = (4, 4, 4)
+    zeros = np.zeros(shape, dtype=np.float32)
+    ones = np.ones(shape, dtype=np.float32)
+
+    mat = Material(
+        materialID=1,
+        Vfrac=ones,
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    with pytest.raises(ValueError, match="Specify at most one of z_slice, y_slice, or x_slice"):
+        morph.visualize_materials(y_slice=0, x_slice=0, runquiet=True, batchMode=True)
+
+
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
 def test_visualizer_closes_figures_after_show(monkeypatch):
     """Ensure interactive visualization does not leave figures resident after display."""
     import matplotlib.pyplot as plt
