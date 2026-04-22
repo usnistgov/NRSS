@@ -27,10 +27,70 @@ if str(REPO_ROOT) not in sys.path:
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-# Development studies should default to one visible GPU unless the caller has
-# already pinned the runtime.
 os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+
+
+def _query_physical_gpu_devices() -> tuple[str, ...]:
+    try:
+        completed = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError:
+        return ()
+    if completed.returncode != 0:
+        return ()
+    return tuple(line.strip() for line in completed.stdout.splitlines() if line.strip())
+
+
+def _bootstrap_single_gpu_visibility(argv: list[str]) -> dict[str, Any]:
+    existing = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if existing is not None and existing.strip():
+        return {
+            "mode": "inherited",
+            "requested_gpu_index": None,
+            "cuda_visible_devices": existing.strip(),
+        }
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--gpu-index", default="auto")
+    args, _unknown = parser.parse_known_args(argv[1:])
+    requested = str(args.gpu_index).strip() or "auto"
+
+    if requested.lower() == "auto":
+        devices = _query_physical_gpu_devices()
+        if devices:
+            os.environ["CUDA_VISIBLE_DEVICES"] = devices[0]
+            return {
+                "mode": "auto_first_physical_gpu",
+                "requested_gpu_index": "auto",
+                "cuda_visible_devices": devices[0],
+                "physical_gpu_devices": list(devices),
+            }
+        return {
+            "mode": "auto_no_gpu_resolved",
+            "requested_gpu_index": "auto",
+            "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
+            "physical_gpu_devices": [],
+        }
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = requested
+    return {
+        "mode": "explicit_gpu_index",
+        "requested_gpu_index": requested,
+        "cuda_visible_devices": requested,
+    }
+
+
+# Keep standalone timing runs single-GPU by default, but do not mutate
+# CUDA visibility when this module is merely imported by another harness.
+if __name__ == "__main__":
+    _EARLY_GPU_BOOTSTRAP = _bootstrap_single_gpu_visibility(sys.argv)
+else:
+    _EARLY_GPU_BOOTSTRAP = None
 
 from NRSS import SFieldMode
 from NRSS.morphology import Material, Morphology, OpticalConstants
@@ -95,6 +155,9 @@ class BenchmarkCase:
     timing_segments: tuple[str, ...] = ()
     create_cy_object: bool = True
     worker_warmup_runs: int = 0
+    run_stdout: bool = False
+    run_stderr: bool = False
+    force_stderr_tty: bool = False
     validation_baseline_name: str | None = None
     notes: str | None = None
 
@@ -963,7 +1026,19 @@ def _run_case_once(
 
             morphology._set_private_backend_timing_segments(case.timing_segments)
 
-        backend_result = morphology.run(stdout=False, stderr=False, return_xarray=False)
+        original_stderr_isatty = None
+        if case.force_stderr_tty:
+            original_stderr_isatty = getattr(sys.stderr, "isatty", None)
+            setattr(sys.stderr, "isatty", lambda: True)
+        try:
+            backend_result = morphology.run(
+                stdout=case.run_stdout,
+                stderr=case.run_stderr,
+                return_xarray=False,
+            )
+        finally:
+            if original_stderr_isatty is not None:
+                setattr(sys.stderr, "isatty", original_stderr_isatty)
         _synchronize_cupy_default_stream()
 
         if collect_timing:
@@ -1021,6 +1096,11 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         "timing_boundary": PRIMARY_TIMING_BOUNDARY,
         "note": _case_note(case),
         "worker_warmup_runs_requested": int(case.worker_warmup_runs),
+        "run_stdout": bool(case.run_stdout),
+        "run_stderr": bool(case.run_stderr),
+        "force_stderr_tty": bool(case.force_stderr_tty),
+        "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
+        "gpu_bootstrap": _EARLY_GPU_BOOTSTRAP,
         "status": "error",
     }
 
@@ -1200,12 +1280,18 @@ def _timing_cases(
                             resident_mode=variant.resident_mode,
                             input_policy=variant.input_policy,
                             ownership_policy=variant.ownership_policy,
-                            backend_options=backend_options,
+                            backend_options=dict(backend_options),
                             timing_segments=timing_segments,
                             worker_warmup_runs=worker_warmup_runs,
                             notes=notes,
                         )
                     )
+
+                reusable_note = (
+                    "Host-resident float32 anisotropic materials use standard GPU reusable staging in A2."
+                    if mode == "host"
+                    else "Device-resident timing lane."
+                )
 
                 for size_label in size_labels:
                     append_case(
@@ -1218,7 +1304,8 @@ def _timing_cases(
                         eangle_rotation=EANGLE_OFF,
                         notes=(
                             f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                            f"Primary no-rotation tuning lane. execution_path={execution_path}."
+                            f"{reusable_note} Primary no-rotation tuning lane. "
+                            f"execution_path={execution_path}."
                         ),
                     )
 
@@ -1233,7 +1320,7 @@ def _timing_cases(
                             eangle_rotation=EANGLE_OFF,
                             notes=(
                                 f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Secondary three-energy no-rotation checkpoint lane. "
+                                f"{reusable_note} Secondary three-energy no-rotation checkpoint lane. "
                                 f"execution_path={execution_path}."
                             ),
                         )
@@ -1251,8 +1338,8 @@ def _timing_cases(
                             eangle_rotation=EANGLE_OFF,
                             notes=(
                                 f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Development-only centered-energy no-rotation lane with {energy_count} "
-                                f"energies. execution_path={execution_path}."
+                                f"{reusable_note} Development-only centered-energy no-rotation lane "
+                                f"with {energy_count} energies. execution_path={execution_path}."
                             ),
                         )
 
@@ -1267,7 +1354,7 @@ def _timing_cases(
                             eangle_rotation=EANGLE_LIMITED,
                             notes=(
                                 f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Secondary limited-EAngle checkpoint lane. "
+                                f"{reusable_note} Secondary limited-EAngle checkpoint lane. "
                                 f"execution_path={execution_path}."
                             ),
                         )
@@ -1286,7 +1373,8 @@ def _timing_cases(
                             eangle_rotation=eangle_rotation,
                             notes=(
                                 f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Custom single-energy rotation lane with EAngleRotation={list(eangle_rotation)} "
+                                f"{reusable_note} Custom single-energy rotation lane with "
+                                f"EAngleRotation={list(eangle_rotation)} "
                                 f"([StartAngle, IncrementAngle, EndAngle]). "
                                 f"execution_path={execution_path}."
                             ),
@@ -1306,8 +1394,8 @@ def _timing_cases(
                             eangle_rotation=EANGLE_OFF,
                             notes=(
                                 f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                f"Custom explicit-energy no-rotation lane with energies={list(energies_ev)}. "
-                                f"execution_path={execution_path}."
+                                f"{reusable_note} Custom explicit-energy no-rotation lane with "
+                                f"energies={list(energies_ev)}. execution_path={execution_path}."
                             ),
                         )
 
@@ -1329,7 +1417,7 @@ def _timing_cases(
                                 eangle_rotation=eangle_rotation,
                                 notes=(
                                     f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                                    f"Custom explicit-energy plus custom rotation lane with "
+                                    f"{reusable_note} Custom explicit-energy plus custom rotation lane with "
                                     f"energies={list(energies_ev)} and EAngleRotation={list(eangle_rotation)} "
                                     f"([StartAngle, IncrementAngle, EndAngle]). "
                                     f"execution_path={execution_path}."
@@ -1347,8 +1435,8 @@ def _timing_cases(
                         eangle_rotation=EANGLE_FULL,
                         notes=(
                             f"{variant.notes} Isotropic-material representation={isotropic_representation}. "
-                            f"Occasional expensive checkpoint for the full parity-style rotation loop. "
-                            f"execution_path={execution_path}."
+                            f"{reusable_note} Occasional expensive checkpoint for the full parity-style "
+                            f"rotation loop. execution_path={execution_path}."
                         ),
                     )
     return cases
@@ -1387,6 +1475,7 @@ def run_matrix(args: argparse.Namespace) -> int:
         "created_utc": _timestamp(),
         "python_executable": sys.executable,
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
+        "gpu_bootstrap": _EARLY_GPU_BOOTSTRAP,
         "timing_boundary": PRIMARY_TIMING_BOUNDARY,
         "timing_segments": list(timing_segments),
         "worker_warmup_runs": worker_warmup_runs,
@@ -1451,6 +1540,15 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--label", default=None, help="Output subdirectory label under test-reports.")
+    parser.add_argument(
+        "--gpu-index",
+        default="auto",
+        help=(
+            "Single-GPU selection for standalone runs. Defaults to 'auto', which picks the first "
+            "physical GPU when CUDA_VISIBLE_DEVICES is otherwise unset. Imported orchestrators "
+            "should pin GPUs via CUDA_VISIBLE_DEVICES instead."
+        ),
+    )
     parser.add_argument(
         "--resident-modes",
         default="host",

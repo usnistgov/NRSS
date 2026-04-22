@@ -3,13 +3,16 @@ import os
 import shutil
 import subprocess
 import sys
+import types
 from functools import lru_cache
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
+import xarray as xr
 import NRSS.backends.registry as backend_registry
+import NRSS.backends.cupy_rsoxs as cupy_rsoxs_module
 
 from tests.path_matrix import ComputationPath
 
@@ -34,6 +37,12 @@ from NRSS.backends import (
     resolve_backend_name,
     resolve_backend_runtime_contract,
     UnknownBackendError,
+)
+from NRSS.backends.cupy_rsoxs import (
+    CupyIntegratedIntensityResult,
+    CupyIntegratedResult,
+    CupyObservableDatasetResult,
+    CupyRsoxsBackendRuntime,
 )
 from NRSS.morphology import Material, Morphology, OpticalConstants
 from NRSS.writer import write_config
@@ -495,21 +504,28 @@ def test_primary_backend_speed_comparison_rows_use_matching_legacy_baselines():
     """Ensure host rows use matching legacy startup baselines and device rows appear only on pre-warm rows."""
     from tests.validation.dev.core_shell_backend_performance.run_primary_backend_speed_comparison import (
         _build_row_records,
+        _cupy_case_key,
     )
 
     def make_summary(legacy_cold, legacy_warm, host_cold, host_warm, device):
         timing_cases = {}
         for lane in ("small", "medium", "large"):
-            for fragment in ("single_no_rotation", "single_rot_0_15_165"):
+            for fragment in (
+                "single_no_rotation",
+                "single_rot_0_15_165",
+                "triple_no_rotation",
+                "triple_limited_rotation",
+            ):
+                is_no_rotation = fragment.endswith("no_rotation")
                 timing_cases[f"core_shell_{lane}_{fragment}_host_cyrsoxs"] = {
                     "status": "ok",
-                    "primary_seconds": legacy_cold if fragment == "single_no_rotation" else legacy_warm,
+                    "primary_seconds": legacy_cold if is_no_rotation else legacy_warm,
                 }
-                timing_cases[f"core_shell_{lane}_{fragment}_host_tensor_coeff"] = {
+                timing_cases[_cupy_case_key(lane=lane, fragment=fragment, residency="host")] = {
                     "status": "ok",
-                    "primary_seconds": host_cold if fragment == "single_no_rotation" else host_warm,
+                    "primary_seconds": host_cold if is_no_rotation else host_warm,
                 }
-                timing_cases[f"core_shell_{lane}_{fragment}_device_tensor_coeff"] = {
+                timing_cases[_cupy_case_key(lane=lane, fragment=fragment, residency="device")] = {
                     "status": "ok",
                     "primary_seconds": device,
                 }
@@ -522,10 +538,14 @@ def test_primary_backend_speed_comparison_rows_use_matching_legacy_baselines():
         cupy_host_prewarm=make_summary(0.0, 0.0, 2.0, 4.0, 2.0),
     )
 
-    cold_no_rotation = rows[0]
-    cold_some_rotation = rows[1]
-    warm_no_rotation = rows[2]
-    warm_some_rotation = rows[3]
+    keyed = {
+        (row["lane"], row["startup"], row["energy_label"], row["rotation_label"]): row for row in rows
+    }
+
+    cold_no_rotation = keyed[("small", "cold", "single", "no rotation")]
+    cold_some_rotation = keyed[("small", "cold", "single", "some rotation (0,15,165)")]
+    warm_no_rotation = keyed[("small", "pre-warm", "single", "no rotation")]
+    warm_some_rotation = keyed[("small", "pre-warm", "single", "some rotation (0,15,165)")]
 
     assert cold_no_rotation["startup"] == "cold"
     assert cold_no_rotation["legacy_cyrsoxs_primary_seconds"] == 10.0
@@ -561,66 +581,72 @@ def test_comprehensive_backend_comparison_speedups_use_matching_legacy_baselines
 
     rows = [
         {
-            "comparison_key": "comprehensive__host__warm__cyrsoxs__no_rotation",
+            "comparison_key": "comprehensive__host__cold__single__cyrsoxs__no_rotation",
             "comparison_backend": "cyrsoxs",
             "comparison_residency": "host",
-            "comparison_startup_mode": "warm",
+            "comparison_startup_mode": "cold",
             "comparison_execution_path": "cyrsoxs",
+            "comparison_energy_key": "single",
             "comparison_rotation_key": "no_rotation",
             "comparison_rotation_label": "no rotation",
             "status": "ok",
             "primary_seconds": 10.0,
         },
         {
-            "comparison_key": "comprehensive__host__hot__cyrsoxs__no_rotation",
+            "comparison_key": "comprehensive__host__hot__single__cyrsoxs__no_rotation",
             "comparison_backend": "cyrsoxs",
             "comparison_residency": "host",
             "comparison_startup_mode": "hot",
             "comparison_execution_path": "cyrsoxs",
+            "comparison_energy_key": "single",
             "comparison_rotation_key": "no_rotation",
             "comparison_rotation_label": "no rotation",
             "status": "ok",
             "primary_seconds": 4.0,
         },
         {
-            "comparison_key": "comprehensive__host__warm__tensor_coeff__no_rotation",
+            "comparison_key": "comprehensive__host__cold__single__tensor_coeff__no_rotation",
             "comparison_backend": "cupy-rsoxs",
             "comparison_residency": "host",
-            "comparison_startup_mode": "warm",
+            "comparison_startup_mode": "cold",
             "comparison_execution_path": "tensor_coeff",
+            "comparison_energy_key": "single",
             "comparison_rotation_key": "no_rotation",
             "comparison_rotation_label": "no rotation",
             "status": "ok",
             "primary_seconds": 5.0,
         },
         {
-            "comparison_key": "comprehensive__host__hot__direct_polarization__no_rotation",
+            "comparison_key": "comprehensive__host__hot__single__direct_polarization__no_rotation",
             "comparison_backend": "cupy-rsoxs",
             "comparison_residency": "host",
             "comparison_startup_mode": "hot",
             "comparison_execution_path": "direct_polarization",
+            "comparison_energy_key": "single",
             "comparison_rotation_key": "no_rotation",
             "comparison_rotation_label": "no rotation",
             "status": "ok",
             "primary_seconds": 2.0,
         },
         {
-            "comparison_key": "comprehensive__device__steady__tensor_coeff__no_rotation",
+            "comparison_key": "comprehensive__device__steady__single__tensor_coeff__no_rotation",
             "comparison_backend": "cupy-rsoxs",
             "comparison_residency": "device",
             "comparison_startup_mode": "steady",
             "comparison_execution_path": "tensor_coeff",
+            "comparison_energy_key": "single",
             "comparison_rotation_key": "no_rotation",
             "comparison_rotation_label": "no rotation",
             "status": "ok",
             "primary_seconds": 2.5,
         },
         {
-            "comparison_key": "comprehensive__device__hot__direct_polarization__no_rotation",
+            "comparison_key": "comprehensive__device__hot__single__direct_polarization__no_rotation",
             "comparison_backend": "cupy-rsoxs",
             "comparison_residency": "device",
             "comparison_startup_mode": "hot",
             "comparison_execution_path": "direct_polarization",
+            "comparison_energy_key": "single",
             "comparison_rotation_key": "no_rotation",
             "comparison_rotation_label": "no rotation",
             "status": "ok",
@@ -632,26 +658,26 @@ def test_comprehensive_backend_comparison_speedups_use_matching_legacy_baselines
         row["comparison_key"]: row for row in _enrich_results_with_legacy_speedups(rows)
     }
 
-    host_warm = enriched["comprehensive__host__warm__tensor_coeff__no_rotation"]
-    assert host_warm["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__warm__cyrsoxs__no_rotation"
-    assert host_warm["comparison_cyrsoxs_baseline_startup_mode"] == "warm"
-    assert host_warm["comparison_cyrsoxs_primary_seconds"] == 10.0
-    assert host_warm["comparison_speedup_vs_cyrsoxs"] == 2.0
+    host_cold = enriched["comprehensive__host__cold__single__tensor_coeff__no_rotation"]
+    assert host_cold["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__cold__single__cyrsoxs__no_rotation"
+    assert host_cold["comparison_cyrsoxs_baseline_startup_mode"] == "cold"
+    assert host_cold["comparison_cyrsoxs_primary_seconds"] == 10.0
+    assert host_cold["comparison_speedup_vs_cyrsoxs"] == 2.0
 
-    host_hot = enriched["comprehensive__host__hot__direct_polarization__no_rotation"]
-    assert host_hot["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__hot__cyrsoxs__no_rotation"
+    host_hot = enriched["comprehensive__host__hot__single__direct_polarization__no_rotation"]
+    assert host_hot["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__hot__single__cyrsoxs__no_rotation"
     assert host_hot["comparison_cyrsoxs_baseline_startup_mode"] == "hot"
     assert host_hot["comparison_cyrsoxs_primary_seconds"] == 4.0
     assert host_hot["comparison_speedup_vs_cyrsoxs"] == 2.0
 
-    device_steady = enriched["comprehensive__device__steady__tensor_coeff__no_rotation"]
-    assert device_steady["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__warm__cyrsoxs__no_rotation"
-    assert device_steady["comparison_cyrsoxs_baseline_startup_mode"] == "warm"
-    assert device_steady["comparison_cyrsoxs_primary_seconds"] == 10.0
-    assert device_steady["comparison_speedup_vs_cyrsoxs"] == 4.0
+    device_steady = enriched["comprehensive__device__steady__single__tensor_coeff__no_rotation"]
+    assert device_steady["comparison_cyrsoxs_baseline_key"] is None
+    assert device_steady["comparison_cyrsoxs_baseline_startup_mode"] is None
+    assert device_steady["comparison_cyrsoxs_primary_seconds"] is None
+    assert device_steady["comparison_speedup_vs_cyrsoxs"] is None
 
-    device_hot = enriched["comprehensive__device__hot__direct_polarization__no_rotation"]
-    assert device_hot["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__hot__cyrsoxs__no_rotation"
+    device_hot = enriched["comprehensive__device__hot__single__direct_polarization__no_rotation"]
+    assert device_hot["comparison_cyrsoxs_baseline_key"] == "comprehensive__host__hot__single__cyrsoxs__no_rotation"
     assert device_hot["comparison_cyrsoxs_baseline_startup_mode"] == "hot"
     assert device_hot["comparison_cyrsoxs_primary_seconds"] == 4.0
     assert device_hot["comparison_speedup_vs_cyrsoxs"] == 4.0
@@ -691,6 +717,11 @@ def test_backend_registry_reports_known_backends():
     assert "execution_path" in get_backend_info("cupy-rsoxs").supported_backend_options
     assert "mixed_precision_mode" in get_backend_info("cupy-rsoxs").supported_backend_options
     assert "z_collapse_mode" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "energy_progress_bar" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "result_residency" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "result_chunk_size" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "result_layout" in get_backend_info("cupy-rsoxs").supported_backend_options
+    assert "total_chi_wedge_deg" in get_backend_info("cupy-rsoxs").supported_backend_options
 
 
 @pytest.mark.backend_agnostic_contract
@@ -832,11 +863,19 @@ def test_cupy_backend_array_contract_defaults_to_host_resident_numpy():
     assert contract["options"]["execution_path"] == "direct_polarization"
     assert contract["options"]["mixed_precision_mode"] is None
     assert contract["options"]["z_collapse_mode"] is None
+    assert contract["options"]["result_residency"] == "host"
+    assert contract["options"]["result_chunk_size"] == 1
+    assert contract["options"]["result_layout"] == "detector"
+    assert contract["options"]["total_chi_wedge_deg"] == 90.0
     assert runtime_contract["namespace"] == "cupy"
     assert runtime_contract["device"] == "gpu"
     assert runtime_contract["options"]["execution_path"] == "direct_polarization"
     assert runtime_contract["options"]["mixed_precision_mode"] is None
     assert runtime_contract["options"]["z_collapse_mode"] is None
+    assert runtime_contract["options"]["result_residency"] == "host"
+    assert runtime_contract["options"]["result_chunk_size"] == 1
+    assert runtime_contract["options"]["result_layout"] == "detector"
+    assert runtime_contract["options"]["total_chi_wedge_deg"] == 90.0
     assert plan.target_namespace == "numpy"
     assert plan.target_device == "cpu"
     assert plan.transfer == "none"
@@ -900,7 +939,13 @@ def _expected_cupy_backend_options(
     execution_path: str = "direct_polarization",
     mixed_precision_mode: str | None = None,
     z_collapse_mode: str | None = None,
-) -> dict[str, str | None]:
+    direct_isotropic_mode: str | None = None,
+    energy_progress_bar: bool = True,
+    result_residency: str = "host",
+    result_chunk_size: int | None = 1,
+    result_layout: str = "detector",
+    total_chi_wedge_deg: float = 90.0,
+) -> dict[str, str | bool | int | float | None]:
     kernel_preload_stage = "off"
     igor_shift_backend = "nvrtc"
     if execution_path == "direct_polarization":
@@ -914,6 +959,12 @@ def _expected_cupy_backend_options(
         "kernel_preload_stage": kernel_preload_stage,
         "igor_shift_backend": igor_shift_backend,
         "direct_polarization_backend": "nvrtc",
+        "direct_isotropic_mode": direct_isotropic_mode,
+        "energy_progress_bar": energy_progress_bar,
+        "result_residency": result_residency,
+        "result_chunk_size": result_chunk_size,
+        "result_layout": result_layout,
+        "total_chi_wedge_deg": total_chi_wedge_deg,
     }
 
 
@@ -1016,6 +1067,498 @@ def test_cupy_backend_accepts_z_collapse_aliases_and_orthogonal_options():
     assert morph.backend_options == _expected_cupy_backend_options(
         execution_path="direct_polarization",
     )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_energy_progress_bar_backend_option():
+    """Ensure cupy-rsoxs normalizes the explicit energy progress bar surface."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"energy_progress_bar": "off"},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        energy_progress_bar=False,
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_result_residency_backend_option():
+    """Ensure cupy-rsoxs normalizes explicit result residency independently of morphology residency."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"result_residency": "gpu"},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        result_residency="device",
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_result_chunk_size_backend_option():
+    """Ensure cupy-rsoxs normalizes explicit result chunk sizing for host-backed results."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"result_chunk_size": 7},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        result_chunk_size=7,
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_result_chunk_size_auto_aliases():
+    """Ensure cupy-rsoxs accepts auto-like aliases for default chunk sizing."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"result_chunk_size": "auto"},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        result_chunk_size=1,
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_integrated_result_layout_backend_option():
+    """Ensure cupy-rsoxs normalizes opt-in integrated output layout selection."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"result_layout": "integrated"},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        result_layout="integrated",
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+@pytest.mark.parametrize(
+    ("requested_layout", "expected_layout"),
+    [
+        ("i_only", "i_only"),
+        ("i", "i_only"),
+        ("i_para_i_perp", "i_para_i_perp"),
+        ("i_a", "i_a"),
+    ],
+)
+def test_cupy_backend_accepts_observable_result_layout_backend_options(
+    requested_layout: str,
+    expected_layout: str,
+):
+    """Ensure cupy-rsoxs normalizes the maintained observable result layouts."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"result_layout": requested_layout},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        result_layout=expected_layout,
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_accepts_total_chi_wedge_backend_option():
+    """Ensure cupy-rsoxs normalizes the maintained chi-sector width option."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={"total_chi_wedge_deg": 60},
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        total_chi_wedge_deg=60.0,
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_invalid_result_chunk_size_backend_option():
+    """Ensure cupy-rsoxs rejects unsupported result_chunk_size values up front."""
+    with pytest.raises(BackendOptionError, match="result_chunk_size must be a positive integer"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"result_chunk_size": 0},
+            create_cy_object=False,
+        )
+    with pytest.raises(BackendOptionError, match="result_chunk_size must be a positive integer"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"result_chunk_size": "definitely-not-valid"},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_unknown_result_layout_backend_option():
+    """Ensure cupy-rsoxs rejects unsupported integrated-output layout values up front."""
+    with pytest.raises(BackendOptionError, match="does not support result_layout"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"result_layout": "definitely-not-valid"},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+@pytest.mark.parametrize("invalid_value", (0, -1, 181, "not-a-number"))
+def test_cupy_backend_rejects_invalid_total_chi_wedge_backend_option(invalid_value):
+    """Ensure cupy-rsoxs rejects out-of-range chi-sector widths up front."""
+    with pytest.raises(BackendOptionError, match="total_chi_wedge_deg"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"total_chi_wedge_deg": invalid_value},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_unknown_result_residency_backend_option():
+    """Ensure cupy-rsoxs rejects unsupported result_residency values up front."""
+    with pytest.raises(BackendOptionError, match="does not support result_residency"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"result_residency": "definitely-not-valid"},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_unknown_energy_progress_bar_backend_option():
+    """Ensure cupy-rsoxs rejects unsupported energy_progress_bar values up front."""
+    with pytest.raises(BackendOptionError, match="does not support energy_progress_bar"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"energy_progress_bar": "definitely-not-valid"},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_energy_progress_bar_wrapper_uses_tqdm_when_enabled(monkeypatch):
+    """Ensure the energy-iterator wrapper enables tqdm only for the interactive opt-in path."""
+    runtime = CupyRsoxsBackendRuntime()
+    morphology = types.SimpleNamespace(backend_options={"energy_progress_bar": True})
+    stream = types.SimpleNamespace(
+        writes=[],
+        flush=lambda: None,
+        isatty=lambda: True,
+    )
+    stream.write = lambda text: stream.writes.append(text)
+    tqdm_calls: list[dict[str, object]] = []
+    progress_updates: list[int] = []
+    progress_closed: list[bool] = []
+    progress_postfixes: list[tuple[str, object]] = []
+
+    class _FakeProgressBar:
+        def set_postfix_str(self, text, refresh=False):
+            progress_postfixes.append((text, refresh))
+
+        def update(self, amount=1):
+            progress_updates.append(amount)
+
+        def close(self):
+            progress_closed.append(True)
+
+    def _fake_tqdm(**kwargs):
+        tqdm_calls.append(kwargs)
+        return _FakeProgressBar()
+
+    monkeypatch.setitem(sys.modules, "tqdm", types.SimpleNamespace(tqdm=_fake_tqdm))
+
+    with runtime._iter_completed_energies(
+        morphology,
+        (284.7, 285.0, 285.2),
+        stdout=True,
+        stderr=True,
+        stream=stream,
+    ) as iterator:
+        observed = list(iterator)
+
+    assert observed == [(0, 284.7), (1, 285.0), (2, 285.2)]
+    assert len(tqdm_calls) == 1
+    assert tqdm_calls[0]["ascii"] is True
+    assert tqdm_calls[0]["colour"] == "#7DF9FF"
+    assert tqdm_calls[0]["desc"] == "Energy"
+    assert tqdm_calls[0]["file"] is stream
+    assert tqdm_calls[0]["total"] == 3
+    assert progress_postfixes == [("284.7 eV", False), ("285.0 eV", False), ("285.2 eV", False)]
+    assert progress_updates == [1, 1, 1]
+    assert progress_closed == [True]
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_energy_progress_bar_wrapper_stays_disabled_when_streams_are_suppressed(monkeypatch):
+    """Ensure stream suppression disables the energy progress bar exactly like the opt-out."""
+    runtime = CupyRsoxsBackendRuntime()
+    morphology = types.SimpleNamespace(backend_options={"energy_progress_bar": True})
+    stream = types.SimpleNamespace(isatty=lambda: True)
+
+    def _fail_import(name):
+        raise AssertionError(f"Unexpected tqdm import: {name!r}")
+
+    monkeypatch.setattr(importlib, "import_module", _fail_import)
+
+    with runtime._iter_completed_energies(
+        morphology,
+        (284.7, 285.0, 285.2),
+        stdout=False,
+        stderr=False,
+        stream=stream,
+    ) as iterator:
+        observed = list(iterator)
+
+    assert observed == [(0, 284.7), (1, 285.0), (2, 285.2)]
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_result_streaming_summary_reports_mode_chunk_and_layout(capsys):
+    """Ensure the pre-loop stdout summary reports result streaming settings exactly once."""
+    runtime = CupyRsoxsBackendRuntime()
+    runtime._emit_result_streaming_summary(
+        stdout=True,
+        result_residency="host",
+        chunk_size=3,
+        result_layout="integrated",
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == "Result streaming: mode=host, chunk=3, layout=integrated.\n"
+    assert captured.err == ""
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_result_streaming_summary_respects_stdout_suppression(capsys):
+    """Ensure the pre-loop summary stays silent when stdout output is disabled."""
+    runtime = CupyRsoxsBackendRuntime()
+    runtime._emit_result_streaming_summary(
+        stdout=False,
+        result_residency="device",
+        chunk_size=1,
+        result_layout="detector",
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_rsoxs_accessor_registration_imports_only_once_after_success(monkeypatch):
+    """Ensure successful accessor registration is cached after the first import."""
+    monkeypatch.setattr(cupy_rsoxs_module, "_PYHYPER_RSOXS_ACCESSOR_STATUS", None)
+
+    class _FakeDataArray:
+        pass
+
+    fake_xr = types.SimpleNamespace(DataArray=_FakeDataArray)
+    monkeypatch.setattr(cupy_rsoxs_module, "xr", fake_xr)
+
+    imports: list[str] = []
+
+    original_import_module = cupy_rsoxs_module.importlib.import_module
+
+    def _fake_import_module(name):
+        imports.append(name)
+        if name != "PyHyperScattering.RSoXS":
+            return original_import_module(name)
+        _FakeDataArray.rsoxs = property(lambda self: None)
+        return types.SimpleNamespace()
+
+    monkeypatch.setattr(cupy_rsoxs_module.importlib, "import_module", _fake_import_module)
+
+    cupy_rsoxs_module._ensure_pyhyper_rsoxs_accessor_registered()
+    cupy_rsoxs_module._ensure_pyhyper_rsoxs_accessor_registered()
+
+    assert imports == ["PyHyperScattering.RSoXS"]
+    assert hasattr(_FakeDataArray, "rsoxs")
+    assert cupy_rsoxs_module._PYHYPER_RSOXS_ACCESSOR_STATUS is True
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_rsoxs_accessor_registration_caches_missing_import(monkeypatch):
+    """Ensure failed accessor imports are cached and not retried."""
+    monkeypatch.setattr(cupy_rsoxs_module, "_PYHYPER_RSOXS_ACCESSOR_STATUS", None)
+
+    class _FakeDataArray:
+        pass
+
+    fake_xr = types.SimpleNamespace(DataArray=_FakeDataArray)
+    monkeypatch.setattr(cupy_rsoxs_module, "xr", fake_xr)
+
+    imports: list[str] = []
+
+    original_import_module = cupy_rsoxs_module.importlib.import_module
+
+    def _fake_import_module(name):
+        imports.append(name)
+        if name == "PyHyperScattering.RSoXS":
+            raise ImportError("missing for test")
+        return original_import_module(name)
+
+    monkeypatch.setattr(cupy_rsoxs_module.importlib, "import_module", _fake_import_module)
+
+    cupy_rsoxs_module._ensure_pyhyper_rsoxs_accessor_registered()
+    cupy_rsoxs_module._ensure_pyhyper_rsoxs_accessor_registered()
+
+    assert imports == ["PyHyperScattering.RSoXS"]
+    assert not hasattr(_FakeDataArray, "rsoxs")
+    assert cupy_rsoxs_module._PYHYPER_RSOXS_ACCESSOR_STATUS is False
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_integrated_to_xarray_calls_accessor_registration_helper(monkeypatch):
+    """Ensure integrated xarray conversion runs the lazy accessor-registration hook."""
+    calls: list[str] = []
+
+    def _fake_ensure():
+        calls.append("called")
+
+    monkeypatch.setattr(cupy_rsoxs_module, "_ensure_pyhyper_rsoxs_accessor_registered", _fake_ensure)
+
+    result = CupyIntegratedResult(
+        data=np.ones((1, 360, 4), dtype=np.float32),
+        energies=(285.0,),
+        q=np.arange(4, dtype=np.float64),
+        chi=np.linspace(-179.5, 179.5, 360, dtype=np.float64),
+        attrs={"source_integrator": "cupy-rsoxs", "integration_compatibility": "NRSSIntegrator"},
+    )
+
+    converted = result.to_xarray()
+
+    assert calls == ["called"]
+    assert converted.dims == ("energy", "chi", "q")
+    assert converted.attrs["integration_compatibility"] == "NRSSIntegrator"
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_i_only_result_to_xarray_returns_q_energy_dataarray():
+    """Ensure the chi-averaged observable wrapper exposes a DataArray with q/energy coords."""
+    result = CupyIntegratedIntensityResult(
+        data=np.ones((2, 4), dtype=np.float64),
+        energies=(285.0, 286.0),
+        q=np.arange(4, dtype=np.float64),
+        attrs={"source_integrator": "cupy-rsoxs", "result_layout": "i_only"},
+        q_perp=np.arange(4, dtype=np.float64) * 0.1,
+    )
+
+    converted = result.to_xarray()
+
+    assert converted.dims == ("energy", "q")
+    assert "q_perp" in converted.coords
+    assert converted.attrs["result_layout"] == "i_only"
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_observable_dataset_result_to_xarray_returns_dataset():
+    """Ensure multi-channel observable layouts are wrapped as an xarray Dataset."""
+    result = CupyObservableDatasetResult(
+        data=np.ones((2, 2, 4), dtype=np.float64),
+        energies=(285.0, 286.0),
+        channel_names=("I_para", "I_perp"),
+        q=np.arange(4, dtype=np.float64),
+        attrs={"source_integrator": "cupy-rsoxs", "result_layout": "i_para_i_perp"},
+    )
+
+    converted = result.to_xarray()
+
+    assert isinstance(converted, xr.Dataset)
+    assert set(converted.data_vars) == {"I_para", "I_perp"}
+    assert converted["I_para"].dims == ("energy", "q")
+    assert converted.attrs["result_layout"] == "i_para_i_perp"
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_energy_progress_bar_wrapper_uses_tqdm_auto_in_notebook_context(monkeypatch):
+    """Ensure notebook kernels use tqdm.auto when terminal TTY progress is unavailable."""
+    runtime = CupyRsoxsBackendRuntime()
+    morphology = types.SimpleNamespace(backend_options={"energy_progress_bar": True})
+    stream = types.SimpleNamespace(
+        writes=[],
+        flush=lambda: None,
+        isatty=lambda: False,
+    )
+    stream.write = lambda text: stream.writes.append(text)
+    auto_calls: list[dict[str, object]] = []
+    progress_updates: list[int] = []
+    progress_closed: list[bool] = []
+    progress_postfixes: list[tuple[str, object]] = []
+
+    class _FakeProgressBar:
+        def set_postfix_str(self, text, refresh=False):
+            progress_postfixes.append((text, refresh))
+
+        def update(self, amount=1):
+            progress_updates.append(amount)
+
+        def close(self):
+            progress_closed.append(True)
+
+    def _fake_import(name):
+        if name == "IPython":
+            return types.SimpleNamespace(get_ipython=lambda: object())
+        if name == "tqdm.auto":
+            return types.SimpleNamespace(
+                tqdm=lambda **kwargs: auto_calls.append(kwargs) or _FakeProgressBar()
+            )
+        raise AssertionError(f"Unexpected import request: {name!r}")
+
+    monkeypatch.setattr(importlib, "import_module", _fake_import)
+    monkeypatch.setitem(sys.modules, "ipykernel", types.SimpleNamespace())
+
+    with runtime._iter_completed_energies(
+        morphology,
+        (284.7, 285.0, 285.2),
+        stdout=True,
+        stderr=True,
+        stream=stream,
+    ) as iterator:
+        observed = list(iterator)
+
+    assert observed == [(0, 284.7), (1, 285.0), (2, 285.2)]
+    assert len(auto_calls) == 1
+    assert auto_calls[0]["desc"] == "Energy"
+    assert auto_calls[0]["file"] is stream
+    assert auto_calls[0]["total"] == 3
+    assert auto_calls[0]["unit"] == "energy"
+    assert progress_postfixes == [("284.7 eV", False), ("285.0 eV", False), ("285.2 eV", False)]
+    assert progress_updates == [1, 1, 1]
+    assert progress_closed == [True]
 
 
 @pytest.mark.backend_specific
@@ -1653,6 +2196,7 @@ def test_cupy_host_resident_runtime_stages_authoritative_numpy_fields_to_device(
         result = morph.run(stdout=False, stderr=False, return_xarray=False)
         cp.cuda.Stream.null.synchronize()
         assert list(result.to_backend_array().shape) == [1, 4, 4]
+        assert inspect_array(result.to_backend_array())["namespace"] == "numpy"
         assert morph.last_runtime_staging_report
         assert all(
             plan.target_namespace == "cupy"
@@ -1690,6 +2234,7 @@ def test_cupy_mixed_precision_host_runtime_stages_numpy_float16_fields_to_device
         result = morph.run(stdout=False, stderr=False, return_xarray=False)
         cp.cuda.Stream.null.synchronize()
         assert list(result.to_backend_array().shape) == [1, 16, 16]
+        assert inspect_array(result.to_backend_array())["namespace"] == "numpy"
         assert morph.last_runtime_staging_report
         assert all(
             plan.target_namespace == "cupy" and plan.target_dtype == "float16"
@@ -1725,6 +2270,7 @@ def test_cupy_host_resident_runtime_skips_orientation_staging_for_explicit_isotr
         result = morph.run(stdout=False, stderr=False, return_xarray=False)
         cp.cuda.Stream.null.synchronize()
         assert list(result.to_backend_array().shape) == [1, 16, 16]
+        assert inspect_array(result.to_backend_array())["namespace"] == "numpy"
         staged_fields = sorted(
             (plan.material_id, plan.field_name)
             for plan in morph.last_runtime_staging_report
@@ -1747,7 +2293,7 @@ def test_cupy_host_resident_runtime_skips_orientation_staging_for_explicit_isotr
 
 @pytest.mark.gpu
 def test_cupy_device_resident_runtime_skips_orientation_staging_for_explicit_isotropic_contract_materials():
-    """Ensure enum-backed isotropic materials also skip orientation staging in device-resident mode."""
+    """Ensure device-resident morphology can still default to host-backed results."""
     cp = _import_cupy_required()
     morph = None
     try:
@@ -1760,6 +2306,7 @@ def test_cupy_device_resident_runtime_skips_orientation_staging_for_explicit_iso
         result = morph.run(stdout=False, stderr=False, return_xarray=False)
         cp.cuda.Stream.null.synchronize()
         assert list(result.to_backend_array().shape) == [1, 16, 16]
+        assert inspect_array(result.to_backend_array())["namespace"] == "numpy"
         staged_fields = sorted(
             (plan.material_id, plan.field_name)
             for plan in morph.last_runtime_staging_report
@@ -1771,6 +2318,34 @@ def test_cupy_device_resident_runtime_skips_orientation_staging_for_explicit_iso
             for plan in morph.last_runtime_staging_report
             if plan.original_namespace != "missing"
         )
+    finally:
+        if morph is not None:
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
+@pytest.mark.gpu
+def test_cupy_result_residency_device_keeps_results_on_gpu_independent_of_morphology_residency():
+    """Ensure result_residency='device' preserves CuPy-backed results without requiring device-resident morphology."""
+    cp = _import_cupy_required()
+    morph = None
+    try:
+        morph = _build_two_material_isotropic_block_morphology(
+            backend="cupy-rsoxs",
+            backend_options={"result_residency": "device"},
+            resident_mode="host",
+            field_namespace="numpy",
+            isotropic_representation="legacy_zero_array",
+        )
+        result = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.Stream.null.synchronize()
+        assert list(result.to_backend_array().shape) == [1, 16, 16]
+        assert inspect_array(result.to_backend_array())["namespace"] == "cupy"
+        scattering = result.to_xarray()
+        assert scattering.shape == (1, 16, 16)
     finally:
         if morph is not None:
             try:
@@ -1849,18 +2424,27 @@ def test_cupy_host_resident_tensor_coeff_shortcuts_legacy_zero_array_fields():
 
 
 @pytest.mark.gpu
-def test_cupy_device_resident_tensor_coeff_keeps_staging_all_legacy_zero_array_fields():
-    """Ensure the tensor_coeff legacy-zero shortcut remains scoped to host-resident staging."""
+@pytest.mark.parametrize("execution_path", ["tensor_coeff", "direct_polarization"])
+def test_cupy_device_resident_legacy_zero_array_shortcuts_runtime_view_without_mutating_authoritative_fields(
+    execution_path,
+):
+    """Ensure device-resident legacy-zero materials use the isotropic runtime view without altering authoritative arrays."""
     cp = _import_cupy_required()
     morph = None
     try:
         morph = _build_two_material_isotropic_block_morphology(
             backend="cupy-rsoxs",
-            backend_options={"execution_path": "tensor_coeff"},
+            backend_options={"execution_path": execution_path},
             resident_mode="device",
             field_namespace="cupy",
             isotropic_representation="legacy_zero_array",
         )
+        for material in morph.materials.values():
+            assert material._explicit_isotropic_contract is False
+            for field_name in ("S", "theta", "psi"):
+                field = getattr(material, field_name)
+                assert inspect_array(field)["namespace"] == "cupy"
+                assert int(cp.count_nonzero(field).item()) == 0
         result = morph.run(stdout=False, stderr=False, return_xarray=False)
         cp.cuda.Stream.null.synchronize()
         assert list(result.to_backend_array().shape) == [1, 16, 16]
@@ -1869,16 +2453,18 @@ def test_cupy_device_resident_tensor_coeff_keeps_staging_all_legacy_zero_array_f
             for plan in morph.last_runtime_staging_report
             if plan.original_namespace != "missing"
         )
-        assert staged_fields == [
-            (1, "S"),
-            (1, "Vfrac"),
-            (1, "psi"),
-            (1, "theta"),
-            (2, "S"),
-            (2, "Vfrac"),
-            (2, "psi"),
-            (2, "theta"),
-        ]
+        assert staged_fields == [(1, "Vfrac"), (2, "Vfrac")]
+        assert all(
+            plan.transfer == "none"
+            for plan in morph.last_runtime_staging_report
+            if plan.original_namespace != "missing"
+        )
+        for material in morph.materials.values():
+            assert material._explicit_isotropic_contract is False
+            for field_name in ("S", "theta", "psi"):
+                field = getattr(material, field_name)
+                assert inspect_array(field)["namespace"] == "cupy"
+                assert int(cp.count_nonzero(field).item()) == 0
     finally:
         if morph is not None:
             try:
@@ -2318,6 +2904,90 @@ def test_cupy_release_runtime_unlocks_mutation_and_allows_rerun():
         assert list(rerun.to_backend_array().shape) == [1, 4, 4]
         assert morph.simulated
         assert morph._results_locked
+    finally:
+        if morph is not None:
+            try:
+                morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
+@pytest.mark.gpu
+def test_cupy_release_runtime_clears_host_mode_pool_and_kernel_cache():
+    """Ensure host-mode release_runtime drops pooled bytes and NRSS kernel caches."""
+    cp = _import_cupy_required()
+    cupy_backend = importlib.import_module("NRSS.backends.cupy_rsoxs")
+
+    shape = (2, 4, 4)
+    energies = [285.0]
+    zeros = np.zeros(shape, dtype=np.float32)
+
+    mat1 = Material(
+        materialID=1,
+        Vfrac=np.ones(shape, dtype=np.float32),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="vacuum_1",
+    )
+    mat2 = Material(
+        materialID=2,
+        Vfrac=zeros.copy(),
+        S=zeros.copy(),
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=energies,
+        opt_constants={285.0: [0.0, 0.0, 0.0, 0.0]},
+        name="vacuum_2",
+    )
+    config = {
+        "CaseType": 0,
+        "MorphologyType": 0,
+        "Energies": energies,
+        "EAngleRotation": [0.0, 0.0, 0.0],
+        "RotMask": 0,
+        "WindowingType": 0,
+        "AlgorithmType": 0,
+        "ReferenceFrame": 1,
+        "EwaldsInterpolation": 1,
+    }
+
+    morph = None
+    try:
+        _release_cupy_memory()
+        cupy_backend._CUPY_KERNEL_CACHE.clear()
+        cupy_backend._CUPY_KERNEL_BACKEND_REPORT.clear()
+        if hasattr(cp, "clear_memo"):
+            cp.clear_memo()
+
+        morph = Morphology(
+            2,
+            materials={1: mat1, 2: mat2},
+            PhysSize=5.0,
+            config=config,
+            backend="cupy-rsoxs",
+            resident_mode="host",
+            input_policy="strict",
+            create_cy_object=True,
+        )
+        result = morph.run(stdout=False, stderr=False, return_xarray=False)
+        cp.cuda.runtime.deviceSynchronize()
+
+        assert list(result.to_backend_array().shape) == [1, 4, 4]
+        assert cp.get_default_memory_pool().total_bytes() > 0
+        assert len(cupy_backend._CUPY_KERNEL_CACHE) > 0
+
+        morph.release_runtime()
+        cp.cuda.runtime.deviceSynchronize()
+
+        assert morph._backend_result is None
+        assert morph.scatteringPattern is None
+        assert cp.get_default_memory_pool().used_bytes() == 0
+        assert cp.get_default_memory_pool().total_bytes() == 0
+        assert len(cupy_backend._CUPY_KERNEL_CACHE) == 0
     finally:
         if morph is not None:
             try:
@@ -3138,6 +3808,274 @@ def test_visualizer_two_material_outputs_and_summary_are_consistent(capsys, monk
         assert image.shape[2] == 4
 
 
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
+def test_visualizer_crops_before_plotting_and_only_requests_needed_fields(monkeypatch):
+    """Ensure slice rendering uses the cropped window and avoids unused effective fields."""
+    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
+
+    plotted_shapes = []
+    requested_fields = []
+    original_imshow = Axes.imshow
+    original_effective_field = Morphology._material_effective_field
+
+    def tracked_imshow(self, data, *args, **kwargs):
+        plotted_shapes.append(np.shape(data))
+        return original_imshow(self, data, *args, **kwargs)
+
+    def tracked_effective_field(self, material, field_name):
+        requested_fields.append(field_name)
+        return original_effective_field(self, material, field_name)
+
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+    monkeypatch.setattr(Axes, "imshow", tracked_imshow)
+    monkeypatch.setattr(Morphology, "_material_effective_field", tracked_effective_field)
+
+    shape = (1, 10, 20)
+    vfrac = np.zeros(shape, dtype=np.float32)
+    vfrac[:, 2:8, 4:16] = 1.0
+
+    mat = Material(
+        materialID=1,
+        Vfrac=vfrac,
+        S=np.zeros(shape, dtype=np.float32),
+        theta=np.zeros(shape, dtype=np.float32),
+        psi=np.zeros(shape, dtype=np.float32),
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    images = morph.visualize_materials(
+        z_slice=0,
+        subsample=18,
+        outputmat=[1],
+        outputplot=["vfrac"],
+        outputaxes=False,
+        runquiet=True,
+        batchMode=True,
+    )
+
+    assert len(images) == 1
+    assert requested_fields == ["Vfrac"]
+    assert plotted_shapes == [(10, 18)]
+
+
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
+def test_visualizer_closes_figures_after_show(monkeypatch):
+    """Ensure interactive visualization does not leave figures resident after display."""
+    import matplotlib.pyplot as plt
+
+    plt.close("all")
+    shown = []
+
+    def tracked_show(*args, **kwargs):
+        shown.append(tuple(plt.get_fignums()))
+
+    monkeypatch.setattr(plt, "show", tracked_show)
+
+    shape = (1, 8, 8)
+    zeros = np.zeros(shape, dtype=np.float32)
+    ones = np.ones(shape, dtype=np.float32)
+
+    mat = Material(
+        materialID=1,
+        Vfrac=ones,
+        S=0.5 * ones,
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    morph.visualize_materials(
+        z_slice=0,
+        subsample=8,
+        runquiet=False,
+        batchMode=False,
+    )
+
+    assert shown
+    assert plt.get_fignums() == []
+
+
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
+def test_visualizer_can_skip_histograms(monkeypatch):
+    """Ensure interactive visualization can suppress histogram panels explicitly."""
+    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
+
+    hist_calls = []
+    original_hist = Axes.hist
+
+    def tracked_hist(self, *args, **kwargs):
+        hist_calls.append(True)
+        return original_hist(self, *args, **kwargs)
+
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+    monkeypatch.setattr(Axes, "hist", tracked_hist)
+
+    shape = (1, 8, 8)
+    zeros = np.zeros(shape, dtype=np.float32)
+    ones = np.ones(shape, dtype=np.float32)
+
+    mat = Material(
+        materialID=1,
+        Vfrac=ones,
+        S=0.5 * ones,
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    morph.visualize_materials(
+        z_slice=0,
+        subsample=8,
+        runquiet=False,
+        batchMode=True,
+        histograms=False,
+    )
+
+    assert hist_calls == []
+
+
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
+def test_visualizer_histogram_auto_mode_samples_large_arrays(monkeypatch):
+    """Ensure histogram_mode='auto' samples when the volume exceeds the threshold."""
+    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
+
+    hist_lengths = []
+    original_hist = Axes.hist
+
+    def tracked_hist(self, values, *args, **kwargs):
+        hist_lengths.append(len(values))
+        return original_hist(self, values, *args, **kwargs)
+
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+    monkeypatch.setattr(Axes, "hist", tracked_hist)
+
+    shape = (1, 320, 320)
+    yy, xx = np.indices(shape[1:])
+    base = ((yy + xx) % 17).astype(np.float32) / 16.0
+    vfrac = base[None, :, :]
+    s_field = (0.5 * vfrac).astype(np.float32)
+    theta = np.zeros(shape, dtype=np.float32)
+    psi = np.zeros(shape, dtype=np.float32)
+
+    mat = Material(
+        materialID=1,
+        Vfrac=vfrac,
+        S=s_field,
+        theta=theta,
+        psi=psi,
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    morph.visualize_materials(
+        z_slice=0,
+        subsample=64,
+        runquiet=False,
+        batchMode=True,
+        histograms=True,
+        histogram_mode="auto",
+        histogram_sample_size=100_000,
+        histogram_sample_threshold=100_000,
+    )
+
+    assert hist_lengths == [100_000, 100_000, 100_000, 100_000]
+
+
+@pytest.mark.backend_agnostic_contract
+@pytest.mark.cpu
+def test_visualizer_histogram_full_mode_uses_all_voxels(monkeypatch):
+    """Ensure histogram_mode='full' does not sample even above the auto threshold."""
+    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
+
+    hist_lengths = []
+    original_hist = Axes.hist
+
+    def tracked_hist(self, values, *args, **kwargs):
+        hist_lengths.append(len(values))
+        return original_hist(self, values, *args, **kwargs)
+
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+    monkeypatch.setattr(Axes, "hist", tracked_hist)
+
+    shape = (1, 320, 320)
+    ones = np.ones(shape, dtype=np.float32)
+    zeros = np.zeros(shape, dtype=np.float32)
+
+    mat = Material(
+        materialID=1,
+        Vfrac=ones,
+        S=0.5 * ones,
+        theta=zeros.copy(),
+        psi=zeros.copy(),
+        energies=[285.0],
+        opt_constants={285.0: [2e-4, 1e-4, 2e-4, 1e-4]},
+        name="mat1",
+    )
+
+    morph = Morphology(
+        1,
+        materials={1: mat},
+        PhysSize=5.0,
+        create_cy_object=False,
+    )
+
+    morph.visualize_materials(
+        z_slice=0,
+        subsample=64,
+        runquiet=False,
+        batchMode=True,
+        histograms=True,
+        histogram_mode="full",
+        histogram_sample_size=100_000,
+        histogram_sample_threshold=100_000,
+    )
+
+    assert hist_lengths == [102_400, 102_400, 102_400, 102_400]
+
+
 @lru_cache(maxsize=1)
 def _has_visible_gpu() -> bool:
     try:
@@ -3414,6 +4352,122 @@ def _assert_scattering_similarity(
     assert float(abs_diff.max()) <= max_abs_max
 
 
+def _assert_integrated_remesh_parity(candidate, reference) -> None:
+    assert candidate.dims == reference.dims
+    assert candidate.sizes == reference.sizes
+
+    for coord_name in ("energy", "chi", "q"):
+        np.testing.assert_allclose(
+            np.asarray(candidate.coords[coord_name].values),
+            np.asarray(reference.coords[coord_name].values),
+            rtol=0.0,
+            atol=1e-12,
+            equal_nan=True,
+        )
+
+    if "q_perp" in reference.coords:
+        assert "q_perp" in candidate.coords
+        np.testing.assert_allclose(
+            np.asarray(candidate.coords["q_perp"].values),
+            np.asarray(reference.coords["q_perp"].values),
+            rtol=0.0,
+            atol=1e-12,
+            equal_nan=True,
+        )
+    else:
+        assert "q_perp" not in candidate.coords
+
+    if "q_abs" in reference.coords:
+        assert "q_abs" in candidate.coords
+        np.testing.assert_allclose(
+            np.asarray(candidate.coords["q_abs"].values),
+            np.asarray(reference.coords["q_abs"].values),
+            rtol=0.0,
+            atol=1e-12,
+            equal_nan=True,
+        )
+    else:
+        assert "q_abs" not in candidate.coords
+
+    for attr_name in ("radial_semantics", "nrss_semantic_mode", "radial_coordinate_mode", "q_axis_note"):
+        assert candidate.attrs.get(attr_name) == reference.attrs.get(attr_name)
+
+    np.testing.assert_allclose(
+        np.asarray(candidate.values),
+        np.asarray(reference.values),
+        rtol=1e-6,
+        atol=1e-9,
+        equal_nan=True,
+    )
+
+
+def _weighted_nanmean_over_chi_numpy(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    finite = np.isfinite(values)
+    safe_values = np.where(finite, values, 0.0)
+    finite_weights = finite.astype(np.float64)
+    if weights.ndim == 1:
+        numerator = np.tensordot(safe_values, weights, axes=([1], [0]))
+        denominator = np.tensordot(finite_weights, weights, axes=([1], [0]))
+    else:
+        numerator = np.moveaxis(np.tensordot(safe_values, weights, axes=([1], [1])), -1, 1)
+        denominator = np.moveaxis(np.tensordot(finite_weights, weights, axes=([1], [1])), -1, 1)
+    averaged = np.full_like(numerator, np.nan, dtype=np.float64)
+    valid = denominator > 0
+    averaged[valid] = numerator[valid] / denominator[valid]
+    return averaged
+
+
+def _reference_observable_reductions(
+    remeshed: xr.DataArray,
+    *,
+    total_chi_wedge_deg: float,
+) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:
+    runtime = CupyRsoxsBackendRuntime()
+    values = np.asarray(remeshed.values, dtype=np.float64)
+    q = np.asarray(remeshed.coords["q"].values, dtype=np.float64)
+    energy = np.asarray(remeshed.coords["energy"].values, dtype=np.float64)
+    attrs = dict(remeshed.attrs)
+
+    all_chi = _weighted_nanmean_over_chi_numpy(values, np.ones(values.shape[1], dtype=np.float64))
+    sector_weights = runtime._sector_mean_weights(
+        np.asarray(remeshed.coords["chi"].values, dtype=np.float64),
+        total_chi_wedge_deg,
+    )
+    sectors = _weighted_nanmean_over_chi_numpy(values, sector_weights)
+    i_para = xr.DataArray(
+        sectors[:, 0, :],
+        dims=("energy", "q"),
+        coords={"energy": energy, "q": q},
+        attrs=dict(attrs),
+    )
+    i_perp = xr.DataArray(
+        sectors[:, 1, :],
+        dims=("energy", "q"),
+        coords={"energy": energy, "q": q},
+        attrs=dict(attrs),
+    )
+    i_mean = xr.DataArray(
+        all_chi,
+        dims=("energy", "q"),
+        coords={"energy": energy, "q": q},
+        attrs=dict(attrs),
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        anisotropy = (i_para - i_perp) / (i_para + i_perp)
+    return i_mean, i_para, i_perp, anisotropy
+
+
+def _symmetrize_opposite_chi(remeshed: xr.DataArray) -> xr.DataArray:
+    values = np.asarray(remeshed.values, dtype=np.float64)
+    symmetrized = 0.5 * (values + np.roll(values, values.shape[1] // 2, axis=1))
+    return xr.DataArray(
+        symmetrized,
+        dims=remeshed.dims,
+        coords={name: coord for name, coord in remeshed.coords.items()},
+        attrs=dict(remeshed.attrs),
+    )
+
+
 def _build_two_material_asymmetric_lobed_morphology(
     energies: list[float],
     eangle_rotation: list[float],
@@ -3596,6 +4650,199 @@ def test_pyhyperscattering_integrator_to_xarray_smoke(nrss_path: ComputationPath
     # The tiny remesh path can pick up a thin NaN fringe at the edge; keep this
     # as a broad sanity check rather than a tight determinism threshold.
     assert float(np.isfinite(remeshed_vals).mean()) >= 0.89
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff", "cupy_direct_polarization")
+def test_cupy_internal_integrated_result_matches_nrssintegrator_multi_energy_smoke(
+    nrss_path: ComputationPath,
+):
+    """Validate maintained reduced-result layouts against the raw->NRSSIntegrator workflow."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for internal integration parity smoke test.")
+
+    from PyHyperScattering.NRSSIntegrator import NRSSIntegrator
+
+    energies = [285.0, 286.0, 287.0]
+    total_chi_wedge_deg = 90.0
+    reference_morph = None
+    integrated_morph = None
+    i_only_morph = None
+    i_para_i_perp_morph = None
+    i_a_morph = None
+    try:
+        base_backend_options = dict(nrss_path.backend_options)
+        reference_morph = _build_two_material_sphere_morphology(
+            energies=energies,
+            shape=(32, 32, 32),
+            backend=nrss_path.backend,
+            backend_options={**base_backend_options, "result_chunk_size": 2},
+            resident_mode=nrss_path.resident_mode,
+            input_policy="strict",
+            ownership_policy=nrss_path.ownership_policy,
+            field_namespace=nrss_path.field_namespace,
+        )
+        raw = reference_morph.run(stdout=False, stderr=False, return_xarray=True)
+        reference = NRSSIntegrator(
+            force_np_backend=True,
+            use_chunked_processing=False,
+        ).integrateImageStack(raw)
+        reference_i, reference_i_para, reference_i_perp, reference_a = _reference_observable_reductions(
+            reference,
+            total_chi_wedge_deg=total_chi_wedge_deg,
+        )
+        reference_a_pyhyper = _symmetrize_opposite_chi(reference).rsoxs.AR(
+            chi_width=total_chi_wedge_deg / 2.0
+        )
+
+        integrated_morph = _build_two_material_sphere_morphology(
+            energies=energies,
+            shape=(32, 32, 32),
+            backend=nrss_path.backend,
+            backend_options={
+                **base_backend_options,
+                "result_chunk_size": 2,
+                "result_layout": "integrated",
+            },
+            resident_mode=nrss_path.resident_mode,
+            input_policy="strict",
+            ownership_policy=nrss_path.ownership_policy,
+            field_namespace=nrss_path.field_namespace,
+        )
+        candidate = integrated_morph.run(stdout=False, stderr=False, return_xarray=True)
+
+        assert candidate.attrs["source_integrator"] == "cupy-rsoxs"
+        assert candidate.attrs["integration_compatibility"] == "NRSSIntegrator"
+        _assert_integrated_remesh_parity(candidate, reference)
+
+        i_only_morph = _build_two_material_sphere_morphology(
+            energies=energies,
+            shape=(32, 32, 32),
+            backend=nrss_path.backend,
+            backend_options={
+                **base_backend_options,
+                "result_chunk_size": 2,
+                "result_layout": "i_only",
+                "total_chi_wedge_deg": total_chi_wedge_deg,
+            },
+            resident_mode=nrss_path.resident_mode,
+            input_policy="strict",
+            ownership_policy=nrss_path.ownership_policy,
+            field_namespace=nrss_path.field_namespace,
+        )
+        i_only_candidate = i_only_morph.run(stdout=False, stderr=False, return_xarray=True)
+
+        assert isinstance(i_only_candidate, xr.DataArray)
+        assert i_only_candidate.dims == ("energy", "q")
+        np.testing.assert_allclose(
+            np.asarray(i_only_candidate.values),
+            np.asarray(reference_i.values),
+            rtol=1e-6,
+            atol=1e-9,
+            equal_nan=True,
+        )
+
+        i_para_i_perp_morph = _build_two_material_sphere_morphology(
+            energies=energies,
+            shape=(32, 32, 32),
+            backend=nrss_path.backend,
+            backend_options={
+                **base_backend_options,
+                "result_chunk_size": 2,
+                "result_layout": "i_para_i_perp",
+                "total_chi_wedge_deg": total_chi_wedge_deg,
+            },
+            resident_mode=nrss_path.resident_mode,
+            input_policy="strict",
+            ownership_policy=nrss_path.ownership_policy,
+            field_namespace=nrss_path.field_namespace,
+        )
+        i_para_i_perp_candidate = i_para_i_perp_morph.run(stdout=False, stderr=False, return_xarray=True)
+
+        assert isinstance(i_para_i_perp_candidate, xr.Dataset)
+        assert set(i_para_i_perp_candidate.data_vars) == {"I_para", "I_perp"}
+        np.testing.assert_allclose(
+            np.asarray(i_para_i_perp_candidate["I_para"].values),
+            np.asarray(reference_i_para.values),
+            rtol=1e-6,
+            atol=1e-9,
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            np.asarray(i_para_i_perp_candidate["I_perp"].values),
+            np.asarray(reference_i_perp.values),
+            rtol=1e-6,
+            atol=1e-9,
+            equal_nan=True,
+        )
+
+        i_a_morph = _build_two_material_sphere_morphology(
+            energies=energies,
+            shape=(32, 32, 32),
+            backend=nrss_path.backend,
+            backend_options={
+                **base_backend_options,
+                "result_chunk_size": 2,
+                "result_layout": "i_a",
+                "total_chi_wedge_deg": total_chi_wedge_deg,
+            },
+            resident_mode=nrss_path.resident_mode,
+            input_policy="strict",
+            ownership_policy=nrss_path.ownership_policy,
+            field_namespace=nrss_path.field_namespace,
+        )
+        i_a_candidate = i_a_morph.run(stdout=False, stderr=False, return_xarray=True)
+
+        assert isinstance(i_a_candidate, xr.Dataset)
+        assert set(i_a_candidate.data_vars) == {"I", "A"}
+        np.testing.assert_allclose(
+            np.asarray(i_a_candidate["I"].values),
+            np.asarray(reference_i.values),
+            rtol=1e-6,
+            atol=1e-9,
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            np.asarray(i_a_candidate["A"].values),
+            np.asarray(reference_a.values),
+            rtol=1e-6,
+            atol=1e-9,
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            np.asarray(i_a_candidate["A"].values),
+            np.asarray(reference_a_pyhyper.values),
+            rtol=1e-6,
+            atol=1e-9,
+            equal_nan=True,
+        )
+    finally:
+        if reference_morph is not None:
+            try:
+                reference_morph.release_runtime()
+            except Exception:
+                pass
+        if integrated_morph is not None:
+            try:
+                integrated_morph.release_runtime()
+            except Exception:
+                pass
+        if i_only_morph is not None:
+            try:
+                i_only_morph.release_runtime()
+            except Exception:
+                pass
+        if i_para_i_perp_morph is not None:
+            try:
+                i_para_i_perp_morph.release_runtime()
+            except Exception:
+                pass
+        if i_a_morph is not None:
+            try:
+                i_a_morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
 
 
 @pytest.mark.gpu

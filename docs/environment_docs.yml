@@ -5,8 +5,6 @@ channels:
   - defaults
 dependencies:
   - python==3.10
-  - cyrsoxs
-  - cupy-cuda12x
   - sphinx==7.1.2
   - pydata-sphinx-theme==0.13.3
   - sphinx-design

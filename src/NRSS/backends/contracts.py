@@ -73,10 +73,31 @@ _BACKEND_ARRAY_CONTRACTS = {
         ),
         "default_igor_shift_backend": "nvrtc",
         "default_direct_polarization_backend": "nvrtc",
+        "default_direct_isotropic_mode": None,
+        "supported_direct_isotropic_modes": (
+            None,
+            "cached_base",
+        ),
+        "default_energy_progress_bar": True,
+        "default_result_residency": "host",
+        "default_result_chunk_size": 1,
+        "default_result_layout": "detector",
+        "default_total_chi_wedge_deg": 90.0,
         "supported_rawkernel_backends": (
             "auto",
             "nvcc",
             "nvrtc",
+        ),
+        "supported_result_residencies": (
+            "host",
+            "device",
+        ),
+        "supported_result_layouts": (
+            "detector",
+            "integrated",
+            "i_only",
+            "i_para_i_perp",
+            "i_a",
         ),
         "supported_backend_options": (
             "execution_path",
@@ -85,6 +106,12 @@ _BACKEND_ARRAY_CONTRACTS = {
             "kernel_preload_stage",
             "igor_shift_backend",
             "direct_polarization_backend",
+            "direct_isotropic_mode",
+            "energy_progress_bar",
+            "result_residency",
+            "result_chunk_size",
+            "result_layout",
+            "total_chi_wedge_deg",
         ),
         "runtime_compute_dtype": "float32",
         "runtime_complex_dtype": "complex64",
@@ -165,6 +192,127 @@ def normalize_rawkernel_backend_name(backend: Any) -> str:
         "default": "nvrtc",
     }
     return aliases.get(cleaned, cleaned)
+
+
+def normalize_direct_isotropic_mode_name(mode: Any) -> str | None:
+    if mode is None:
+        return None
+
+    cleaned = str(mode).strip().lower()
+    aliases = {
+        "": None,
+        "none": None,
+        "off": None,
+        "default": None,
+        "cached-base": "cached_base",
+    }
+    return aliases.get(cleaned, cleaned)
+
+
+def normalize_energy_progress_bar_name(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+
+    cleaned = str(value).strip().lower()
+    aliases = {
+        "": False,
+        "0": False,
+        "1": True,
+        "default": False,
+        "false": False,
+        "none": False,
+        "no": False,
+        "off": False,
+        "on": True,
+        "true": True,
+        "yes": True,
+    }
+    if cleaned not in aliases:
+        raise BackendOptionError(
+            "Backend 'cupy-rsoxs' does not support energy_progress_bar="
+            f"{value!r}. Supported values: True, False, 'on', 'off'."
+        )
+    return aliases[cleaned]
+
+
+def normalize_result_residency_name(value: Any) -> str:
+    if value is None:
+        return "host"
+
+    cleaned = str(value).strip().lower()
+    aliases = {
+        "": "host",
+        "cpu": "host",
+        "default": "host",
+        "gpu": "device",
+    }
+    return aliases.get(cleaned, cleaned)
+
+
+def normalize_result_chunk_size(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip().lower()
+        if cleaned in {"", "auto", "default", "none", "off"}:
+            return None
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise BackendOptionError(
+            "Backend 'cupy-rsoxs' result_chunk_size must be a positive integer "
+            "or one of: auto, default, none, off."
+        ) from exc
+    if normalized <= 0:
+        raise BackendOptionError(
+            "Backend 'cupy-rsoxs' result_chunk_size must be a positive integer."
+        )
+    return normalized
+
+
+def normalize_result_layout_name(value: Any) -> str:
+    if value is None:
+        return "detector"
+
+    cleaned = str(value).strip().lower()
+    aliases = {
+        "": "detector",
+        "default": "detector",
+        "raw": "detector",
+        "scattering": "detector",
+        "detector": "detector",
+        "integrated": "integrated",
+        "reduced": "integrated",
+        "polar": "integrated",
+        "i-only": "i_only",
+        "i_only": "i_only",
+        "i": "i_only",
+        "i-para-i-perp": "i_para_i_perp",
+        "i_para_i_perp": "i_para_i_perp",
+        "ipara_iperp": "i_para_i_perp",
+        "i-and-a": "i_a",
+        "i_a": "i_a",
+        "ia": "i_a",
+    }
+    return aliases.get(cleaned, cleaned)
+
+
+def normalize_total_chi_wedge_deg(value: Any) -> float:
+    if value is None:
+        return 90.0
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise BackendOptionError(
+            "Backend 'cupy-rsoxs' total_chi_wedge_deg must be a finite float in (0, 180]."
+        ) from exc
+    if not np.isfinite(normalized) or normalized <= 0.0 or normalized > 180.0:
+        raise BackendOptionError(
+            "Backend 'cupy-rsoxs' total_chi_wedge_deg must be a finite float in (0, 180]."
+        )
+    return normalized
 
 
 def normalize_resident_mode(
@@ -312,6 +460,63 @@ def normalize_backend_options(
                 f"Supported values: {', '.join(spec.get('supported_rawkernel_backends', ('nvrtc',)))}."
             )
         normalized_options[option_name] = normalized_backend
+
+    if "direct_isotropic_mode" in spec["supported_backend_options"]:
+        direct_isotropic_mode = normalize_direct_isotropic_mode_name(
+            options.get("direct_isotropic_mode", spec.get("default_direct_isotropic_mode"))
+        )
+        if direct_isotropic_mode not in spec.get("supported_direct_isotropic_modes", (None,)):
+            supported_modes = tuple(
+                "None" if mode is None else mode
+                for mode in spec.get("supported_direct_isotropic_modes", (None,))
+            )
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support direct_isotropic_mode "
+                f"{direct_isotropic_mode!r}. Supported modes: {', '.join(supported_modes)}."
+            )
+        normalized_options["direct_isotropic_mode"] = direct_isotropic_mode
+
+    if "energy_progress_bar" in spec["supported_backend_options"]:
+        normalized_options["energy_progress_bar"] = normalize_energy_progress_bar_name(
+            options.get("energy_progress_bar", spec.get("default_energy_progress_bar", False))
+        )
+
+    if "result_residency" in spec["supported_backend_options"]:
+        result_residency = normalize_result_residency_name(
+            options.get("result_residency", spec.get("default_result_residency", "host"))
+        )
+        if result_residency not in spec.get("supported_result_residencies", ("host",)):
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support result_residency "
+                f"{result_residency!r}. Supported values: "
+                f"{', '.join(spec.get('supported_result_residencies', ('host',)))}."
+            )
+        normalized_options["result_residency"] = result_residency
+
+    if "result_chunk_size" in spec["supported_backend_options"]:
+        result_chunk_size = normalize_result_chunk_size(
+            options.get("result_chunk_size", spec.get("default_result_chunk_size"))
+        )
+        if result_chunk_size is None:
+            result_chunk_size = int(spec.get("default_result_chunk_size", 1))
+        normalized_options["result_chunk_size"] = result_chunk_size
+
+    if "result_layout" in spec["supported_backend_options"]:
+        result_layout = normalize_result_layout_name(
+            options.get("result_layout", spec.get("default_result_layout", "detector"))
+        )
+        if result_layout not in spec.get("supported_result_layouts", ("detector",)):
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support result_layout "
+                f"{result_layout!r}. Supported values: "
+                f"{', '.join(spec.get('supported_result_layouts', ('detector',)))}."
+            )
+        normalized_options["result_layout"] = result_layout
+
+    if "total_chi_wedge_deg" in spec["supported_backend_options"]:
+        normalized_options["total_chi_wedge_deg"] = normalize_total_chi_wedge_deg(
+            options.get("total_chi_wedge_deg", spec.get("default_total_chi_wedge_deg", 90.0))
+        )
 
     return normalized_options
 

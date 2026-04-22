@@ -1,7 +1,8 @@
 from enum import Enum
 import numpy as np
 from NRSS.morphology import Material, Morphology
-from PyHyperScattering.integrate import WPIntegrator
+from NRSS.material_contracts import SFieldMode
+from PyHyperScattering.integrate import NRSSIntegrator
 import pickle, lzma
 from pathlib import Path
 import glob
@@ -29,7 +30,7 @@ class EulerStyle(Enum):
     """
     creates extraordindary index orientation that is tangential to the core particle center and longitudinal such that all orientations are not parallel to the XY plane except at the north and south poles
     """
-def adsorbed_polymer_morphology(args):
+def adsorbed_polymer_morphology(args, *, backend=None, backend_options=None):
     """
     Generates a morphology object for an adsorbed polymer on a sphere.
 
@@ -45,6 +46,11 @@ def adsorbed_polymer_morphology(args):
             - "energies" (list): A list of energies for the model.
             - "oc_polymer" (object): The opt_constants object for the polymer.
             - "oc_particle" (object): The opt_constants object for the particle.
+        backend (str or None, optional): Preferred NRSS backend to construct on
+            the morphology object. Defaults to ``None`` so NRSS resolves the
+            maintained default backend.
+        backend_options (dict or None, optional): Backend options forwarded to
+            the ``Morphology`` constructor. Defaults to ``None``.
 
     Returns:
         morph (Morphology): A Morphology object representing the adsorbed polymer on a sphere.
@@ -97,8 +103,6 @@ def adsorbed_polymer_morphology(args):
     S_field *= v_sphere == False
 
     # constructing the model object
-    a_zeros = np.zeros(v_sphere.shape, dtype=np.float32)
-
     mat1_poly = Material(
         materialID=1,
         Vfrac=(1 - v_sphere).astype(np.float32),
@@ -114,9 +118,9 @@ def adsorbed_polymer_morphology(args):
     mat2_particle = Material(
         materialID=2,
         Vfrac=v_sphere.astype(np.float32),
-        S=a_zeros,
-        theta=a_zeros,
-        psi=a_zeros,
+        S=SFieldMode.ISOTROPIC,
+        theta=None,
+        psi=None,
         NumZYX=v_sphere.shape,
         energies=args["energies"],
         opt_constants=args["oc_particle"].opt_constants,
@@ -127,6 +131,13 @@ def adsorbed_polymer_morphology(args):
         2,
         {1: mat1_poly, 2: mat2_particle},
         PhysSize=args["PhysSize_nm_per_voxel"],
+        # Keep this large tutorial on the historical backend. The default
+        # cupy-rsoxs direct-polarization path allocates multiple full-volume
+        # complex tensors for this 512x1024x1024 morphology and exhausts GPU
+        # memory before reduction.
+        # backend="cyrsoxs",
+        backend=backend,
+        backend_options=backend_options,
     )
     # the return statement is what the function delivers as an output
     return morph
@@ -147,7 +158,7 @@ def adsorbed_polymer_run(args):
             - "args" (dict): A copy of the input arguments.
 
     Description:
-        This function runs the adsorbed polymer model using the provided arguments. It creates a morphology object using the adsorbed_polymer_morphology function and then runs the model using the morphology.run method. The resulting data is then remeshed using the WPIntegrator.integrateImageStack method. The mean of the remeshed data along the "chi" dimension is calculated and stored in the "I" key of the results dictionary. The result of the rsoxs.AR function applied to the remeshed data with a chi_width of 45 is stored in the "A" key of the results dictionary. Visualizations of the model are created using the morphology.visualize_materials function and stored in the "visualizations" key of the results dictionary. The input arguments are stored in the "args" key of the results dictionary. The results dictionary is then returned.
+        This function runs the adsorbed polymer model using the provided arguments. It creates a morphology object using the adsorbed_polymer_morphology function and then runs the model using the morphology.run method. The resulting data is then remeshed using the NRSSIntegrator.integrateImageStack method. The mean of the remeshed data along the "chi" dimension is calculated and stored in the "I" key of the results dictionary. The result of the rsoxs.AR function applied to the remeshed data with a chi_width of 45 is stored in the "A" key of the results dictionary. Visualizations of the model are created using the morphology.visualize_materials function and stored in the "visualizations" key of the results dictionary. The input arguments are stored in the "args" key of the results dictionary. The results dictionary is then returned.
     """    
     # notice how we're passing args to the adsorbed_polymer_morphology function
     # we could also have args that affect how the model is run (but we don't right now)
@@ -155,10 +166,11 @@ def adsorbed_polymer_run(args):
     # we start right away with the adsorbed_polymer_morphology function
     # Create morphology object
     morph = adsorbed_polymer_morphology(args)
-
+    data = None
+    integrator = None
+    remeshed_data = None
     # FFT "window" parameter
     morph.inputData.windowingType = 0  # cy.FFTWindowing.Hanning
-
 
     # that rotation function we don't need bc your model is radially symmetric
     morph.EAngleRotation = [0.0, 0.0, 0.0]
@@ -170,7 +182,7 @@ def adsorbed_polymer_run(args):
     data = morph.run(stdout=True, stderr=False)
 
     # the PyHyperScattering part for interpreting the model result
-    integrator = WPIntegrator(use_chunked_processing=False)
+    integrator = NRSSIntegrator(use_chunked_processing=False)
     remeshed_data = integrator.integrateImageStack(data)
 
     # we will use a pythin dictionary for holding the results
@@ -199,9 +211,14 @@ def adsorbed_polymer_run(args):
     # if you wanted to see full 2D patterns
     # I'm choosing only I and A, which are reductions of the data, but ones focused on our inquiry
     # I'm also returning the visualizations created above
-
-    # note we return the results dictionary, which has I, A, and visualizations stored in it
-    return results
+    try:
+        return results        
+    finally:
+        del remeshed_data
+        del integrator
+        del data
+        morph.release_runtime()
+        del morph
 
 
 # FROM NOTEBOOK 2
@@ -323,6 +340,7 @@ def plot_result(result):
         >>> result = adsorbed_polymer_run(args)
         >>> rgb_array = plot_result(result)
     """
+    plt.close("all")
     rc('font', size=14)
 
     dpi = 72

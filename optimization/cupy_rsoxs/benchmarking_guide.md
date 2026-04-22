@@ -15,6 +15,14 @@ If you only need the current state, use `accepted_state.md` instead.
 
 - Main timing harness:
   - `tests/validation/dev/cupy_rsoxs_optimization/run_cupy_rsoxs_optimization_matrix.py`
+- Dedicated stderr/stdout-sensitive companion harness:
+  - `tests/validation/dev/cupy_rsoxs_optimization/run_energy_progress_bar_overhead.py`
+  - use this only for experiments whose behavior depends on terminal stream
+    settings, for example opt-in progress-bar overhead checks
+- Maintained `cupy-rsoxs` authority lanes should pass:
+  - `--isotropic-material-representation enum_contract`
+- Treat `legacy_zero_array` as a compatibility / recheck surface, not the
+  default maintained authority surface.
 - Segment timing surface:
   - `A1`, `A2`, `B`, `C`, `D`, `E`, `F`
 - Companion cross-backend comparison entry point:
@@ -26,9 +34,11 @@ If you only need the current state, use `accepted_state.md` instead.
   - small CoreShell
   - explicit rotation sets, especially `0:15:165` and `0:5:165`
   - device-resident first for quick ranking
+  - `isotropic_representation=enum_contract`
 - Required host steady-state follow-up:
   - host resident
   - `--cuda-prewarm before_prepare_inputs`
+  - `--isotropic-material-representation enum_contract`
 - Required physics gates before acceptance:
   - `pytest tests/validation/test_core_shell_reference.py -k "test_core_shell_sim_regression_pybind" --nrss-backend cupy-rsoxs -v`
   - `pytest tests/validation/test_core_shell_reference.py -k "test_core_shell_sim_regression_cupy_borrow_strict" --nrss-backend cupy-rsoxs -v`
@@ -40,6 +50,7 @@ If you only need the current state, use `accepted_state.md` instead.
   - `resident_mode='device'`
   - single energy
   - `EAngleRotation=[0, 5, 165]`
+  - `isotropic_representation=enum_contract`
   - `--worker-warmup-runs 1`
 - Required companion checks:
   - device-hot no-rotation companion

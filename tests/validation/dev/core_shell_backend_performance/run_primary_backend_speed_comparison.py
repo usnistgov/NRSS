@@ -56,9 +56,19 @@ CUPY_SCRIPT = (
 
 LANE_ORDER = ("small", "medium", "large")
 STARTUP_ORDER = ("cold", "pre-warm")
+ENERGY_ORDER = ("single", "triple")
+CUPY_ISOTROPIC_REPRESENTATION = "enum_contract"
 ROTATION_ORDER = (
-    ("no rotation", "single_no_rotation", [0.0, 0.0, 0.0]),
-    ("some rotation (0,15,165)", "single_rot_0_15_165", [0.0, 15.0, 165.0]),
+    (
+        "no rotation",
+        {"single": "single_no_rotation", "triple": "triple_no_rotation"},
+        [0.0, 0.0, 0.0],
+    ),
+    (
+        "some rotation (0,15,165)",
+        {"single": "single_rot_0_15_165", "triple": "triple_limited_rotation"},
+        [0.0, 15.0, 165.0],
+    ),
 )
 
 
@@ -77,7 +87,14 @@ COMPONENT_SPECS = (
         run_label_suffix="legacy_cold",
         script_path=LEGACY_SCRIPT,
         output_root=LEGACY_ROOT,
-        args=("--size-labels", "small,medium,large", "--rotation-specs", "0:15:165"),
+        args=(
+            "--size-labels",
+            "small,medium,large",
+            "--rotation-specs",
+            "0:15:165",
+            "--include-triple-no-rotation",
+            "--include-triple-limited",
+        ),
     ),
     ComponentSpec(
         key="legacy_prewarm",
@@ -89,6 +106,8 @@ COMPONENT_SPECS = (
             "small,medium,large",
             "--rotation-specs",
             "0:15:165",
+            "--include-triple-no-rotation",
+            "--include-triple-limited",
             "--cuda-prewarm",
             "before_prepare_inputs",
         ),
@@ -105,6 +124,10 @@ COMPONENT_SPECS = (
             "small,medium,large",
             "--rotation-specs",
             "0:15:165",
+            "--include-triple-no-rotation",
+            "--include-triple-limited",
+            "--isotropic-material-representation",
+            CUPY_ISOTROPIC_REPRESENTATION,
         ),
     ),
     ComponentSpec(
@@ -119,6 +142,10 @@ COMPONENT_SPECS = (
             "small,medium,large",
             "--rotation-specs",
             "0:15:165",
+            "--include-triple-no-rotation",
+            "--include-triple-limited",
+            "--isotropic-material-representation",
+            CUPY_ISOTROPIC_REPRESENTATION,
             "--cuda-prewarm",
             "before_prepare_inputs",
         ),
@@ -211,6 +238,15 @@ def _read_primary_seconds(summary: dict[str, Any], key: str) -> float:
     return float(summary["timing_cases"][key]["primary_seconds"])
 
 
+def _cupy_case_key(*, lane: str, fragment: str, residency: str) -> str:
+    suffix = (
+        ""
+        if CUPY_ISOTROPIC_REPRESENTATION == "legacy_zero_array"
+        else f"_{CUPY_ISOTROPIC_REPRESENTATION}"
+    )
+    return f"core_shell_{lane}_{fragment}_{residency}_tensor_coeff{suffix}"
+
+
 def _build_row_records(
     *,
     legacy_cold: dict[str, Any],
@@ -224,44 +260,47 @@ def _build_row_records(
         for startup in STARTUP_ORDER:
             legacy_summary = legacy_cold if startup == "cold" else legacy_prewarm
             host_summary = cupy_host_and_device_cold if startup == "cold" else cupy_host_prewarm
-            for rotation_label, fragment, rotation_spec in ROTATION_ORDER:
-                legacy_key = f"core_shell_{lane}_{fragment}_host_cyrsoxs"
-                host_key = f"core_shell_{lane}_{fragment}_host_tensor_coeff"
-                device_key = f"core_shell_{lane}_{fragment}_device_tensor_coeff"
+            for energy_label in ENERGY_ORDER:
+                for rotation_label, fragments, rotation_spec in ROTATION_ORDER:
+                    fragment = fragments[energy_label]
+                    legacy_key = f"core_shell_{lane}_{fragment}_host_cyrsoxs"
+                    host_key = _cupy_case_key(lane=lane, fragment=fragment, residency="host")
+                    device_key = _cupy_case_key(lane=lane, fragment=fragment, residency="device")
 
-                legacy_primary = _read_primary_seconds(legacy_summary, legacy_key)
-                host_primary = _read_primary_seconds(host_summary, host_key)
-                host_speedup = None if host_primary == 0.0 else legacy_primary / host_primary
+                    legacy_primary = _read_primary_seconds(legacy_summary, legacy_key)
+                    host_primary = _read_primary_seconds(host_summary, host_key)
+                    host_speedup = None if host_primary == 0.0 else legacy_primary / host_primary
 
-                device_primary = None
-                device_speedup_vs_legacy_prewarm = None
-                if startup == "pre-warm":
-                    device_primary = _read_primary_seconds(cupy_host_and_device_cold, device_key)
-                    device_speedup_vs_legacy_prewarm = (
-                        None if device_primary == 0.0 else legacy_primary / device_primary
+                    device_primary = None
+                    device_speedup_vs_legacy_prewarm = None
+                    if startup == "pre-warm":
+                        device_primary = _read_primary_seconds(cupy_host_and_device_cold, device_key)
+                        device_speedup_vs_legacy_prewarm = (
+                            None if device_primary == 0.0 else legacy_primary / device_primary
+                        )
+
+                    rows.append(
+                        {
+                            "lane": lane,
+                            "voxel_dims": dims,
+                            "startup": startup,
+                            "energy_label": energy_label,
+                            "rotation_label": rotation_label,
+                            "rotation_spec": rotation_spec,
+                            "legacy_cyrsoxs_primary_seconds": legacy_primary,
+                            "cupy_rsoxs_host_primary_seconds": host_primary,
+                            "cupy_rsoxs_host_speedup_vs_legacy": host_speedup,
+                            "cupy_rsoxs_device_primary_seconds": device_primary,
+                            "cupy_rsoxs_device_speedup_vs_legacy_prewarm": (
+                                device_speedup_vs_legacy_prewarm
+                            ),
+                            "device_comparison_note": (
+                                "Compared against the matching legacy pre-warm row."
+                                if startup == "pre-warm"
+                                else "Not reported on cold rows."
+                            ),
+                        }
                     )
-
-                rows.append(
-                    {
-                        "lane": lane,
-                        "voxel_dims": dims,
-                        "startup": startup,
-                        "rotation_label": rotation_label,
-                        "rotation_spec": rotation_spec,
-                        "legacy_cyrsoxs_primary_seconds": legacy_primary,
-                        "cupy_rsoxs_host_primary_seconds": host_primary,
-                        "cupy_rsoxs_host_speedup_vs_legacy": host_speedup,
-                        "cupy_rsoxs_device_primary_seconds": device_primary,
-                        "cupy_rsoxs_device_speedup_vs_legacy_prewarm": (
-                            device_speedup_vs_legacy_prewarm
-                        ),
-                        "device_comparison_note": (
-                            "Compared against the matching legacy pre-warm row."
-                            if startup == "pre-warm"
-                            else "Not reported on cold rows."
-                        ),
-                    }
-                )
     return rows
 
 
@@ -283,6 +322,7 @@ def _display_rows(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
             "Lane": row["lane"],
             "Voxel dims": str(tuple(row["voxel_dims"])),
             "Startup": row["startup"],
+            "Energy": row["energy_label"],
             "Rotation": row["rotation_label"],
             "Legacy cyrsoxs": _fmt_time(row["legacy_cyrsoxs_primary_seconds"]),
             "cupy-rsoxs host": _fmt_time(row["cupy_rsoxs_host_primary_seconds"]),
@@ -310,7 +350,8 @@ def _render_png(path: Path, rows: list[dict[str, Any]], *, title_label: str) -> 
     headers = list(display_rows[0].keys())
     cell_text = [[row[h] for h in headers] for row in display_rows]
 
-    fig, ax = plt.subplots(figsize=(26, 8.5), dpi=220)
+    fig_height = max(8.5, 4.0 + 0.25 * len(rows))
+    fig, ax = plt.subplots(figsize=(26, fig_height), dpi=220)
     ax.axis("off")
 
     table = ax.table(
@@ -337,7 +378,9 @@ def _render_png(path: Path, rows: list[dict[str, Any]], *, title_label: str) -> 
         data = rows[row_idx - 1]
         base_color = (
             lane_break
-            if data["rotation_label"] == "no rotation" and data["startup"] == "cold"
+            if data["energy_label"] == "single"
+            and data["rotation_label"] == "no rotation"
+            and data["startup"] == "cold"
             else ("white" if row_idx % 2 else row_alt)
         )
         cell.set_facecolor(base_color)
@@ -367,10 +410,10 @@ def _render_png(path: Path, rows: list[dict[str, Any]], *, title_label: str) -> 
         0.5,
         0.065,
         (
-            "Single-energy CoreShell lanes. Host speedups use the matching legacy startup "
-            "state. Device columns appear on pre-warm rows only, because the cupy-rsoxs "
-            "device lane does not meaningfully participate in the cold/pre-warm split and "
-            "is compared against the matching legacy pre-warm row."
+            "Single-energy and triple-energy CoreShell lanes. Host speedups use the matching "
+            "legacy startup state. Device columns appear on pre-warm rows only, because the "
+            "cupy-rsoxs device lane does not meaningfully participate in the cold/pre-warm "
+            "split and is compared against the matching legacy pre-warm row."
         ),
         ha="center",
         va="center",
@@ -441,8 +484,9 @@ def run_comparison(args: argparse.Namespace) -> int:
             "lanes": list(LANE_ORDER),
             "lane_shapes": {label: list(SIZE_SPECS[label].shape) for label in LANE_ORDER},
             "startup_states": list(STARTUP_ORDER),
+            "energy_panels": list(ENERGY_ORDER),
             "rotations": [label for label, _fragment, _spec in ROTATION_ORDER],
-            "single_energy_only": True,
+            "cupy_isotropic_representation": CUPY_ISOTROPIC_REPRESENTATION,
             "device_rows_reported_on": "pre-warm only",
         },
         "component_runs": {
@@ -468,9 +512,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Principal cross-backend primary-time comparison for backend development. "
-            "Runs the fixed single-energy CoreShell panel across legacy cyrsoxs, "
-            "cupy-rsoxs host cold, cupy-rsoxs host pre-warm, and cupy-rsoxs device, "
-            "then writes a combined summary, TSV, and PNG table."
+            "Runs the fixed single-energy and triple-energy CoreShell panel across "
+            "legacy cyrsoxs, cupy-rsoxs host cold, cupy-rsoxs host pre-warm, and "
+            "cupy-rsoxs device, using the explicit isotropic enum contract for the "
+            "cupy-rsoxs lanes, then writes a combined summary, TSV, and PNG table."
         )
     )
     parser.add_argument(

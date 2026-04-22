@@ -8,7 +8,9 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +31,7 @@ from tests.validation.dev.cupy_rsoxs_optimization.run_cupy_rsoxs_optimization_ma
 )
 from tests.validation.dev.cupy_rsoxs_optimization.run_cupy_rsoxs_optimization_matrix import (  # noqa: E402
     CORE_SHELL_SINGLE_ENERGIES,
+    CORE_SHELL_TRIPLE_ENERGIES,
     EANGLE_OFF,
     SIZE_SPECS,
     TIMING_SEGMENTS,
@@ -38,7 +41,7 @@ from tests.validation.dev.cupy_rsoxs_optimization.run_cupy_rsoxs_optimization_ma
 from tests.validation.dev.cyrsoxs_timing.run_cyrsoxs_timing_matrix import (  # noqa: E402
     BenchmarkCase as CyrsoxsBenchmarkCase,
 )
-from tests.validation.lib.core_shell import has_visible_gpu  # noqa: E402
+from tests.validation.lib.core_shell import has_visible_gpu, visible_gpu_devices  # noqa: E402
 
 
 OUT_ROOT = REPO_ROOT / "test-reports" / "core-shell-backend-performance-dev"
@@ -64,8 +67,14 @@ ROTATION_SPECS = (
     ("no_rotation", EANGLE_OFF, "no rotation"),
     ("rot_0_5_165", (0.0, 5.0, 165.0), "0:5:165"),
 )
-HOST_STARTUP_MODES = ("warm", "hot")
-DEVICE_STARTUP_MODES = ("steady", "hot")
+ENERGY_SPECS = (
+    ("single", CORE_SHELL_SINGLE_ENERGIES, "single"),
+    ("triple", CORE_SHELL_TRIPLE_ENERGIES, "triple"),
+)
+SPEED_HOST_STARTUP_MODES = ("cold", "hot")
+SPEED_DEVICE_STARTUP_MODES = ("steady", "hot")
+MEMORY_HOST_STARTUP_MODES = ("hot",)
+MEMORY_DEVICE_STARTUP_MODES = ("hot",)
 GPU_MEMORY_OBSERVER_STABILIZE_WINDOW = 5
 GPU_MEMORY_OBSERVER_STABILIZE_TOLERANCE_MIB = 8.0
 GPU_MEMORY_OBSERVER_STARTUP_TIMEOUT_S = 30.0
@@ -81,11 +90,18 @@ class ComparisonCase:
     execution_path: str
     path_variant: str
     z_collapse_mode: str | None
+    energy_key: str
+    energy_label: str
+    energies_ev: tuple[float, ...]
     rotation_key: str
     rotation_label: str
     eangle_rotation: tuple[float, float, float]
     script_path: Path
     worker_case: Any
+
+
+BACKEND_BUCKET_ORDER = ("cyrsoxs", "tensor_coeff", "direct_polarization")
+CUPY_ISOTROPIC_REPRESENTATION = "enum_contract"
 
 
 def _sample_process_rss_mib(pid: int) -> float | None:
@@ -149,7 +165,7 @@ def _start_gpu_memory_observer(
     *,
     output_dir: Path,
     case: ComparisonCase,
-    gpu_index: int,
+    gpu_device: str,
     poll_interval_s: float,
 ) -> tuple[subprocess.Popen[str], Path, Path, Path]:
     observer_ready_path = output_dir / f"{case.key}__gpu_mem_observer_ready.json"
@@ -183,7 +199,7 @@ def _start_gpu_memory_observer(
     ]
     env = os.environ.copy()
     env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    env["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
+    env["CUDA_VISIBLE_DEVICES"] = str(gpu_device)
     proc = subprocess.Popen(
         cmd,
         cwd=str(REPO_ROOT),
@@ -298,13 +314,17 @@ def _merge_memory_probes(
 def _host_cyrsoxs_case(
     *,
     startup_mode: str,
+    energy_key: str,
+    energy_label: str,
+    energies_ev: tuple[float, ...],
     rotation_key: str,
     rotation_label: str,
     eangle_rotation,
     size_label: str,
 ):
     worker_warmup_runs = 1 if startup_mode == "hot" else 0
-    label = f"comprehensive__host__{startup_mode}__cyrsoxs__{rotation_key}"
+    cuda_prewarm_mode = "off" if startup_mode == "cold" else "before_prepare_inputs"
+    label = f"comprehensive__host__{startup_mode}__{energy_key}__cyrsoxs__{rotation_key}"
     return ComparisonCase(
         key=label,
         backend="cyrsoxs",
@@ -313,6 +333,9 @@ def _host_cyrsoxs_case(
         execution_path="cyrsoxs",
         path_variant="cyrsoxs",
         z_collapse_mode=None,
+        energy_key=energy_key,
+        energy_label=energy_label,
+        energies_ev=energies_ev,
         rotation_key=rotation_key,
         rotation_label=rotation_label,
         eangle_rotation=eangle_rotation,
@@ -321,14 +344,15 @@ def _host_cyrsoxs_case(
             label=label,
             family="core_shell",
             shape_label=size_label,
-            energies_ev=CORE_SHELL_SINGLE_ENERGIES,
+            energies_ev=energies_ev,
             eangle_rotation=eangle_rotation,
             isotropic_representation="legacy_zero_array",
-            cuda_prewarm_mode="before_prepare_inputs",
+            cuda_prewarm_mode=cuda_prewarm_mode,
             worker_warmup_runs=worker_warmup_runs,
             notes=(
                 "Comprehensive cross-backend host comparison lane for the "
-                f"{size_label} single-energy CoreShell benchmark under startup_mode={startup_mode}."
+                f"{size_label} {energy_label}-energy CoreShell benchmark under "
+                f"startup_mode={startup_mode}."
             ),
         ),
     )
@@ -338,6 +362,9 @@ def _cupy_case(
     *,
     residency: str,
     startup_mode: str,
+    energy_key: str,
+    energy_label: str,
+    energies_ev: tuple[float, ...],
     execution_path: str,
     z_collapse_mode: str | None,
     rotation_key: str,
@@ -348,9 +375,9 @@ def _cupy_case(
     path_variant = execution_path
     if z_collapse_mode is not None:
         path_variant = f"{execution_path}_zcollapse_{z_collapse_mode}"
-    label = f"comprehensive__{residency}__{startup_mode}__{path_variant}__{rotation_key}"
+    label = f"comprehensive__{residency}__{startup_mode}__{energy_key}__{path_variant}__{rotation_key}"
     field_namespace = "numpy" if residency == "host" else "cupy"
-    cuda_prewarm_mode = "before_prepare_inputs" if residency == "host" else "off"
+    cuda_prewarm_mode = "before_prepare_inputs" if residency == "host" and startup_mode == "hot" else "off"
     worker_warmup_runs = 1 if startup_mode == "hot" else 0
     backend_options = {"execution_path": execution_path}
     if z_collapse_mode is not None:
@@ -363,6 +390,9 @@ def _cupy_case(
         execution_path=execution_path,
         path_variant=path_variant,
         z_collapse_mode=z_collapse_mode,
+        energy_key=energy_key,
+        energy_label=energy_label,
+        energies_ev=energies_ev,
         rotation_key=rotation_key,
         rotation_label=rotation_label,
         eangle_rotation=eangle_rotation,
@@ -372,10 +402,10 @@ def _cupy_case(
             family="core_shell",
             backend="cupy-rsoxs",
             shape_label=size_label,
-            energies_ev=CORE_SHELL_SINGLE_ENERGIES,
+            energies_ev=energies_ev,
             eangle_rotation=eangle_rotation,
             field_namespace=field_namespace,
-            isotropic_representation="legacy_zero_array",
+            isotropic_representation=CUPY_ISOTROPIC_REPRESENTATION,
             cuda_prewarm_mode=cuda_prewarm_mode,
             resident_mode=residency,
             input_policy="strict",
@@ -385,33 +415,46 @@ def _cupy_case(
             worker_warmup_runs=worker_warmup_runs,
             notes=(
                 "Comprehensive cross-backend comparison lane for the "
-                f"{size_label} single-energy "
+                f"{size_label} {energy_label}-energy "
                 f"CoreShell benchmark under residency={residency}, startup_mode={startup_mode}, "
-                f"execution_path={execution_path}, z_collapse_mode={z_collapse_mode!r}."
+                f"execution_path={execution_path}, z_collapse_mode={z_collapse_mode!r}, "
+                f"isotropic_representation={CUPY_ISOTROPIC_REPRESENTATION}."
             ),
         ),
     )
 
 
-def _build_cases(*, include_z_collapse: bool, size_label: str) -> list[ComparisonCase]:
+def _speed_energy_specs_for_startup(startup_mode: str) -> tuple[tuple[str, tuple[float, ...], str], ...]:
+    if startup_mode == "hot":
+        return ENERGY_SPECS
+    return (ENERGY_SPECS[0],)
+
+
+def _build_speed_cases(*, include_z_collapse: bool, size_label: str) -> list[ComparisonCase]:
     cases: list[ComparisonCase] = []
     for rotation_key, eangle_rotation, rotation_label in ROTATION_SPECS:
-        for startup_mode in HOST_STARTUP_MODES:
-            cases.append(
-                _host_cyrsoxs_case(
-                    startup_mode=startup_mode,
-                    rotation_key=rotation_key,
-                    rotation_label=rotation_label,
-                    eangle_rotation=eangle_rotation,
-                    size_label=size_label,
+        for startup_mode in SPEED_HOST_STARTUP_MODES:
+            for energy_key, energies_ev, energy_label in _speed_energy_specs_for_startup(startup_mode):
+                cases.append(
+                    _host_cyrsoxs_case(
+                        startup_mode=startup_mode,
+                        energy_key=energy_key,
+                        energy_label=energy_label,
+                        energies_ev=energies_ev,
+                        rotation_key=rotation_key,
+                        rotation_label=rotation_label,
+                        eangle_rotation=eangle_rotation,
+                        size_label=size_label,
+                    )
                 )
-            )
-            for execution_path in ("tensor_coeff", "direct_polarization"):
                 cases.append(
                     _cupy_case(
                         residency="host",
                         startup_mode=startup_mode,
-                        execution_path=execution_path,
+                        energy_key=energy_key,
+                        energy_label=energy_label,
+                        energies_ev=energies_ev,
+                        execution_path="tensor_coeff",
                         z_collapse_mode=None,
                         rotation_key=rotation_key,
                         rotation_label=rotation_label,
@@ -419,27 +462,48 @@ def _build_cases(*, include_z_collapse: bool, size_label: str) -> list[Compariso
                         size_label=size_label,
                     )
                 )
-            if include_z_collapse:
                 cases.append(
                     _cupy_case(
                         residency="host",
                         startup_mode=startup_mode,
-                        execution_path="tensor_coeff",
-                        z_collapse_mode="mean",
+                        energy_key=energy_key,
+                        energy_label=energy_label,
+                        energies_ev=energies_ev,
+                        execution_path="direct_polarization",
+                        z_collapse_mode=None,
                         rotation_key=rotation_key,
                         rotation_label=rotation_label,
                         eangle_rotation=eangle_rotation,
                         size_label=size_label,
                     )
                 )
+                if include_z_collapse:
+                    cases.append(
+                        _cupy_case(
+                            residency="host",
+                            startup_mode=startup_mode,
+                            energy_key=energy_key,
+                            energy_label=energy_label,
+                            energies_ev=energies_ev,
+                            execution_path="tensor_coeff",
+                            z_collapse_mode="mean",
+                            rotation_key=rotation_key,
+                            rotation_label=rotation_label,
+                            eangle_rotation=eangle_rotation,
+                            size_label=size_label,
+                        )
+                    )
 
-        for startup_mode in DEVICE_STARTUP_MODES:
-            for execution_path in ("tensor_coeff", "direct_polarization"):
+        for startup_mode in SPEED_DEVICE_STARTUP_MODES:
+            for energy_key, energies_ev, energy_label in _speed_energy_specs_for_startup(startup_mode):
                 cases.append(
                     _cupy_case(
                         residency="device",
                         startup_mode=startup_mode,
-                        execution_path=execution_path,
+                        energy_key=energy_key,
+                        energy_label=energy_label,
+                        energies_ev=energies_ev,
+                        execution_path="tensor_coeff",
                         z_collapse_mode=None,
                         rotation_key=rotation_key,
                         rotation_label=rotation_label,
@@ -447,27 +511,277 @@ def _build_cases(*, include_z_collapse: bool, size_label: str) -> list[Compariso
                         size_label=size_label,
                     )
                 )
-            if include_z_collapse:
                 cases.append(
                     _cupy_case(
                         residency="device",
                         startup_mode=startup_mode,
-                        execution_path="tensor_coeff",
-                        z_collapse_mode="mean",
+                        energy_key=energy_key,
+                        energy_label=energy_label,
+                        energies_ev=energies_ev,
+                        execution_path="direct_polarization",
+                        z_collapse_mode=None,
                         rotation_key=rotation_key,
                         rotation_label=rotation_label,
                         eangle_rotation=eangle_rotation,
                         size_label=size_label,
                     )
                 )
+                if include_z_collapse:
+                    cases.append(
+                        _cupy_case(
+                            residency="device",
+                            startup_mode=startup_mode,
+                            energy_key=energy_key,
+                            energy_label=energy_label,
+                            energies_ev=energies_ev,
+                            execution_path="tensor_coeff",
+                            z_collapse_mode="mean",
+                            rotation_key=rotation_key,
+                            rotation_label=rotation_label,
+                            eangle_rotation=eangle_rotation,
+                            size_label=size_label,
+                        )
+                    )
     return cases
+
+
+def _build_memory_cases(*, include_z_collapse: bool, size_label: str) -> list[ComparisonCase]:
+    cases: list[ComparisonCase] = []
+    for rotation_key, eangle_rotation, rotation_label in ROTATION_SPECS:
+        for startup_mode in MEMORY_HOST_STARTUP_MODES:
+            for energy_key, energies_ev, energy_label in ENERGY_SPECS:
+                cases.append(
+                    _host_cyrsoxs_case(
+                        startup_mode=startup_mode,
+                        energy_key=energy_key,
+                        energy_label=energy_label,
+                        energies_ev=energies_ev,
+                        rotation_key=rotation_key,
+                        rotation_label=rotation_label,
+                        eangle_rotation=eangle_rotation,
+                        size_label=size_label,
+                    )
+                )
+                cases.append(
+                    _cupy_case(
+                        residency="host",
+                        startup_mode=startup_mode,
+                        energy_key=energy_key,
+                        energy_label=energy_label,
+                        energies_ev=energies_ev,
+                        execution_path="tensor_coeff",
+                        z_collapse_mode=None,
+                        rotation_key=rotation_key,
+                        rotation_label=rotation_label,
+                        eangle_rotation=eangle_rotation,
+                        size_label=size_label,
+                    )
+                )
+                cases.append(
+                    _cupy_case(
+                        residency="host",
+                        startup_mode=startup_mode,
+                        energy_key=energy_key,
+                        energy_label=energy_label,
+                        energies_ev=energies_ev,
+                        execution_path="direct_polarization",
+                        z_collapse_mode=None,
+                        rotation_key=rotation_key,
+                        rotation_label=rotation_label,
+                        eangle_rotation=eangle_rotation,
+                        size_label=size_label,
+                    )
+                )
+                if include_z_collapse:
+                    cases.append(
+                        _cupy_case(
+                            residency="host",
+                            startup_mode=startup_mode,
+                            energy_key=energy_key,
+                            energy_label=energy_label,
+                            energies_ev=energies_ev,
+                            execution_path="tensor_coeff",
+                            z_collapse_mode="mean",
+                            rotation_key=rotation_key,
+                            rotation_label=rotation_label,
+                            eangle_rotation=eangle_rotation,
+                            size_label=size_label,
+                        )
+                    )
+
+        for startup_mode in MEMORY_DEVICE_STARTUP_MODES:
+            for energy_key, energies_ev, energy_label in ENERGY_SPECS:
+                cases.append(
+                    _cupy_case(
+                        residency="device",
+                        startup_mode=startup_mode,
+                        energy_key=energy_key,
+                        energy_label=energy_label,
+                        energies_ev=energies_ev,
+                        execution_path="tensor_coeff",
+                        z_collapse_mode=None,
+                        rotation_key=rotation_key,
+                        rotation_label=rotation_label,
+                        eangle_rotation=eangle_rotation,
+                        size_label=size_label,
+                    )
+                )
+                cases.append(
+                    _cupy_case(
+                        residency="device",
+                        startup_mode=startup_mode,
+                        energy_key=energy_key,
+                        energy_label=energy_label,
+                        energies_ev=energies_ev,
+                        execution_path="direct_polarization",
+                        z_collapse_mode=None,
+                        rotation_key=rotation_key,
+                        rotation_label=rotation_label,
+                        eangle_rotation=eangle_rotation,
+                        size_label=size_label,
+                    )
+                )
+                if include_z_collapse:
+                    cases.append(
+                        _cupy_case(
+                            residency="device",
+                            startup_mode=startup_mode,
+                            energy_key=energy_key,
+                            energy_label=energy_label,
+                            energies_ev=energies_ev,
+                            execution_path="tensor_coeff",
+                            z_collapse_mode="mean",
+                            rotation_key=rotation_key,
+                            rotation_label=rotation_label,
+                            eangle_rotation=eangle_rotation,
+                            size_label=size_label,
+                        )
+                    )
+    return cases
+
+
+def _case_bucket(case: ComparisonCase) -> str:
+    if case.backend == "cyrsoxs":
+        return "cyrsoxs"
+    if case.execution_path == "direct_polarization":
+        return "direct_polarization"
+    return "tensor_coeff"
+
+
+def _bucketed_cases(cases: list[ComparisonCase]) -> list[tuple[str, list[ComparisonCase]]]:
+    grouped: dict[str, list[ComparisonCase]] = {}
+    for case in cases:
+        grouped.setdefault(_case_bucket(case), []).append(case)
+    return [(bucket, grouped[bucket]) for bucket in BACKEND_BUCKET_ORDER if bucket in grouped]
+
+
+def _serial_gpu_device(*, requested_gpu_index: int) -> str:
+    visible_devices = visible_gpu_devices()
+    requested = str(requested_gpu_index)
+    if requested in visible_devices:
+        return requested
+    if visible_devices:
+        return visible_devices[0]
+    return requested
+
+
+def _parallel_gpu_devices() -> tuple[str, ...]:
+    visible_devices = visible_gpu_devices()
+    if len(visible_devices) < 3:
+        return ()
+    return visible_devices[:3]
+
+
+def _run_case_stream(
+    *,
+    cases: list[ComparisonCase],
+    output_dir: Path,
+    gpu_device: str,
+    monitor_memory: bool,
+    poll_interval_s: float,
+    skip_existing: bool,
+    on_result,
+) -> None:
+    for case in cases:
+        result = _run_case_subprocess(
+            case=case,
+            output_dir=output_dir,
+            gpu_device=gpu_device,
+            monitor_memory=monitor_memory,
+            poll_interval_s=poll_interval_s,
+            skip_existing=skip_existing,
+        )
+        on_result(case, result)
+
+
+def _run_pass(
+    *,
+    cases: list[ComparisonCase],
+    summary: dict[str, Any],
+    summary_key: str,
+    summary_path: Path,
+    output_dir: Path,
+    monitor_memory: bool,
+    poll_interval_s: float,
+    skip_existing: bool,
+    serial_gpu_device: str,
+    parallel_gpu_devices: tuple[str, ...],
+) -> None:
+    write_lock = threading.Lock()
+
+    def on_result(case: ComparisonCase, result: dict[str, Any]) -> None:
+        with write_lock:
+            summary[summary_key][case.key] = result
+            _write_summary(summary_path, summary)
+            print(_result_summary_line(result, include_speed=not monitor_memory), flush=True)
+
+    bucketed = _bucketed_cases(cases)
+    if len(parallel_gpu_devices) >= 3 and len(bucketed) >= 3:
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = []
+            for (bucket, bucket_cases), gpu_device in zip(bucketed, parallel_gpu_devices):
+                print(
+                    f"Launching {summary_key} bucket {bucket} on GPU {gpu_device} "
+                    f"({len(bucket_cases)} cases)...",
+                    flush=True,
+                )
+                futures.append(
+                    executor.submit(
+                        _run_case_stream,
+                        cases=bucket_cases,
+                        output_dir=output_dir,
+                        gpu_device=gpu_device,
+                        monitor_memory=monitor_memory,
+                        poll_interval_s=poll_interval_s,
+                        skip_existing=skip_existing,
+                        on_result=on_result,
+                    )
+                )
+            for future in futures:
+                future.result()
+        return
+
+    print(
+        f"Running {summary_key} serially on GPU {serial_gpu_device} because fewer than 3 visible GPUs "
+        "were available.",
+        flush=True,
+    )
+    _run_case_stream(
+        cases=cases,
+        output_dir=output_dir,
+        gpu_device=serial_gpu_device,
+        monitor_memory=monitor_memory,
+        poll_interval_s=poll_interval_s,
+        skip_existing=skip_existing,
+        on_result=on_result,
+    )
 
 
 def _run_case_subprocess(
     *,
     case: ComparisonCase,
     output_dir: Path,
-    gpu_index: int,
+    gpu_device: str,
     monitor_memory: bool,
     poll_interval_s: float,
     skip_existing: bool,
@@ -501,7 +815,7 @@ def _run_case_subprocess(
         ]
         env = os.environ.copy()
         env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-        env["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
+        env["CUDA_VISIBLE_DEVICES"] = str(gpu_device)
 
         observer_proc = None
         observer_ready = None
@@ -511,7 +825,7 @@ def _run_case_subprocess(
             observer_proc, observer_ready_path, observer_trace_path, observer_stop_path = _start_gpu_memory_observer(
                 output_dir=output_dir,
                 case=case,
-                gpu_index=gpu_index,
+                gpu_device=gpu_device,
                 poll_interval_s=poll_interval_s,
             )
             observer_ready = _wait_for_gpu_memory_observer_ready(
@@ -586,6 +900,9 @@ def _run_case_subprocess(
                 "comparison_backend": case.backend,
                 "comparison_residency": case.residency,
                 "comparison_startup_mode": case.startup_mode,
+                "comparison_energy_key": case.energy_key,
+                "comparison_energy_label": case.energy_label,
+                "comparison_energies_ev": list(case.energies_ev),
                 "comparison_execution_path": case.execution_path,
                 "comparison_path_variant": case.path_variant,
                 "comparison_z_collapse_mode": case.z_collapse_mode,
@@ -607,9 +924,10 @@ def _run_case_subprocess(
         return result
 
 
-def _case_sort_key(result: dict[str, Any]) -> tuple[int, int, int, int]:
+def _case_sort_key(result: dict[str, Any]) -> tuple[int, int, int, int, int, int]:
     residency_order = {"host": 0, "device": 1}
-    startup_order = {"warm": 0, "hot": 1, "steady": 2}
+    startup_order = {"cold": 0, "steady": 1, "hot": 2}
+    energy_order = {"single": 0, "triple": 1}
     backend_order = {"cyrsoxs": 0, "tensor_coeff": 1, "direct_polarization": 2}
     path_variant_order = {
         "cyrsoxs": 0,
@@ -621,6 +939,7 @@ def _case_sort_key(result: dict[str, Any]) -> tuple[int, int, int, int]:
     return (
         residency_order.get(result.get("comparison_residency", ""), 99),
         startup_order.get(result.get("comparison_startup_mode", ""), 99),
+        energy_order.get(result.get("comparison_energy_key", ""), 99),
         backend_order.get(result.get("comparison_execution_path", ""), 99),
         path_variant_order.get(result.get("comparison_path_variant", ""), 99),
         rotation_order.get(result.get("comparison_rotation_key", ""), 99),
@@ -629,21 +948,20 @@ def _case_sort_key(result: dict[str, Any]) -> tuple[int, int, int, int]:
 
 def _legacy_startup_mode_for_case(result: dict[str, Any]) -> str | None:
     startup_mode = str(result.get("comparison_startup_mode", ""))
-    if startup_mode == "steady":
-        return "warm"
-    if startup_mode in {"warm", "hot"}:
+    if startup_mode in {"cold", "hot"}:
         return startup_mode
     return None
 
 
-def _legacy_baseline_lookup(rows: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
-    baselines: dict[tuple[str, str], dict[str, Any]] = {}
+def _legacy_baseline_lookup(rows: list[dict[str, Any]]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    baselines: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in rows:
         if row.get("comparison_backend") != "cyrsoxs":
             continue
         startup_mode = str(row.get("comparison_startup_mode", ""))
+        energy_key = str(row.get("comparison_energy_key", ""))
         rotation_key = str(row.get("comparison_rotation_key", ""))
-        baselines[(startup_mode, rotation_key)] = row
+        baselines[(startup_mode, energy_key, rotation_key)] = row
     return baselines
 
 
@@ -669,7 +987,13 @@ def _enrich_results_with_legacy_speedups(rows: list[dict[str, Any]]) -> list[dic
         enriched_row["comparison_speedup_vs_cyrsoxs"] = None
 
         if row.get("comparison_backend") == "cupy-rsoxs" and baseline_startup_mode is not None:
-            baseline = baselines.get((baseline_startup_mode, str(row.get("comparison_rotation_key", ""))))
+            baseline = baselines.get(
+                (
+                    baseline_startup_mode,
+                    str(row.get("comparison_energy_key", "")),
+                    str(row.get("comparison_rotation_key", "")),
+                )
+            )
             if baseline is not None:
                 enriched_row["comparison_cyrsoxs_baseline_key"] = baseline.get("comparison_key")
                 if baseline.get("status") == "ok":
@@ -694,10 +1018,11 @@ def _build_human_report_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
             {
                 "Residency": row.get("comparison_residency", ""),
                 "Startup": row.get("comparison_startup_mode", ""),
+                "Energy": row.get("comparison_energy_label", ""),
                 "Execution path": row.get("comparison_execution_path", ""),
                 "z collapse": row.get("comparison_z_collapse_mode") or "off",
                 "Rotation": row.get("comparison_rotation_label", ""),
-                "Legacy baseline": row.get("comparison_cyrsoxs_baseline_startup_mode", ""),
+                "Legacy baseline": row.get("comparison_cyrsoxs_baseline_startup_mode") or "",
                 "Legacy cyrsoxs": row.get("comparison_cyrsoxs_primary_seconds"),
                 "cupy-rsoxs": row.get("primary_seconds"),
                 "Speedup vs cyrsoxs": row.get("comparison_speedup_vs_cyrsoxs"),
@@ -708,7 +1033,8 @@ def _build_human_report_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
         report_rows,
         key=lambda row: (
             {"host": 0, "device": 1}.get(str(row.get("Residency", "")), 99),
-            {"warm": 0, "hot": 1, "steady": 2}.get(str(row.get("Startup", "")), 99),
+            {"cold": 0, "steady": 1, "hot": 2}.get(str(row.get("Startup", "")), 99),
+            {"single": 0, "triple": 1}.get(str(row.get("Energy", "")), 99),
             {"tensor_coeff": 0, "direct_polarization": 1}.get(
                 str(row.get("Execution path", "")), 99
             ),
@@ -736,8 +1062,14 @@ def _build_memory_report_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]
         if row.get("comparison_backend") != "cupy-rsoxs":
             continue
 
-        baseline_startup_mode = str(row.get("comparison_cyrsoxs_baseline_startup_mode", ""))
-        baseline = baselines.get((baseline_startup_mode, str(row.get("comparison_rotation_key", ""))))
+        baseline_startup_mode = str(row.get("comparison_cyrsoxs_baseline_startup_mode") or "")
+        baseline = baselines.get(
+            (
+                baseline_startup_mode,
+                str(row.get("comparison_energy_key", "")),
+                str(row.get("comparison_rotation_key", "")),
+            )
+        )
         candidate_probe = row.get("memory_probe", {})
         baseline_probe = baseline.get("memory_probe", {}) if baseline is not None else {}
 
@@ -750,6 +1082,7 @@ def _build_memory_report_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]
             {
                 "Residency": row.get("comparison_residency", ""),
                 "Startup": row.get("comparison_startup_mode", ""),
+                "Energy": row.get("comparison_energy_label", ""),
                 "Execution path": row.get("comparison_execution_path", ""),
                 "z collapse": row.get("comparison_z_collapse_mode") or "off",
                 "Rotation": row.get("comparison_rotation_label", ""),
@@ -774,7 +1107,8 @@ def _build_memory_report_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]
         report_rows,
         key=lambda row: (
             {"host": 0, "device": 1}.get(str(row.get("Residency", "")), 99),
-            {"warm": 0, "hot": 1, "steady": 2}.get(str(row.get("Startup", "")), 99),
+            {"cold": 0, "steady": 1, "hot": 2}.get(str(row.get("Startup", "")), 99),
+            {"single": 0, "triple": 1}.get(str(row.get("Energy", "")), 99),
             {"tensor_coeff": 0, "direct_polarization": 1}.get(
                 str(row.get("Execution path", "")), 99
             ),
@@ -853,6 +1187,8 @@ def _write_table(path: Path, rows: list[dict[str, Any]], *, include_memory: bool
             "comparison_backend",
             "comparison_residency",
             "comparison_startup_mode",
+            "comparison_energy_key",
+            "comparison_energy_label",
             "comparison_execution_path",
             "comparison_path_variant",
             "comparison_z_collapse_mode",
@@ -878,6 +1214,8 @@ def _write_table(path: Path, rows: list[dict[str, Any]], *, include_memory: bool
             "comparison_backend",
             "comparison_residency",
             "comparison_startup_mode",
+            "comparison_energy_key",
+            "comparison_energy_label",
             "comparison_execution_path",
             "comparison_path_variant",
             "comparison_z_collapse_mode",
@@ -902,6 +1240,8 @@ def _write_table(path: Path, rows: list[dict[str, Any]], *, include_memory: bool
                     "comparison_backend": row.get("comparison_backend", ""),
                     "comparison_residency": row.get("comparison_residency", ""),
                     "comparison_startup_mode": row.get("comparison_startup_mode", ""),
+                    "comparison_energy_key": row.get("comparison_energy_key", ""),
+                    "comparison_energy_label": row.get("comparison_energy_label", ""),
                     "comparison_execution_path": row.get("comparison_execution_path", ""),
                     "comparison_path_variant": row.get("comparison_path_variant", ""),
                     "comparison_z_collapse_mode": row.get("comparison_z_collapse_mode", ""),
@@ -931,6 +1271,8 @@ def _write_table(path: Path, rows: list[dict[str, Any]], *, include_memory: bool
                     "comparison_backend": row.get("comparison_backend", ""),
                     "comparison_residency": row.get("comparison_residency", ""),
                     "comparison_startup_mode": row.get("comparison_startup_mode", ""),
+                    "comparison_energy_key": row.get("comparison_energy_key", ""),
+                    "comparison_energy_label": row.get("comparison_energy_label", ""),
                     "comparison_execution_path": row.get("comparison_execution_path", ""),
                     "comparison_path_variant": row.get("comparison_path_variant", ""),
                     "comparison_z_collapse_mode": row.get("comparison_z_collapse_mode", ""),
@@ -957,7 +1299,8 @@ def _write_human_report(path: Path, summary: dict[str, Any]) -> None:
         [
             f"# Comprehensive Backend Comparison Report ({summary['label']})",
             "",
-            f"{summary['size_label'].capitalize()} single-energy CoreShell cross-backend comparison.",
+            f"{summary['size_label'].capitalize()} CoreShell cross-backend comparison.",
+            f"cupy-rsoxs lanes use isotropic_representation={summary['cupy_isotropic_representation']}.",
             "",
             (
                 "Optional z-collapse rows are included in this report."
@@ -966,19 +1309,23 @@ def _write_human_report(path: Path, summary: dict[str, Any]) -> None:
             ),
             "",
             "Speedup convention:",
-            "- host `warm` compares against legacy `cyrsoxs` `warm`.",
+            "- host `cold` compares against legacy `cyrsoxs` `cold`.",
             "- host `hot` compares against legacy `cyrsoxs` `hot`.",
-            "- device `steady` compares against legacy `cyrsoxs` `warm`.",
+            "- device `steady` is reported without a legacy speedup baseline in this matrix.",
             "- device `hot` compares against legacy `cyrsoxs` `hot`.",
             "",
             "## Speed Pass",
+            "",
+            "Cold and steady rows are single-energy only.",
+            "Hot rows include both the single-energy and triple-energy lanes.",
             "",
             _ascii_table(speed_rows),
             "",
             "## Memory Pass",
             "",
             "Speed is assessed only from the separate speed-pass series above.",
-            "This memory pass reports warmed same-GPU observer GPU deltas and parent-side RSS.",
+            "This memory pass reports hot-only rows with single-energy and triple-energy lanes.",
+            "It uses a warmed same-GPU observer GPU delta plus parent-side RSS.",
             "Memory factors are reported as `cupy-rsoxs / cyrsoxs` using the matching legacy baseline row.",
             "",
             _ascii_table(memory_rows),
@@ -999,6 +1346,8 @@ def _result_summary_line(result: dict[str, Any], *, include_speed: bool) -> str:
             f"{result.get('status')} ({result.get('error_type', 'unknown')})"
         )
     parts = [f"{result['comparison_key']}:"]
+    if result.get("comparison_energy_label"):
+        parts.append(str(result["comparison_energy_label"]))
     if include_speed:
         parts.append(f"primary {float(result['primary_seconds']):.3f}s")
     probe = result.get("memory_probe")
@@ -1028,22 +1377,46 @@ def run_comparison(args: argparse.Namespace) -> int:
     speed_table_path = run_dir / SPEED_TABLE_NAME
     memory_table_path = run_dir / MEMORY_TABLE_NAME
     report_path = run_dir / REPORT_NAME
-    cases = _build_cases(include_z_collapse=bool(args.include_z_collapse), size_label=args.size_label)
+    speed_cases = _build_speed_cases(
+        include_z_collapse=bool(args.include_z_collapse),
+        size_label=args.size_label,
+    )
+    memory_cases = _build_memory_cases(
+        include_z_collapse=bool(args.include_z_collapse),
+        size_label=args.size_label,
+    )
+    serial_gpu_device = _serial_gpu_device(requested_gpu_index=args.gpu_index)
+    parallel_gpu_devices = _parallel_gpu_devices()
+    multi_gpu_enabled = len(parallel_gpu_devices) >= 3
 
     summary = {
         "label": run_label,
         "created_utc": _timestamp(),
         "python_executable": sys.executable,
         "gpu_index": int(args.gpu_index),
+        "visible_gpu_devices": list(visible_gpu_devices()),
+        "serial_gpu_device": serial_gpu_device,
+        "parallel_gpu_devices": list(parallel_gpu_devices),
+        "parallel_execution_enabled": multi_gpu_enabled,
+        "parallel_bucket_order": list(BACKEND_BUCKET_ORDER),
         "size_label": args.size_label,
-        "energies_ev": list(CORE_SHELL_SINGLE_ENERGIES),
+        "cupy_isotropic_representation": CUPY_ISOTROPIC_REPRESENTATION,
+        "single_energies_ev": list(CORE_SHELL_SINGLE_ENERGIES),
+        "triple_energies_ev": list(CORE_SHELL_TRIPLE_ENERGIES),
         "include_z_collapse": bool(args.include_z_collapse),
         "rotations": [
             {"key": key, "label": label, "eangle_rotation": list(spec)}
             for key, spec, label in ROTATION_SPECS
         ],
-        "host_startup_modes": list(HOST_STARTUP_MODES),
-        "device_startup_modes": list(DEVICE_STARTUP_MODES),
+        "speed_host_startup_modes": list(SPEED_HOST_STARTUP_MODES),
+        "speed_device_startup_modes": list(SPEED_DEVICE_STARTUP_MODES),
+        "memory_host_startup_modes": list(MEMORY_HOST_STARTUP_MODES),
+        "memory_device_startup_modes": list(MEMORY_DEVICE_STARTUP_MODES),
+        "speed_energy_policy": {
+            "cold_and_steady": "single only",
+            "hot": "single and triple",
+        },
+        "memory_energy_policy": "hot-only single and triple",
         "memory_poll_interval_s": float(args.memory_poll_interval_s),
         "speed_cases": {},
         "memory_cases": {},
@@ -1052,32 +1425,32 @@ def run_comparison(args: argparse.Namespace) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
 
     print("Running comprehensive speed pass...", flush=True)
-    for case in cases:
-        result = _run_case_subprocess(
-            case=case,
-            output_dir=speed_dir,
-            gpu_index=args.gpu_index,
-            monitor_memory=False,
-            poll_interval_s=args.memory_poll_interval_s,
-            skip_existing=not args.no_skip_existing,
-        )
-        summary["speed_cases"][case.key] = result
-        _write_summary(summary_path, summary)
-        print(_result_summary_line(result, include_speed=True), flush=True)
+    _run_pass(
+        cases=speed_cases,
+        summary=summary,
+        summary_key="speed_cases",
+        summary_path=summary_path,
+        output_dir=speed_dir,
+        monitor_memory=False,
+        poll_interval_s=args.memory_poll_interval_s,
+        skip_existing=not args.no_skip_existing,
+        serial_gpu_device=serial_gpu_device,
+        parallel_gpu_devices=parallel_gpu_devices,
+    )
 
     print("Running comprehensive memory pass...", flush=True)
-    for case in cases:
-        result = _run_case_subprocess(
-            case=case,
-            output_dir=memory_dir,
-            gpu_index=args.gpu_index,
-            monitor_memory=True,
-            poll_interval_s=args.memory_poll_interval_s,
-            skip_existing=not args.no_skip_existing,
-        )
-        summary["memory_cases"][case.key] = result
-        _write_summary(summary_path, summary)
-        print(_result_summary_line(result, include_speed=False), flush=True)
+    _run_pass(
+        cases=memory_cases,
+        summary=summary,
+        summary_key="memory_cases",
+        summary_path=summary_path,
+        output_dir=memory_dir,
+        monitor_memory=True,
+        poll_interval_s=args.memory_poll_interval_s,
+        skip_existing=not args.no_skip_existing,
+        serial_gpu_device=serial_gpu_device,
+        parallel_gpu_devices=parallel_gpu_devices,
+    )
 
     _write_table(speed_table_path, list(summary["speed_cases"].values()), include_memory=False)
     _write_table(memory_table_path, list(summary["memory_cases"].values()), include_memory=True)
@@ -1094,13 +1467,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Development-only comprehensive cross-backend single-size CoreShell comparison. "
-            "Runs separate speed and memory passes across host warm/hot and "
-            "device steady/hot lanes. The memory pass uses a warmed same-GPU "
-            "CuPy memGetInfo observer plus process RSS polling."
+            "Runs a speed pass across host cold/hot and device steady/hot lanes, "
+            "with triple-energy rows on hot lanes only. The separate memory pass is "
+            "hot-only and records both single-energy and triple-energy rows using a "
+            "warmed same-GPU CuPy memGetInfo observer plus process RSS polling. If "
+            "3 or more visible GPUs are available, the cyrsoxs, tensor_coeff, and "
+            "direct_polarization buckets run in parallel on separate GPUs; otherwise "
+            "the harness falls back to serial execution on one GPU."
         )
     )
     parser.add_argument("--label", default=None, help="Output subdirectory label under test-reports.")
-    parser.add_argument("--gpu-index", type=int, default=0, help="Global GPU index to pin for serial runs.")
+    parser.add_argument(
+        "--gpu-index",
+        type=int,
+        default=0,
+        help="Preferred GPU index for serial fallback runs. Auto-parallel mode uses the first 3 visible GPUs.",
+    )
     parser.add_argument(
         "--size-label",
         default="small",

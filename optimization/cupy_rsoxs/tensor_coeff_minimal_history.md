@@ -11,7 +11,7 @@ Do not open the archive unless one of the rows below is insufficient.
 | detector / projection geometry cache scaffolding | retained | useful scaffolding, but not treated as the main accepted speed win by itself |
 | detector-grid helper projection path for general-angle and aligned `x` / `y` families | accepted | replaced extra `scatter3d` materialization in the wrapper |
 | float32 fused isotropic accumulation (`mem09`) | accepted | removed the float32 `isotropic_term` temporary and materially improved host-hot `Segment B` plus peak memory |
-| host-resident legacy-zero shortcut (`mem10`) | accepted | exact-zero `legacy_zero_array` host inputs now stage only `Vfrac` and route through isotropic handling |
+| legacy-zero shortcut (`mem10`) | accepted | exact-zero `legacy_zero_array` inputs now stage only `Vfrac` and route through isotropic handling in both supported residency modes, without rewriting the authoritative material contract |
 
 ## Rejected Or Closed
 

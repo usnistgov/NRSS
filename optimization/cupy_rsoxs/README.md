@@ -11,6 +11,7 @@ specific historical experiment that is not captured in the compact docs below.
 | --- | --- | --- |
 | Current maintained optimized state | `accepted_state.md` | archive, old root stubs |
 | Remaining work that has not been cleanly closed | `remaining_untried_ideas.md` | minimal history docs unless an idea needs provenance |
+| Detailed resumable plan for the shared host-resident reusable-staging branch | `shared_reusable_staging_branch_plan.md` | archive unless a historical result is missing |
 | `tensor_coeff` optimization history | `tensor_coeff_minimal_history.md` | direct-path history, archive |
 | `direct_polarization` optimization history | `direct_polarization_minimal_history.md` | tensor history, archive |
 | Benchmark surface, commands, acceptance gates | `benchmarking_guide.md` | archive harness README |
@@ -37,6 +38,10 @@ specific historical experiment that is not captured in the compact docs below.
   - short list of still-open ideas
   - excludes already-landed work
   - marks partially tried items separately from truly untried ones
+- `shared_reusable_staging_branch_plan.md`
+  - detailed resumable plan for the shared host-resident reusable-staging branch
+  - historical CPU-vs-GPU reusable-computation comparison plus implementation notes
+  - kernel and memory-minimization strategy for the accepted GPU-staging round
 - `tensor_coeff_minimal_history.md`
   - compact accepted / rejected / still-open record for `tensor_coeff`
 - `direct_polarization_minimal_history.md`

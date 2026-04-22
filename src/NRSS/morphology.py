@@ -340,6 +340,64 @@ class Morphology:
             - ``direct_polarization_backend``: RawKernel compiler selection for
               maintained direct-polarization kernels. Defaults to ``"nvrtc"``.
               Supported values are ``"auto"``, ``"nvcc"``, and ``"nvrtc"``.
+            - ``direct_isotropic_mode``: temporary opt-in direct-polarization
+              isotropic-path selector for ``execution_path="direct_polarization"``.
+              Defaults to ``None``, which keeps the maintained lower-memory
+              direct path. ``"cached_base"`` precomputes one isotropic base
+              field per energy and reuses it across the rotation loop; this can
+              improve direct-path speed on rotation-heavy lanes but increases
+              GPU memory relative to the default direct path. Supported values
+              are ``None`` and ``"cached_base"``.
+            - ``energy_progress_bar``: ``True`` by default.
+              Multi-energy terminal progress bar for ``cupy-rsoxs``.
+              Set ``backend_options={"energy_progress_bar": False}`` to opt
+              out if you want the legacy no-progress behavior.
+              NRSS shows the ASCII ``tqdm`` bar only when more than one energy
+              is requested, ``run(stdout=True, stderr=True)`` is used, and
+              stderr is attached to an interactive TTY. Any stdout or stderr
+              suppression behaves the same as disabling this option.
+            - ``result_residency``: ``"host"`` (default) or ``"device"``.
+              Controls where the retained simulation result buffer lives after
+              the run completes. ``"host"`` keeps the result contract
+              NumPy-backed and uses pinned host memory plus asynchronous device
+              to host copies while the energy loop is still running.
+              ``"device"`` retains the final result as a CuPy array on the GPU.
+              This option affects result storage only; it does not change the
+              authoritative morphology-array ``resident_mode`` contract.
+            - ``result_chunk_size``: positive integer, default ``1``.
+              Host-streaming chunk size for ``result_residency="host"``.
+              ``1`` copies one completed energy slice at a time. Values larger
+              than ``1`` use double-buffered CuPy staging chunks and stream
+              completed chunks asynchronously to pinned host memory. The value
+              is clamped to the number of requested energies. This option has
+              no effect for ``result_residency="device"``.
+            - ``result_layout``: ``"detector"`` (default), ``"integrated"``,
+              ``"i_only"``, ``"i_para_i_perp"``, or ``"i_a"``.
+              Controls whether ``morph.run()`` retains raw detector panels
+              ``(energy, qy, qx)``, integrated output ``(energy, chi, q)``, a
+              chi-averaged intensity ``(energy, q)``, or multi-channel reduced
+              observables packaged as an xarray ``Dataset``. ``"detector"``
+              preserves the historical raw scattering contract.
+              ``"integrated"`` performs the polar remesh inside
+              ``cupy-rsoxs`` and returns output compatible with the maintained
+              ``NRSSIntegrator`` semantics as an ``xarray.DataArray`` with
+              dims ``(energy, chi, q)``. ``"i_only"`` returns the weighted
+              mean across all chi as an ``xarray.DataArray`` with dims
+              ``(energy, q)``. ``"i_para_i_perp"`` returns an
+              ``xarray.Dataset`` with ``I_para`` and ``I_perp`` data variables,
+              each indexed by ``(energy, q)``. ``"i_a"`` returns an
+              ``xarray.Dataset`` with chi-averaged ``I`` and anisotropy ``A``
+              data variables, each indexed by ``(energy, q)``.
+              For all non-``"detector"`` layouts, the reduction stays on GPU
+              until the final requested result buffer is streamed or retained,
+              and ``result_chunk_size`` applies to reduced chunks rather than
+              raw detector images.
+            - ``total_chi_wedge_deg``: float in ``(0, 180]``, default ``90``.
+              Total angular width for the parallel/perpendicular sector
+              reductions used by ``result_layout="i_para_i_perp"`` and
+              ``result_layout="i_a"``. The wedge handling uses weighted chi-bin
+              edge overlap on the GPU so sector boundaries remain balanced even
+              when the requested width lands on bin edges.
         resident_mode : {"host", "device"} or None, default None
             Location of the authoritative morphology arrays. ``"cupy-rsoxs"``
             defaults to ``"host"`` and also supports ``"device"``.
@@ -364,8 +422,13 @@ class Morphology:
         ``execution_path``, the normalized defaults include
         ``execution_path="direct_polarization"``,
         ``kernel_preload_stage="a1"``,
-        ``igor_shift_backend="nvcc"``, and
-        ``direct_polarization_backend="nvrtc"``.
+        ``igor_shift_backend="nvcc"``,
+        ``direct_polarization_backend="nvrtc"``, and
+        ``energy_progress_bar=True``,
+        ``result_residency="host"``,
+        ``result_chunk_size=1``, and
+        ``result_layout="detector"``, and
+        ``total_chi_wedge_deg=90.0``.
         """
 
         self._numMaterial = numMaterial
@@ -1435,6 +1498,11 @@ class Material(OpticalConstants):
 
         This isotropic contract is semantic, not just shorthand for filling
         orientation arrays with zeros.
+
+        Runtime UI options such as the default multi-energy progress bar are
+        configured on :class:`Morphology`, not on :class:`Material`. To disable
+        the default ``cupy-rsoxs`` energy progress bar, construct the morphology
+        with ``backend_options={"energy_progress_bar": False}``.
         """
         self._owner_morphology = None
         self._explicit_isotropic_contract = False
