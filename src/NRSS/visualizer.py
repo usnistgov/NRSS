@@ -15,6 +15,8 @@ def morphology_visualizer(
     translate_x: int = None,
     translate_y: int = None,
     screen_euler: bool = True,
+    screen_euler_vfrac: float = 0.05,
+    screen_euler_s: float = 0.05,
     add_quiver: bool = False,
     quiver_bw: bool = True,
     outputmat: list = None,
@@ -46,7 +48,9 @@ def morphology_visualizer(
         translate_y : int
             Number of voxels to translate image in y; meant for use with subsample
         screen_euler : bool
-            Suppress visualization of euler angles where vfrac < 0.05 or S < 0.05; intended to hilight edges
+            Suppress visualization of euler angles where vfrac < screen_euler_vfrac or S < screen_euler_s; intended to hilight edges
+            screen_euler_vfrac : float
+            screen_euler_s : float
         add_quiver : bool
             Adds lines to every voxel on the psi plot that indicate in-plane direction. Not recommended for resolutions larger than 128x128, best for resolutions 64x64 or lower.
         quiver_bw : bool
@@ -275,8 +279,8 @@ def morphology_visualizer(
                             np.ma.masked_array(
                                 theta_field[z_slice, :, :] % np.pi,
                                 np.logical_or(
-                                    vfrac[z_slice, :, :] < 0.01,
-                                    s_field[z_slice, :, :] < 0.01,
+                                    vfrac[z_slice, :, :] < screen_euler_vfrac,
+                                    s_field[z_slice, :, :] < screen_euler_s,
                                 ),
                             ),
                             cmap=plt.get_cmap("jet"),
@@ -348,8 +352,8 @@ def morphology_visualizer(
                     norm = matplotlib.colors.Normalize(vmin=0, vmax=2 * np.pi, clip=False)
                     if screen_euler:
                         screen_mask = np.logical_or(
-                            vfrac[z_slice, :, :] < 0.01,
-                            s_field[z_slice, :, :] < 0.01,
+                            vfrac[z_slice, :, :] < screen_euler_vfrac,
+                            s_field[z_slice, :, :] < screen_euler_s,
                         )
                         psiplot = ax6.imshow(
                             np.ma.masked_array(
