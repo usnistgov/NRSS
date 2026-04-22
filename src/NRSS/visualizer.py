@@ -312,7 +312,10 @@ def morphology_visualizer(
                 if psi_field is not None:
                     psi_slice = psi_field[z_slice, start_y:end_y, start_x:end_x]
                 if screen_euler and (show_theta or show_psi):
-                    screen_mask = np.logical_or(vfrac_slice < 0.01, s_slice < 0.01)
+                    screen_mask = np.logical_or(
+                        vfrac_slice < screen_euler_vfrac,
+                        s_slice < screen_euler_s,
+                    )
 
                 if show_vfrac:
                     ax1 = plt.subplot(gs[0, 0])
