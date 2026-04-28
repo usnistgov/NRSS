@@ -72,6 +72,16 @@ def _histogram_values(
     return np.asarray(flat), False, total_size
 
 
+def _to_numpy_if_needed(array):
+    if array is None:
+        return None
+    if _is_cupy_array(array):
+        import cupy as cp
+
+        return cp.asnumpy(array)
+    return np.asarray(array)
+
+
 def _resolve_slice_plane(num_zyx, z_slice, y_slice, x_slice):
     requested = {
         "xy": z_slice if (y_slice is None and x_slice is None) else None,
@@ -182,6 +192,21 @@ def _crop_slice_to_square(slice_array):
     return slice_array[start_y:end_y, :]
 
 
+def _add_full_height_colorbar(fig, ax, mappable, pad_fraction: float = 0.01, width_fraction: float = 0.012):
+    axis_bbox = ax.get_position()
+    colorbar_x0 = axis_bbox.x1 + pad_fraction
+    colorbar_width = width_fraction
+    colorbar_ax = fig.add_axes(
+        [
+            colorbar_x0,
+            axis_bbox.y0,
+            colorbar_width,
+            axis_bbox.height,
+        ]
+    )
+    return fig.colorbar(mappable, cax=colorbar_ax)
+
+
 def morphology_visualizer(
     morphology,
     z_slice: int = 0,
@@ -190,7 +215,7 @@ def morphology_visualizer(
     subsample: int = None,
     translate_x: int = None,
     translate_y: int = None,
-    vertical_slice_aspect: str = "full",
+    vertical_slice_aspect: str = "square",
     screen_euler: bool = True,
     screen_euler_vfrac: float = 0.05,
     screen_euler_s: float = 0.05,
@@ -439,6 +464,12 @@ def morphology_visualizer(
                         theta_slice = _crop_slice_to_square(theta_slice)
                     if psi_slice is not None:
                         psi_slice = _crop_slice_to_square(psi_slice)
+
+                vfrac_slice = _to_numpy_if_needed(vfrac_slice)
+                s_slice = _to_numpy_if_needed(s_slice)
+                theta_slice = _to_numpy_if_needed(theta_slice)
+                psi_slice = _to_numpy_if_needed(psi_slice)
+
                 if screen_euler and (show_theta or show_psi):
                     screen_mask = np.logical_or(
                         vfrac_slice < screen_euler_vfrac,
@@ -469,7 +500,7 @@ def morphology_visualizer(
                     ax1.set_ylabel(display_config["vertical_label"], labelpad=0)
                     ax1.set_xlabel(display_config["horizontal_label"])
                     ax1.set_title(f"Mat {i} {material.name} Vfrac ({plane_name})")
-                    Vfrac_cbar = plt.colorbar(Vfracplot, ax=ax1, fraction=0.040)
+                    Vfrac_cbar = _add_full_height_colorbar(fig, ax1, Vfracplot)
 
                 if show_s:
                     ax2 = plt.subplot(gs[0, 1])
@@ -495,7 +526,7 @@ def morphology_visualizer(
                     ax2.set_ylabel(display_config["vertical_label"], labelpad=0)
                     ax2.set_xlabel(display_config["horizontal_label"])
                     ax2.set_title(f"Mat {i} {material.name} S ({plane_name})")
-                    S_cbar = plt.colorbar(Splot, fraction=0.040)
+                    S_cbar = _add_full_height_colorbar(fig, ax2, Splot)
 
                 if show_histograms:
                     vfrac_hist, vfrac_sampled, vfrac_hist_count = _histogram_values(
@@ -563,7 +594,7 @@ def morphology_visualizer(
                     ax5.set_ylabel(display_config["vertical_label"])
                     ax5.set_xlabel(display_config["horizontal_label"])
                     ax5.set_title(f"Mat {i} {material.name} theta ({plane_name})")
-                    theta_cbar = plt.colorbar(thetaplot, fraction=0.040)
+                    theta_cbar = _add_full_height_colorbar(fig, ax5, thetaplot)
 
                     ax5i = inset_axes(
                         ax5,
@@ -686,7 +717,7 @@ def morphology_visualizer(
                     ax6.set_ylabel(display_config["vertical_label"])
                     ax6.set_xlabel(display_config["horizontal_label"])
                     ax6.set_title(f"Mat {i} {material.name} psi ({plane_name})")
-                    psi_cbar = plt.colorbar(psiplot, fraction=0.040)
+                    psi_cbar = _add_full_height_colorbar(fig, ax6, psiplot)
                     ax4i = inset_axes(
                         ax6,
                         axes_class=matplotlib.projections.get_projection_class("polar"),
