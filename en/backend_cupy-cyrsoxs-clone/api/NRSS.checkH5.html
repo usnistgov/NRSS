@@ -1,0 +1,892 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>NRSS.checkH5 &#8212; NRSS 0.1.0 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/ntd2d.css?v=525a25f0" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- So that users can add custom icons -->
+  <script defer src="../_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
+
+    <script src="../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/NRSS.checkH5';</script>
+    <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="NRSS.morphology" href="NRSS.morphology.html" />
+    <link rel="prev" title="NRSS.writer" href="NRSS.writer.html" />
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  
+    
+    <script src="../_static/searchtools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <script src="../searchindex.js"></script>
+  
+
+  <link rel="stylesheet" href="https://pages.nist.gov/nist-header-footer/css/nist-combined.css">
+  <script src="https://code.jquery.com/jquery-3.6.2.min.js" type="text/javascript" defer="defer"></script>
+  <script src="https://pages.nist.gov/nist-header-footer/js/nist-header-footer.js" type="text/javascript" defer="defer"></script>
+
+
+  </head>
+  <body data-default-mode="">
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+  
+  
+  
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header id="pst-header" class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../_static/Logo_NRSS.svg" class="logo__image only-light" alt="NRSS 0.1.0 documentation - Home"/>
+    <img src="../_static/Logo_NRSS.svg" class="logo__image only-dark pst-js-only" alt="NRSS 0.1.0 documentation - Home"/>
+  
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../getting_started/idx_getting_started.html">
+    Getting Started
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../user_guide/idx_user_guide.html">
+    User Guide
+  </a>
+</li>
+
+
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="idx_api.html">
+    Software Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../development/idx_development.html">
+    Development and Contributing:
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-external" href="https://www.nist.gov/programs-projects/resonant-soft-x-ray-scattering-rsoxs">
+    NIST RSoXS project
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-external" href="https://pages.nist.gov/PyHyperScattering/en/main/index.html">
+    PyHyperScattering
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+
+<div class="theme-switch-container dropdown pst-js-only" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Color mode">
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button dropdown-toggle" aria-label="Color mode" data-bs-toggle="dropdown">
+    <i class="theme-switch fa-solid fa-sun fa-lg fa-fw" data-mode="light" title="Light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg fa-fw" data-mode="dark" title="Dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg fa-fw" data-mode="auto" title="System Settings"></i>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end">
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg fa-fw me-1"></i>System Settings</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="light"><i class="fa-solid fa-sun fa-lg fa-fw me-1"></i>Light</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="dark"><i class="fa-solid fa-moon fa-lg fa-fw me-1"></i>Dark</button></li>
+  </ul>
+</div></div>
+      
+        <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/usnistgov/NRSS" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i><span class="visually-hidden">GitHub</span></a>
+        </li>
+</ul></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../getting_started/idx_getting_started.html">
+    Getting Started
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../user_guide/idx_user_guide.html">
+    User Guide
+  </a>
+</li>
+
+
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="idx_api.html">
+    Software Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../development/idx_development.html">
+    Development and Contributing:
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-external" href="https://www.nist.gov/programs-projects/resonant-soft-x-ray-scattering-rsoxs">
+    NIST RSoXS project
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-external" href="https://pages.nist.gov/PyHyperScattering/en/main/index.html">
+    PyHyperScattering
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+          
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+
+<div class="theme-switch-container dropdown pst-js-only" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Color mode">
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button dropdown-toggle" aria-label="Color mode" data-bs-toggle="dropdown">
+    <i class="theme-switch fa-solid fa-sun fa-lg fa-fw" data-mode="light" title="Light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg fa-fw" data-mode="dark" title="Dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg fa-fw" data-mode="auto" title="System Settings"></i>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end">
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg fa-fw me-1"></i>System Settings</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="light"><i class="fa-solid fa-sun fa-lg fa-fw me-1"></i>Light</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="dark"><i class="fa-solid fa-moon fa-lg fa-fw me-1"></i>Dark</button></li>
+  </ul>
+</div></div>
+        
+          <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/usnistgov/NRSS" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i><span class="visually-hidden">GitHub</span></a>
+        </li>
+</ul></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item pst-sidebar-collapse"><button id="pst-collapse-sidebar-button" aria-expanded="true" aria-controls="pst-primary-sidebar">
+  <svg class="pst-icon" role="img" aria-hidden="true" focusable="false" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+    <path fill="currentColor" d="M3 15.5C2.36232 15.5 1.74874 15.2564 1.28478 14.8189C0.820828 14.3815 0.541576 13.7832 0.504167 13.1467L0.5 13L0.5 3C0.499965 2.36232 0.743605 1.74874 1.18107 1.28478C1.61854 0.820828 2.21676 0.541576 2.85333 0.504167L3 0.5L13 0.5C13.6377 0.499965 14.2513 0.743605 14.7152 1.18107C15.1792 1.61854 15.4584 2.21676 15.4958 2.85333L15.5 3L15.5 13C15.5 13.6377 15.2564 14.2513 14.8189 14.7152C14.3815 15.1792 13.7832 15.4584 13.1467 15.4958L13 15.5L3 15.5ZM3 13.8333L10.5 13.8333L10.5 2.16667L3 2.16667C2.79589 2.16669 2.59889 2.24163 2.44636 2.37726C2.29383 2.5129 2.19638 2.69979 2.1725 2.9025L2.16667 3L2.16667 13C2.16669 13.2041 2.24163 13.4011 2.37726 13.5536C2.5129 13.7062 2.69979 13.8036 2.9025 13.8275L3 13.8333ZM6.65583 10.325L6.5775 10.2558L4.91083 8.58917C4.76735 8.44567 4.68116 8.25476 4.66843 8.05223C4.65569 7.84971 4.71729 7.6495 4.84167 7.48917L4.91083 7.41083L6.5775 5.74417C6.72747 5.59471 6.9287 5.50794 7.14032 5.50148C7.35194 5.49502 7.55809 5.56935 7.7169 5.70937C7.8757 5.8494 7.97525 6.04463 7.99533 6.25539C8.01541 6.46616 7.95451 6.67667 7.825 6.84417L7.75583 6.9225L6.67917 8L7.75583 9.0775C7.89931 9.22099 7.98551 9.41191 7.99824 9.61443C8.01097 9.81695 7.94938 10.0172 7.825 10.1775L7.75583 10.2558C7.61234 10.3993 7.42142 10.4855 7.2189 10.4982C7.01638 10.511 6.81617 10.4494 6.65583 10.325Z"/>
+  </svg>
+  <span class="pst-collapse-sidebar-label">Collapse Sidebar</span>
+  <span class="pst-expand-sidebar-label">Expand Sidebar</span>
+</button></div>
+        <div class="sidebar-primary-item">
+
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="cyrsoxs.html">CyRSoXS Simulation Components</a></li>
+<li class="toctree-l1"><a class="reference internal" href="NRSS.writer.html">NRSS.writer</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">NRSS.checkH5</a></li>
+<li class="toctree-l1"><a class="reference internal" href="NRSS.morphology.html">NRSS.morphology</a></li>
+<li class="toctree-l1"><a class="reference internal" href="NRSS.reader.html">NRSS.reader</a></li>
+</ul>
+</div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    
+    <li class="breadcrumb-item"><a href="idx_api.html" class="nav-link">Software Reference</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">NRSS.checkH5</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="module-NRSS.checkH5">
+<span id="nrss-checkh5"></span><h1>NRSS.checkH5<a class="headerlink" href="#module-NRSS.checkH5" title="Link to this heading">#</a></h1>
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.checkH5.checkH5">
+<span class="sig-prename descclassname"><span class="pre">NRSS.checkH5.</span></span><span class="sig-name descname"><span class="pre">checkH5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'perp82.hd5'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">z_slice</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subsample</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outputmat</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">runquiet</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">plotstyle</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'light'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.checkH5.checkH5" title="Link to this definition">#</a></dt>
+<dd><p>Reads in morphology HDF5 file and checks that the format is consistent for CyRSoXS. Optionally plots and returns select quantities.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>filename</strong> (<em>str</em><em> or </em><em>path</em>) – Name of HDF5 morphology file to check</p></li>
+<li><p><strong>z_slice</strong> (<em>int</em>) – Which z-slice of the array to plot.</p></li>
+<li><p><strong>subsample</strong> (<em>int</em>) – Number of voxels to display in X and Y</p></li>
+<li><p><strong>outputmat</strong> (<em>int</em>) – Number of which material to return</p></li>
+<li><p><strong>runquiet</strong> (<em>bool</em>) – Boolean flag for running without plotting or outputting to console</p></li>
+<li><p><strong>plotstyle</strong> (<em>str</em>) – Use a light or dark background for plots. ‘dark’ - dark, ‘light’ - light</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><strong>Vfrac</strong> (<em>ndarray</em>) – Volume fraction of selected material. [ Z, Y, X]</p></li>
+<li><p><strong>S</strong> (<em>ndarray</em>) – Fraction of alignment for selected material. [Z, Y, X]</p></li>
+<li><p><strong>theta</strong> (<em>ndarray</em>) – Second Euler angle (ZYZ convention). [Z, Y, X]</p></li>
+<li><p><strong>psi</strong> (<em>ndarray</em>) – Third Euler angle (ZYZ convention). [Z, Y, X]</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.checkH5.check_NumMat">
+<span class="sig-prename descclassname"><span class="pre">NRSS.checkH5.</span></span><span class="sig-name descname"><span class="pre">check_NumMat</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">f</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">morphology_type</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.checkH5.check_NumMat" title="Link to this definition">#</a></dt>
+<dd><p>Checks and validates the number of materials in the HDF5 file</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>f</strong> (<em>file object</em>)</p></li>
+<li><p><strong>morphology_type</strong> (<em>int</em>) – 0 - Euler, 1 - Vector</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>num_mat</strong> – Number of materials in file</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.checkH5.inset_axes">
+<span class="sig-prename descclassname"><span class="pre">NRSS.checkH5.</span></span><span class="sig-name descname"><span class="pre">inset_axes</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">parent_axes</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">width</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">height</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">loc</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'upper</span> <span class="pre">right'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bbox_to_anchor</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bbox_transform</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axes_class</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axes_kwargs</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">borderpad</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.5</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.checkH5.inset_axes" title="Link to this definition">#</a></dt>
+<dd><p>Create an inset axes with a given width and height.</p>
+<p>Both sizes used can be specified either in inches or percentage.
+For example,:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">inset_axes</span><span class="p">(</span><span class="n">parent_axes</span><span class="p">,</span> <span class="n">width</span><span class="o">=</span><span class="s1">&#39;40%&#39;</span><span class="p">,</span> <span class="n">height</span><span class="o">=</span><span class="s1">&#39;30%&#39;</span><span class="p">,</span> <span class="n">loc</span><span class="o">=</span><span class="s1">&#39;lower left&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>creates in inset axes in the lower left corner of <em>parent_axes</em> which spans
+over 30% in height and 40% in width of the <em>parent_axes</em>. Since the usage
+of <cite>.inset_axes</cite> may become slightly tricky when exceeding such standard
+cases, it is recommended to read <span class="xref std std-doc">the examples</span>.</p>
+<p class="rubric">Notes</p>
+<p>The meaning of <em>bbox_to_anchor</em> and <em>bbox_to_transform</em> is interpreted
+differently from that of legend. The value of bbox_to_anchor
+(or the return value of its get_points method; the default is
+<em>parent_axes.bbox</em>) is transformed by the bbox_transform (the default
+is Identity transform) and then interpreted as points in the pixel
+coordinate (which is dpi dependent).</p>
+<p>Thus, following three calls are identical and creates an inset axes
+with respect to the <em>parent_axes</em>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">axins</span> <span class="o">=</span> <span class="n">inset_axes</span><span class="p">(</span><span class="n">parent_axes</span><span class="p">,</span> <span class="s2">&quot;30%&quot;</span><span class="p">,</span> <span class="s2">&quot;40%&quot;</span><span class="p">)</span>
+<span class="n">axins</span> <span class="o">=</span> <span class="n">inset_axes</span><span class="p">(</span><span class="n">parent_axes</span><span class="p">,</span> <span class="s2">&quot;30%&quot;</span><span class="p">,</span> <span class="s2">&quot;40%&quot;</span><span class="p">,</span>
+                   <span class="n">bbox_to_anchor</span><span class="o">=</span><span class="n">parent_axes</span><span class="o">.</span><span class="n">bbox</span><span class="p">)</span>
+<span class="n">axins</span> <span class="o">=</span> <span class="n">inset_axes</span><span class="p">(</span><span class="n">parent_axes</span><span class="p">,</span> <span class="s2">&quot;30%&quot;</span><span class="p">,</span> <span class="s2">&quot;40%&quot;</span><span class="p">,</span>
+                   <span class="n">bbox_to_anchor</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span>
+                   <span class="n">bbox_transform</span><span class="o">=</span><span class="n">parent_axes</span><span class="o">.</span><span class="n">transAxes</span><span class="p">)</span>
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>parent_axes</strong> (<cite>matplotlib.axes.Axes</cite>) – Axes to place the inset axes.</p></li>
+<li><p><strong>width</strong> (<em>float</em><em> or </em><em>str</em>) – Size of the inset axes to create. If a float is provided, it is
+the size in inches, e.g. <em>width=1.3</em>. If a string is provided, it is
+the size in relative units, e.g. <em>width=’40%’</em>. By default, i.e. if
+neither <em>bbox_to_anchor</em> nor <em>bbox_transform</em> are specified, those
+are relative to the parent_axes. Otherwise, they are to be understood
+relative to the bounding box provided via <em>bbox_to_anchor</em>.</p></li>
+<li><p><strong>height</strong> (<em>float</em><em> or </em><em>str</em>) – Size of the inset axes to create. If a float is provided, it is
+the size in inches, e.g. <em>width=1.3</em>. If a string is provided, it is
+the size in relative units, e.g. <em>width=’40%’</em>. By default, i.e. if
+neither <em>bbox_to_anchor</em> nor <em>bbox_transform</em> are specified, those
+are relative to the parent_axes. Otherwise, they are to be understood
+relative to the bounding box provided via <em>bbox_to_anchor</em>.</p></li>
+<li><p><strong>loc</strong> (<em>str</em><em>, </em><em>default: 'upper right'</em>) – Location to place the inset axes.  Valid locations are
+‘upper left’, ‘upper center’, ‘upper right’,
+‘center left’, ‘center’, ‘center right’,
+‘lower left’, ‘lower center’, ‘lower right’.
+For backward compatibility, numeric values are accepted as well.
+See the parameter <em>loc</em> of <cite>.Legend</cite> for details.</p></li>
+<li><p><strong>bbox_to_anchor</strong> (tuple or <cite>~matplotlib.transforms.BboxBase</cite>, optional) – Bbox that the inset axes will be anchored to. If None,
+a tuple of (0, 0, 1, 1) is used if <em>bbox_transform</em> is set
+to <em>parent_axes.transAxes</em> or <em>parent_axes.figure.transFigure</em>.
+Otherwise, <em>parent_axes.bbox</em> is used. If a tuple, can be either
+[left, bottom, width, height], or [left, bottom].
+If the kwargs <em>width</em> and/or <em>height</em> are specified in relative units,
+the 2-tuple [left, bottom] cannot be used. Note that,
+unless <em>bbox_transform</em> is set, the units of the bounding box
+are interpreted in the pixel coordinate. When using <em>bbox_to_anchor</em>
+with tuple, it almost always makes sense to also specify
+a <em>bbox_transform</em>. This might often be the axes transform
+<em>parent_axes.transAxes</em>.</p></li>
+<li><p><strong>bbox_transform</strong> (<cite>~matplotlib.transforms.Transform</cite>, optional) – Transformation for the bbox that contains the inset axes.
+If None, a <cite>.transforms.IdentityTransform</cite> is used. The value
+of <em>bbox_to_anchor</em> (or the return value of its get_points method)
+is transformed by the <em>bbox_transform</em> and then interpreted
+as points in the pixel coordinate (which is dpi dependent).
+You may provide <em>bbox_to_anchor</em> in some normalized coordinate,
+and give an appropriate transform (e.g., <em>parent_axes.transAxes</em>).</p></li>
+<li><p><strong>axes_class</strong> (<cite>~matplotlib.axes.Axes</cite> type, default: <cite>.HostAxes</cite>) – The type of the newly created inset axes.</p></li>
+<li><p><strong>axes_kwargs</strong> (<em>dict</em><em>, </em><em>optional</em>) – <p>Keyword arguments to pass to the constructor of the inset axes.
+Valid arguments include:</p>
+<p>Properties:
+adjustable: {‘box’, ‘datalim’}
+agg_filter: a filter function, which takes a (m, n, 3) float array and a dpi value, and returns a (m, n, 3) array and two offsets from the bottom left corner of the image
+alpha: float or None
+anchor: (float, float) or {‘C’, ‘SW’, ‘S’, ‘SE’, ‘E’, ‘NE’, …}
+animated: bool
+aspect: {‘auto’, ‘equal’} or float
+autoscale_on: bool
+autoscalex_on: unknown
+autoscaley_on: unknown
+axes_locator: Callable[[Axes, Renderer], Bbox]
+axisbelow: bool or ‘line’
+box_aspect: float or None
+clip_box: <cite>~matplotlib.transforms.BboxBase</cite> or None
+clip_on: bool
+clip_path: Patch or (Path, Transform) or None
+facecolor or fc: <a href="#id1"><span class="problematic" id="id2">:mpltype:`color`</span></a>
+figure: <cite>~matplotlib.figure.Figure</cite> or <cite>~matplotlib.figure.SubFigure</cite>
+forward_navigation_events: bool or “auto”
+frame_on: bool
+gid: str
+in_layout: bool
+label: object
+mouseover: bool
+navigate: bool
+navigate_mode: unknown
+path_effects: list of <cite>.AbstractPathEffect</cite>
+picker: None or bool or float or callable
+position: [left, bottom, width, height] or <cite>~matplotlib.transforms.Bbox</cite>
+prop_cycle: <cite>~cycler.Cycler</cite>
+rasterization_zorder: float or None
+rasterized: bool
+sketch_params: (scale: float, length: float, randomness: float)
+snap: bool or None
+subplotspec: unknown
+title: str
+transform: <cite>~matplotlib.transforms.Transform</cite>
+url: str
+visible: bool
+xbound: (lower: float, upper: float)
+xinverted: unknown
+xlabel: str
+xlim: (left: float, right: float)
+xmargin: float greater than -0.5
+xscale: unknown
+xticklabels: unknown
+xticks: unknown
+ybound: (lower: float, upper: float)
+yinverted: unknown
+ylabel: str
+ylim: (bottom: float, top: float)
+ymargin: float greater than -0.5
+yscale: unknown
+yticklabels: unknown
+yticks: unknown
+zorder: float</p>
+</p></li>
+<li><p><strong>borderpad</strong> (<em>float</em><em> or </em><em>(</em><em>float</em><em>, </em><em>float</em><em>)</em><em>, </em><em>default: 0.5</em>) – <p>Padding between inset axes and the bbox_to_anchor.
+If a float, the same padding is used for both x and y.
+If a tuple of two floats, it specifies the (x, y) padding.
+The units are axes font size, i.e. for a default font size of 10 points
+<em>borderpad = 0.5</em> is equivalent to a padding of 5 points.</p>
+<div class="versionadded">
+<p><span class="versionmodified added">Added in version 3.11: </span>The <em>borderpad</em> parameter now accepts a tuple of (x, y) paddings.</p>
+</div>
+</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>inset_axes</strong> – Inset axes object created.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><em>axes_class</em></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.checkH5.rc">
+<span class="sig-prename descclassname"><span class="pre">NRSS.checkH5.</span></span><span class="sig-name descname"><span class="pre">rc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">group</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.checkH5.rc" title="Link to this definition">#</a></dt>
+<dd><p>Set the current <cite>.rcParams</cite>.  <em>group</em> is the grouping for the rc, e.g.,
+for <code class="docutils literal notranslate"><span class="pre">lines.linewidth</span></code> the group is <code class="docutils literal notranslate"><span class="pre">lines</span></code>, for
+<code class="docutils literal notranslate"><span class="pre">axes.facecolor</span></code>, the group is <code class="docutils literal notranslate"><span class="pre">axes</span></code>, and so on.  Group may
+also be a list or tuple of group names, e.g., (<em>xtick</em>, <em>ytick</em>).
+<em>kwargs</em> is a dictionary attribute name/value pairs, e.g.,:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">rc</span><span class="p">(</span><span class="s1">&#39;lines&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>sets the current <cite>.rcParams</cite> and is equivalent to:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">rcParams</span><span class="p">[</span><span class="s1">&#39;lines.linewidth&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">2</span>
+<span class="n">rcParams</span><span class="p">[</span><span class="s1">&#39;lines.color&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;r&#39;</span>
+</pre></div>
+</div>
+<p>The following aliases are available to save typing for interactive users:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Alias</p></th>
+<th class="head"><p>Property</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>‘lw’</p></td>
+<td><p>‘linewidth’</p></td>
+</tr>
+<tr class="row-odd"><td><p>‘ls’</p></td>
+<td><p>‘linestyle’</p></td>
+</tr>
+<tr class="row-even"><td><p>‘c’</p></td>
+<td><p>‘color’</p></td>
+</tr>
+<tr class="row-odd"><td><p>‘fc’</p></td>
+<td><p>‘facecolor’</p></td>
+</tr>
+<tr class="row-even"><td><p>‘ec’</p></td>
+<td><p>‘edgecolor’</p></td>
+</tr>
+<tr class="row-odd"><td><p>‘mew’</p></td>
+<td><p>‘markeredgewidth’</p></td>
+</tr>
+<tr class="row-even"><td><p>‘aa’</p></td>
+<td><p>‘antialiased’</p></td>
+</tr>
+<tr class="row-odd"><td><p>‘sans’</p></td>
+<td><p>‘sans-serif’</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Thus you could abbreviate the above call as:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">rc</span><span class="p">(</span><span class="s1">&#39;lines&#39;</span><span class="p">,</span> <span class="n">lw</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">c</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Note you can use python’s kwargs dictionary facility to store
+dictionaries of default parameters.  e.g., you can customize the
+font rc as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">font</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;family&#39;</span> <span class="p">:</span> <span class="s1">&#39;monospace&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;weight&#39;</span> <span class="p">:</span> <span class="s1">&#39;bold&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;size&#39;</span>   <span class="p">:</span> <span class="s1">&#39;large&#39;</span><span class="p">}</span>
+<span class="n">rc</span><span class="p">(</span><span class="s1">&#39;font&#39;</span><span class="p">,</span> <span class="o">**</span><span class="n">font</span><span class="p">)</span>  <span class="c1"># pass in the font dict as kwargs</span>
+</pre></div>
+</div>
+<p>This enables you to easily switch between several configurations.  Use
+<code class="docutils literal notranslate"><span class="pre">matplotlib.style.use('default')</span></code> or <code class="xref py py-func docutils literal notranslate"><span class="pre">rcdefaults()</span></code> to
+restore the default <cite>.rcParams</cite> after changes.</p>
+<p class="rubric">Notes</p>
+<p>Similar functionality is available by using the normal dict interface, i.e.
+<code class="docutils literal notranslate"><span class="pre">rcParams.update({&quot;lines.linewidth&quot;:</span> <span class="pre">2,</span> <span class="pre">...})</span></code> (but <code class="docutils literal notranslate"><span class="pre">rcParams.update</span></code>
+does not support abbreviations or grouping).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.checkH5.readH5_euler">
+<span class="sig-prename descclassname"><span class="pre">NRSS.checkH5.</span></span><span class="sig-name descname"><span class="pre">readH5_euler</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.checkH5.readH5_euler" title="Link to this definition">#</a></dt>
+<dd><p>Reads in Euler Morphology from HDF5 file. Checks that total material volume fractions sum to 1 for all voxels.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>filename</strong> (<em>str</em><em> or </em><em>path</em>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><strong>Vfrac</strong> (<em>ndarray</em>) – Volume fraction of all materials. [Material, Z, Y, X]</p></li>
+<li><p><strong>S</strong> (<em>ndarray</em>) – Fraction of alignment for each material. [Material, Z, Y, X]</p></li>
+<li><p><strong>theta</strong> (<em>ndarray</em>) – Second Euler angle (ZYZ convention). [Material, Z, Y, X]</p></li>
+<li><p><strong>psi</strong> (<em>ndarray</em>) – Third Euler angle (ZYZ convention). [Material, Z, Y, X]</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="NRSS.checkH5.readH5_vector">
+<span class="sig-prename descclassname"><span class="pre">NRSS.checkH5.</span></span><span class="sig-name descname"><span class="pre">readH5_vector</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.checkH5.readH5_vector" title="Link to this definition">#</a></dt>
+<dd><p>Reads in Vector Morphology from HDF5 file and converts to Euler Morphology. Checks that total material volume fractions sum to 1 for all voxels.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>filename</strong> (<em>str</em><em> or </em><em>path</em>)</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><ul class="simple">
+<li><p><strong>Vfrac</strong> (<em>ndarray</em>) – Volume fraction of all materials. [Material, Z, Y, X]</p></li>
+<li><p><strong>S</strong> (<em>ndarray</em>) – Fraction of alignment for each material. [Material, Z, Y, X]</p></li>
+<li><p><strong>theta</strong> (<em>ndarray</em>) – Second Euler angle (ZYZ convention). [Material, Z, Y, X]</p></li>
+<li><p><strong>psi</strong> (<em>ndarray</em>) – Third Euler angle (ZYZ convention). [Material, Z, Y, X]</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="NRSS.writer.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">NRSS.writer</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="NRSS.morphology.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">NRSS.morphology</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.checkH5.checkH5"><code class="docutils literal notranslate"><span class="pre">checkH5()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.checkH5.check_NumMat"><code class="docutils literal notranslate"><span class="pre">check_NumMat()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.checkH5.inset_axes"><code class="docutils literal notranslate"><span class="pre">inset_axes()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.checkH5.rc"><code class="docutils literal notranslate"><span class="pre">rc()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.checkH5.readH5_euler"><code class="docutils literal notranslate"><span class="pre">readH5_euler()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.checkH5.readH5_vector"><code class="docutils literal notranslate"><span class="pre">readH5_vector()</span></code></a></li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+
+  <div class="tocsection sourcelink">
+    <a href="../_sources/api/NRSS.checkH5.rst.txt">
+      <i class="fa-solid fa-file-lines"></i> Show Source
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9"></script>
+
+
+  
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright : Official Contribution of the US Government.  Not subject to copyright in the United States.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.0.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.20.0.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+
+  <!-- Taken from https://www.filamentgroup.com/lab/html-includes/#another-demo%3A-including-another-html-file -->
+  <iframe src="../_static/ntd2d_menu.html" onload="this.before((this.contentDocument.body||this.contentDocument).children[0]);this.remove()"></iframe>
+  </body>
+</html>
