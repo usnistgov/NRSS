@@ -944,6 +944,7 @@ def _expected_cupy_backend_options(
     result_residency: str = "host",
     result_chunk_size: int | None = 1,
     result_layout: str = "detector",
+    result_q_grid_mode: str = "intersection",
     total_chi_wedge_deg: float = 90.0,
 ) -> dict[str, str | bool | int | float | None]:
     kernel_preload_stage = "off"
@@ -964,6 +965,7 @@ def _expected_cupy_backend_options(
         "result_residency": result_residency,
         "result_chunk_size": result_chunk_size,
         "result_layout": result_layout,
+        "result_q_grid_mode": result_q_grid_mode,
         "total_chi_wedge_deg": total_chi_wedge_deg,
     }
 
@@ -1146,6 +1148,25 @@ def test_cupy_backend_accepts_integrated_result_layout_backend_option():
 
 @pytest.mark.backend_specific
 @pytest.mark.cpu
+def test_cupy_backend_accepts_union_q_grid_for_reduced_result_layout():
+    """Ensure cupy-rsoxs normalizes the opt-in union shared-q contract."""
+    morph = Morphology(
+        1,
+        backend="cupy-rsoxs",
+        backend_options={
+            "result_layout": "integrated",
+            "result_q_grid_mode": "union",
+        },
+        create_cy_object=False,
+    )
+    assert morph.backend_options == _expected_cupy_backend_options(
+        result_layout="integrated",
+        result_q_grid_mode="union",
+    )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
 @pytest.mark.parametrize(
     ("requested_layout", "expected_layout"),
     [
@@ -1215,6 +1236,29 @@ def test_cupy_backend_rejects_unknown_result_layout_backend_option():
             1,
             backend="cupy-rsoxs",
             backend_options={"result_layout": "definitely-not-valid"},
+            create_cy_object=False,
+        )
+
+
+@pytest.mark.backend_specific
+@pytest.mark.cpu
+def test_cupy_backend_rejects_invalid_union_q_grid_contracts():
+    """Ensure union-q mode requires a supported reduced result layout."""
+    with pytest.raises(BackendOptionError, match="requires a reduced result_layout"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={"result_q_grid_mode": "union"},
+            create_cy_object=False,
+        )
+    with pytest.raises(BackendOptionError, match="does not support result_q_grid_mode"):
+        Morphology(
+            1,
+            backend="cupy-rsoxs",
+            backend_options={
+                "result_layout": "integrated",
+                "result_q_grid_mode": "definitely-not-valid",
+            },
             create_cy_object=False,
         )
 
@@ -4095,6 +4139,7 @@ def _build_two_material_sphere_morphology(
     energies: list[float],
     shape: tuple[int, int, int] = (32, 32, 32),
     sphere_diameter_vox: int = 16,
+    phys_size: float = 5.0,
     eangle_rotation: list[float] | None = None,
     config_overrides: dict | None = None,
     backend: str = "cyrsoxs",
@@ -4173,7 +4218,7 @@ def _build_two_material_sphere_morphology(
     morph = Morphology(
         2,
         materials={1: mat1, 2: mat2},
-        PhysSize=5.0,
+        PhysSize=phys_size,
         config=config,
         create_cy_object=True,
         backend=backend,
@@ -4840,6 +4885,63 @@ def test_cupy_internal_integrated_result_matches_nrssintegrator_multi_energy_smo
         if i_a_morph is not None:
             try:
                 i_a_morph.release_runtime()
+            except Exception:
+                pass
+        _release_cupy_memory()
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff", "cupy_direct_polarization")
+def test_cupy_internal_integrator_union_q_grid_retains_hard_xray_support(
+    nrss_path: ComputationPath,
+):
+    """Keep Cu K-alpha q support while masking unsupported soft-X-ray bins."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for internal union-q smoke test.")
+
+    energies = [285.0, 8047.8]
+    morph = None
+    try:
+        base_backend_options = dict(nrss_path.backend_options)
+        morph = _build_two_material_sphere_morphology(
+            energies=energies,
+            shape=(32, 32, 32),
+            phys_size=1.0,
+            backend=nrss_path.backend,
+            backend_options={
+                **base_backend_options,
+                "result_chunk_size": 2,
+                "result_layout": "integrated",
+                "result_q_grid_mode": "union",
+            },
+            resident_mode=nrss_path.resident_mode,
+            input_policy="strict",
+            ownership_policy=nrss_path.ownership_policy,
+            field_namespace=nrss_path.field_namespace,
+        )
+        result = morph.run(stdout=False, stderr=False, return_xarray=True)
+
+        q = np.asarray(result.coords["q"].values, dtype=np.float64)
+        q_abs = np.asarray(result.coords["q_abs"].values, dtype=np.float64)
+        soft_q_max = float(np.nanmax(q_abs[0]))
+        hard_q_max = float(np.nanmax(q_abs[1]))
+        hard_only = q > soft_q_max
+
+        assert result.dims == ("energy", "chi", "q")
+        assert list(result.coords["energy"].values) == energies
+        assert result.attrs["result_q_grid_mode"] == "union"
+        assert result.attrs["radial_coordinate_mode"] == (
+            "shared_q_grid_union_interpolated"
+        )
+        assert np.any(hard_only)
+        assert hard_q_max > 4.0
+        assert np.isclose(q[-1], hard_q_max, rtol=0.0, atol=1e-12)
+        assert np.isnan(np.asarray(result.values[0])[:, hard_only]).all()
+        assert np.isfinite(np.asarray(result.values[1])[:, hard_only]).any()
+    finally:
+        if morph is not None:
+            try:
+                morph.release_runtime()
             except Exception:
                 pass
         _release_cupy_memory()

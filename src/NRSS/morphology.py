@@ -392,6 +392,19 @@ class Morphology:
               until the final requested result buffer is streamed or retained,
               and ``result_chunk_size`` applies to reduced chunks rather than
               raw detector images.
+            - ``result_q_grid_mode``: ``"intersection"`` (default) or
+              ``"union"``. Controls the shared detector-corrected ``q``
+              coordinate for multi-energy 3D reduced layouts.
+              ``"intersection"`` preserves ``NRSSIntegrator`` compatibility by
+              retaining only the q range supported by every energy. ``"union"``
+              retains the range supported by any energy and fills samples
+              outside each energy's physical support with ``NaN``. Union mode
+              applies to ``"integrated"``, ``"i_only"``,
+              ``"i_para_i_perp"``, and ``"i_a"``; it is rejected with
+              ``result_layout="detector"``. The common q grid retains the polar
+              remesh bin count, so union and intersection modes generally have
+              different q increments. See the user-guide section on
+              ``cupy-rsoxs`` reduced-result q grids for details.
             - ``total_chi_wedge_deg``: float in ``(0, 180]``, default ``90``.
               Total angular width for the parallel/perpendicular sector
               reductions used by ``result_layout="i_para_i_perp"`` and
@@ -427,7 +440,8 @@ class Morphology:
         ``energy_progress_bar=True``,
         ``result_residency="host"``,
         ``result_chunk_size=1``, and
-        ``result_layout="detector"``, and
+        ``result_layout="detector"``,
+        ``result_q_grid_mode="intersection"``, and
         ``total_chi_wedge_deg=90.0``.
         """
 

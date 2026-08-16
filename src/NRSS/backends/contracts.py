@@ -82,6 +82,7 @@ _BACKEND_ARRAY_CONTRACTS = {
         "default_result_residency": "host",
         "default_result_chunk_size": 1,
         "default_result_layout": "detector",
+        "default_result_q_grid_mode": "intersection",
         "default_total_chi_wedge_deg": 90.0,
         "supported_rawkernel_backends": (
             "auto",
@@ -99,6 +100,10 @@ _BACKEND_ARRAY_CONTRACTS = {
             "i_para_i_perp",
             "i_a",
         ),
+        "supported_result_q_grid_modes": (
+            "intersection",
+            "union",
+        ),
         "supported_backend_options": (
             "execution_path",
             "mixed_precision_mode",
@@ -111,6 +116,7 @@ _BACKEND_ARRAY_CONTRACTS = {
             "result_residency",
             "result_chunk_size",
             "result_layout",
+            "result_q_grid_mode",
             "total_chi_wedge_deg",
         ),
         "runtime_compute_dtype": "float32",
@@ -295,6 +301,22 @@ def normalize_result_layout_name(value: Any) -> str:
         "i-and-a": "i_a",
         "i_a": "i_a",
         "ia": "i_a",
+    }
+    return aliases.get(cleaned, cleaned)
+
+
+def normalize_result_q_grid_mode_name(value: Any) -> str:
+    if value is None:
+        return "intersection"
+
+    cleaned = str(value).strip().lower()
+    aliases = {
+        "": "intersection",
+        "default": "intersection",
+        "overlap": "intersection",
+        "intersection": "intersection",
+        "full": "union",
+        "union": "union",
     }
     return aliases.get(cleaned, cleaned)
 
@@ -512,6 +534,30 @@ def normalize_backend_options(
                 f"{', '.join(spec.get('supported_result_layouts', ('detector',)))}."
             )
         normalized_options["result_layout"] = result_layout
+
+    if "result_q_grid_mode" in spec["supported_backend_options"]:
+        result_q_grid_mode = normalize_result_q_grid_mode_name(
+            options.get(
+                "result_q_grid_mode",
+                spec.get("default_result_q_grid_mode", "intersection"),
+            )
+        )
+        if result_q_grid_mode not in spec.get(
+            "supported_result_q_grid_modes", ("intersection",)
+        ):
+            raise BackendOptionError(
+                f"Backend {backend_name!r} does not support result_q_grid_mode "
+                f"{result_q_grid_mode!r}. Supported values: "
+                f"{', '.join(spec.get('supported_result_q_grid_modes', ('intersection',)))}."
+            )
+        if result_q_grid_mode != "intersection" and normalized_options.get(
+            "result_layout"
+        ) == "detector":
+            raise BackendOptionError(
+                "Backend 'cupy-rsoxs' result_q_grid_mode='union' requires a reduced "
+                "result_layout; choose integrated, i_only, i_para_i_perp, or i_a."
+            )
+        normalized_options["result_q_grid_mode"] = result_q_grid_mode
 
     if "total_chi_wedge_deg" in spec["supported_backend_options"]:
         normalized_options["total_chi_wedge_deg"] = normalize_total_chi_wedge_deg(

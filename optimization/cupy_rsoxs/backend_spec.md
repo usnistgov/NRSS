@@ -866,7 +866,9 @@ Current prep/implementation status to preserve:
    - `kernel_preload_stage` for the maintained custom-kernel preload policy,
    - `igor_shift_backend` for the maintained Igor-shift RawKernel family,
    - `direct_polarization_backend` for the maintained default
-     `direct_polarization` Segment `B` RawKernel family.
+     `direct_polarization` Segment `B` RawKernel family,
+   - `result_q_grid_mode` for intersection or opt-in union shared-q behavior
+     in reduced multi-energy 3D results.
 4. Current contract table:
    - `cyrsoxs`: authoritative/runtime namespace `numpy`, device `cpu`, default
      dtype `float32`
@@ -930,6 +932,30 @@ Optical-constants direction for parity:
    morphology data.
 
 ### Output policy and result ownership
+
+For reduced `cupy-rsoxs` result layouts, `result_q_grid_mode` controls the
+shared detector-corrected q grid for multi-energy 3D output:
+
+1. `intersection` is the default and preserves `NRSSIntegrator` compatibility
+   by limiting the shared q coordinate to the range supported by every energy.
+2. `union` is opt-in and extends the shared q coordinate to the range supported
+   by any energy. Energy/q samples outside an individual energy's physical
+   support are represented by `NaN`.
+3. The option applies to `integrated`, `i_only`, `i_para_i_perp`, and `i_a`.
+   Detector-layout output has no shared radial grid and therefore rejects the
+   union setting.
+4. Single-energy reduced results use their native detector-corrected q axis,
+   and 2D reciprocal-plane results use energy-independent `q_perp`; the option
+   changes output only for multi-energy 3D reductions.
+5. Both modes keep the polar remesh bin count. Their uniform common-grid
+   increment is therefore `(q_max - q_min) / (N_q - 1)`, not necessarily the
+   Cartesian detector increment `2*pi/(N*PhysSize)`. Intersection mode can
+   oversample a short common range; union mode spans its wider range without
+   increasing the result allocation.
+6. Union results expose `result_q_grid_mode='union'`,
+   `radial_coordinate_mode='shared_q_grid_union_interpolated'`, and a
+   descriptive `q_axis_note`. The pre-interpolation axes remain available as
+   the energy-dependent `q_abs` coordinate.
 
 Output policy direction:
 

@@ -82,3 +82,4 @@ For detailed examples and implementations, refer to the tutorial notebooks in th
    :maxdepth: 2
 
    pyhyper
+   cupy_rsoxs_result_q_grids

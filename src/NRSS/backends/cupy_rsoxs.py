@@ -730,6 +730,11 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
     def _result_layout(self, morphology) -> str:
         return str(morphology.backend_options.get("result_layout", "detector"))
 
+    def _result_q_grid_mode(self, morphology) -> str:
+        return str(
+            morphology.backend_options.get("result_q_grid_mode", "intersection")
+        )
+
     @staticmethod
     def _uses_reduced_result_layout(result_layout: str) -> bool:
         return result_layout != "detector"
@@ -821,16 +826,28 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 if not np.allclose(q, q_perp, atol=0.0, rtol=0.0):
                     q_perp_coord = q_perp
             else:
-                q_common = self._shared_q_grid(q_axes)
+                q_grid_mode = self._result_q_grid_mode(morphology)
+                q_common = self._shared_q_grid(q_axes, mode=q_grid_mode)
                 q_abs = np.asarray(q_axes, dtype=np.float64)
                 attrs.pop("energy_ev", None)
                 if q_common is not None:
                     q = q_common
-                    attrs["radial_coordinate_mode"] = "shared_q_grid_interpolated"
-                    attrs["q_axis_note"] = (
-                        "The q dimension is a shared detector-corrected q grid spanning the overlap "
-                        "of all slices. Exact per-slice q values before interpolation remain in q_abs."
-                    )
+                    if q_grid_mode == "union":
+                        attrs["radial_coordinate_mode"] = (
+                            "shared_q_grid_union_interpolated"
+                        )
+                        attrs["result_q_grid_mode"] = "union"
+                        attrs["q_axis_note"] = (
+                            "The q dimension is a shared detector-corrected q grid spanning the union "
+                            "of all slices. Values outside each slice's physical q support are NaN; "
+                            "exact per-slice q values before interpolation remain in q_abs."
+                        )
+                    else:
+                        attrs["radial_coordinate_mode"] = "shared_q_grid_interpolated"
+                        attrs["q_axis_note"] = (
+                            "The q dimension is a shared detector-corrected q grid spanning the overlap "
+                            "of all slices. Exact per-slice q values before interpolation remain in q_abs."
+                        )
                     needs_common_q_interpolation = True
                     device_q_axes = cp.asarray(q_abs)
                     device_q_common = cp.asarray(q_common)
@@ -929,7 +946,11 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return q
 
     @staticmethod
-    def _shared_q_grid(q_axes: np.ndarray) -> np.ndarray | None:
+    def _shared_q_grid(
+        q_axes: np.ndarray,
+        *,
+        mode: str = "intersection",
+    ) -> np.ndarray | None:
         lower_bounds = []
         upper_bounds = []
         n_points = None
@@ -941,9 +962,21 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             upper_bounds.append(float(np.max(finite)))
             n_points = axis.size if n_points is None else min(n_points, axis.size)
 
-        q_min = max(lower_bounds)
-        q_max = min(upper_bounds)
-        if not np.isfinite(q_min) or not np.isfinite(q_max) or q_max <= q_min or n_points is None or n_points < 2:
+        if mode == "intersection":
+            q_min = max(lower_bounds)
+            q_max = min(upper_bounds)
+        elif mode == "union":
+            q_min = min(lower_bounds)
+            q_max = max(upper_bounds)
+        else:
+            raise ValueError(f"Unsupported shared q-grid mode {mode!r}.")
+        if (
+            not np.isfinite(q_min)
+            or not np.isfinite(q_max)
+            or q_max <= q_min
+            or n_points is None
+            or n_points < 2
+        ):
             return None
         return np.linspace(q_min, q_max, int(n_points), dtype=np.float64)
 
