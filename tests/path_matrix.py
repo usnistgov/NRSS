@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import os
 
 
 @dataclass(frozen=True)
@@ -53,18 +54,24 @@ PEER_PATHS: tuple[ComputationPath, ...] = (
 )
 
 PATHS_BY_ID = {path.id: path for path in PEER_PATHS}
+SPEED_VARIANT_ENV = "NRSS_TEST_SPEED_VARIANT"
+SPEED_VARIANTS = ("compact_c2c", "compact_r2c")
 
 
 def get_computation_path(path_id: str) -> ComputationPath:
     try:
-        return PATHS_BY_ID[path_id]
+        path = PATHS_BY_ID[path_id]
     except KeyError as exc:
         known = ", ".join(PATHS_BY_ID)
         raise ValueError(f"Unknown NRSS computation path {path_id!r}. Known paths: {known}.") from exc
+    variant = os.environ.get(SPEED_VARIANT_ENV)
+    if path.id == "cupy_tensor_coeff" and variant:
+        return replace(path, backend_options={**path.backend_options, "energy_basis_mode": variant})
+    return path
 
 
 def peer_paths_for_backend(backend: str) -> tuple[ComputationPath, ...]:
-    return tuple(path for path in PEER_PATHS if path.backend == backend)
+    return tuple(get_computation_path(path.id) for path in PEER_PATHS if path.backend == backend)
 
 
 def default_path_for_backend(backend: str) -> ComputationPath:

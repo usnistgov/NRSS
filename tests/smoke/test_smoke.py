@@ -1644,7 +1644,7 @@ def test_cupy_tensor_coeff_z_collapse_is_exact_identity_for_native_single_slice(
     collapsed = None
     try:
         base = _build_two_material_isotropic_single_slice_morphology(
-            backend_options={"execution_path": "tensor_coeff"},
+            backend_options={"execution_path": "tensor_coeff", "energy_basis_mode": None},
         )
         collapsed = _build_two_material_isotropic_single_slice_morphology(
             backend_options={"execution_path": "tensor_coeff", "z_collapse_mode": "mean"},
@@ -2742,6 +2742,7 @@ def test_cupy_private_segment_timing_is_opt_in_and_subsettable():
             PhysSize=5.0,
             config=config,
             backend="cupy-rsoxs",
+            backend_options={"energy_basis_mode": None},
             resident_mode="device",
             input_policy="strict",
             ownership_policy="borrow",
@@ -2839,6 +2840,7 @@ def test_cupy_private_segment_timing_records_runtime_staging_as_a2():
             PhysSize=5.0,
             config=config,
             backend="cupy-rsoxs",
+            backend_options={"energy_basis_mode": None},
             input_policy="strict",
             create_cy_object=True,
         )
@@ -3013,6 +3015,7 @@ def test_cupy_release_runtime_clears_host_mode_pool_and_kernel_cache():
             PhysSize=5.0,
             config=config,
             backend="cupy-rsoxs",
+            backend_options={"energy_basis_mode": None},
             resident_mode="host",
             input_policy="strict",
             create_cy_object=True,
@@ -4945,6 +4948,48 @@ def test_cupy_internal_integrator_union_q_grid_retains_hard_xray_support(
             except Exception:
                 pass
         _release_cupy_memory()
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff")
+def test_cupy_common_q_remap_matches_per_row_interpolation(nrss_path: ComputationPath):
+    """Preserve boundary, duplicate q-bin, and nonfinite intensity behavior."""
+    if not _has_visible_gpu():
+        pytest.skip("No visible NVIDIA GPU found for common-q remap smoke test.")
+
+    import cupy as cp
+
+    from NRSS.backends.cupy_rsoxs import CupyRsoxsBackendRuntime
+
+    axes = np.array([
+        [0, np.nan, 0.5, 0.5, 1, 2, np.nan],
+        [0, 0.6, 1, 2, 2.5, 3, np.nan],
+        [np.nan, 1, np.nan, np.nan, np.nan, np.nan, np.nan],
+    ])
+    common = np.array([-0.25, 0, 0.25, 0.5, 0.75, 1, 1.5, 2, 2.5, 3, 3.25])
+    values = cp.arange(42, dtype=cp.float64).reshape(3, 2, 7)
+    values[0, 0, 4] = cp.nan
+    values[1, 1, 1:3] = cp.inf
+    values[1, 1, 4] = -cp.inf
+    cp_common = cp.asarray(common)
+    expected = cp.full((3, 2, common.size), cp.nan)
+    for energy, axis in enumerate(axes):
+        bins = np.flatnonzero(np.isfinite(axis))
+        bins = bins[np.r_[True, np.diff(axis[bins]) > 0]]
+        if bins.size < 2:
+            continue
+        x = cp.asarray(axis[bins])
+        for chi in range(values.shape[1]):
+            expected[energy, chi] = cp.interp(
+                cp_common, x, values[energy, chi, bins], left=cp.nan, right=cp.nan,
+            )
+    bounds = CupyRsoxsBackendRuntime._common_q_bounds(axes, common)
+    out = cp.empty_like(expected)
+    actual = CupyRsoxsBackendRuntime._interp_chunk_to_common_q_cupy(
+        values, q_axes=cp.asarray(axes), q_common=cp_common, bounds=cp.asarray(bounds), cp=cp, out=out,
+    )
+    assert actual is out
+    cp.testing.assert_array_equal(actual, expected)
 
 
 @pytest.mark.gpu

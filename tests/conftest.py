@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import sys
@@ -18,6 +19,8 @@ from NRSS.backends import (
 )
 from tests.path_matrix import (
     PEER_PATHS,
+    SPEED_VARIANTS,
+    SPEED_VARIANT_ENV,
     ComputationPath,
     default_path_for_backend,
     get_computation_path,
@@ -43,6 +46,11 @@ def pytest_addoption(parser):
         action="store",
         default=None,
         help="Select a maintained NRSS computation path for path-aware tests.",
+    )
+    parser.addoption(
+        "--nrss-speed-variant",
+        choices=SPEED_VARIANTS,
+        help="Force the selected Fourier basis for tensor-path validation.",
     )
 
 
@@ -116,7 +124,7 @@ def _matrix_paths_for_config(config) -> tuple[ComputationPath, ...]:
         return (explicit_path,)
     if selection_mode == "explicit_backend" and selected_backend is not None:
         return peer_paths_for_backend(selected_backend)
-    return PEER_PATHS
+    return tuple(get_computation_path(path.id) for path in PEER_PATHS)
 
 
 def _paths_from_subset_marker(marker) -> tuple[ComputationPath, ...]:
@@ -192,6 +200,11 @@ def pytest_generate_tests(metafunc):
 
 
 def pytest_configure(config):
+    variant = config.getoption("--nrss-speed-variant") or os.environ.get(SPEED_VARIANT_ENV)
+    if variant:
+        if variant not in SPEED_VARIANTS:
+            raise pytest.UsageError(f"Unsupported NRSS speed variant {variant!r}.")
+        os.environ[SPEED_VARIANT_ENV] = variant
     explicit_path, selected_backend, selection_mode = _resolve_path_matrix_selection(config)
     backend_info = get_backend_info(selected_backend) if selected_backend is not None else None
 
@@ -317,3 +330,33 @@ def nrss_backend_options(nrss_path):
 @pytest.fixture
 def nrss_backend_info(nrss_path):
     return get_backend_info(nrss_path.backend)
+
+
+@pytest.fixture(autouse=True)
+def _trace_energy_basis_validation(request, monkeypatch):
+    trace = os.environ.get("NRSS_TEST_ENERGY_BASIS_LOG")
+    if not trace:
+        return
+
+    from NRSS.backends import _cupy_energy_basis
+    from NRSS.backends.cupy_rsoxs import _ExecutionReport
+
+    build = _cupy_energy_basis.build_energy_basis
+
+    def counted_build(runtime, morphology, cp, materials, energies, window, mode, execution):
+        report = execution if execution is not None else _ExecutionReport()
+        initial_count = sum(report.fft_calls.values())
+        basis = build(runtime, morphology, cp, materials, energies, window, mode, report)
+        payload = {
+            "case": request.node.nodeid,
+            "route": mode,
+            "shape": list(morphology.NumZYX),
+            "energies": len(set(energies)),
+            "ffts": sum(report.fft_calls.values()) - initial_count,
+            "bytes": basis.nbytes,
+        }
+        with Path(trace).open("a") as stream:
+            stream.write(json.dumps(payload) + "\n")
+        return basis
+
+    monkeypatch.setattr(_cupy_energy_basis, "build_energy_basis", counted_build)

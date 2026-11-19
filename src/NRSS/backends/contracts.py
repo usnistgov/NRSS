@@ -106,6 +106,7 @@ _BACKEND_ARRAY_CONTRACTS = {
         ),
         "supported_backend_options": (
             "execution_path",
+            "energy_basis_mode",
             "mixed_precision_mode",
             "z_collapse_mode",
             "kernel_preload_stage",
@@ -409,6 +410,13 @@ def normalize_backend_options(
                 f"{', '.join(spec['supported_execution_paths'])}."
             )
         normalized_options["execution_path"] = execution_path
+    if "energy_basis_mode" in options:
+        mode = options["energy_basis_mode"]
+        if mode not in (None, "auto", "compact_c2c", "compact_r2c", "direct_r2c"):
+            raise BackendOptionError(
+                "energy_basis_mode must be None, 'auto', 'compact_c2c', 'compact_r2c', or 'direct_r2c'."
+            )
+        normalized_options["energy_basis_mode"] = mode
     if "mixed_precision_mode" in spec["supported_backend_options"]:
         mixed_precision_mode = normalize_mixed_precision_mode_name(
             options.get("mixed_precision_mode", spec["default_mixed_precision_mode"])
