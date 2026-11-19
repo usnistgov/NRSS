@@ -49,6 +49,7 @@ Build and maintain an NRSS backend architecture that:
    - `optimization/cupy_rsoxs/backend_spec.md`
 2. Optimization routing and compact history:
    - `optimization/cupy_rsoxs/README.md`
+   - Current-workflow speed tickets: `optimization/cupy_rsoxs/speed_tickets/README.md`
 3. Validation/path-matrix/program status:
    - `optimization/cupy_rsoxs/validation_and_status.md`
 4. Fast approximation support posture:

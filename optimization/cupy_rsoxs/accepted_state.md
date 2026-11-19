@@ -2,17 +2,25 @@
 
 Open this file when you need the current maintained optimization state.
 
-If you need untried work, go to `remaining_untried_ideas.md`.
+For new work, use the [prioritized speed tickets](speed_tickets/README.md).
 If you need benchmark commands or acceptance gates, go to `benchmarking_guide.md`.
 
 ## Maintained Execution Paths
 
 - `tensor_coeff`
-  - maintained default execution path
+  - maintained execution path that reuses tensor transforms across E angles
   - primary optimization target for angle-heavy workloads
 - `direct_polarization`
-  - maintained alternate path
-  - useful when lower memory footprint or direct-path behavior is the point
+  - per-energy fallback in the normalized runtime contract
+  - available explicitly for direct-path comparisons
+
+## Automatic energy-basis reuse
+
+The CuPy default and explicit `tensor_coeff` select the compact real Fourier basis for full-depth FP32 single- and multi-energy scans. Explicit direct polarization follows its per-energy path. Set `energy_basis_mode=None` to select the configured per-energy route. [Qualification](speed_tickets/RESULTS.md#compact-tensor-default-at-all-energy-counts)
+
+The compact tensor route uses a fused projector at each energy and fuses angle weighting, rotation, and accumulation for multiple electric-field directions. [Qualification](speed_tickets/RESULTS.md#s07--combined-compact-projection-and-rotation-qualification)
+
+Peak VRAM can exceed dense tensor for thin models with broad detector coverage. [Memory guidance](../../docs/source/user_guide/cupy_rsoxs_memory.rst)
 
 ## Current Accepted Optimizations
 
@@ -34,6 +42,8 @@ If you need benchmark commands or acceptance gates, go to `benchmarking_guide.md
   - drop raw staged `S`, `theta`, `psi`,
   - keep `Vfrac + phi_a + sx + sy + sz` as the steady-state runtime layout.
 - Detector / projection geometry caching remains part of the accepted runtime.
+- Windowed compact tensor runs apply separable Hann factors while generating each real basis field. [Qualification](speed_tickets/RESULTS.md#s07--separable-hann-window-qualification)
+- CuPy plans each energy's common-q interpolation indices once and applies the remap to all azimuthal rows in each output chunk. [Qualification](speed_tickets/RESULTS.md#s07--batched-common-q-qualification)
 
 ### `tensor_coeff`
 
@@ -68,7 +78,7 @@ If you need benchmark commands or acceptance gates, go to `benchmarking_guide.md
 
 ## Current Caveats That Still Matter
 
-- `tensor_coeff` remains the maintained default for multi-angle work.
+- The normalized execution path records the per-energy fallback. Use the execution report to confirm the route.
 - Cross-backend GPU-memory claims should use host-resident `cupy-rsoxs` as the
   comparison authority.
 - Old long-form optimization notes have been archived; do not open them unless
