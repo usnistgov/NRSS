@@ -1878,7 +1878,10 @@ def test_cupy_mixed_precision_host_resident_accepts_authoritative_numpy_float16_
     """Ensure host-resident mixed_precision_mode accepts strict authoritative NumPy float16 arrays."""
     morph = _build_two_material_isotropic_block_morphology(
         backend="cupy-rsoxs",
-        backend_options={"mixed_precision_mode": "reduced_morphology_bit_depth"},
+        backend_options={
+            "mixed_precision_mode": "reduced_morphology_bit_depth",
+            "kernel_preload_stage": "off",
+        },
         resident_mode="host",
         field_namespace="numpy",
         isotropic_representation="legacy_zero_array",
