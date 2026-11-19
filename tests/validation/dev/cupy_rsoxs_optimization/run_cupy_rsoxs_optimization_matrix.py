@@ -11,16 +11,16 @@ import sys
 import tempfile
 import time
 import traceback
-from dataclasses import asdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import numpy as np
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+REPO_ROOT = Path(os.environ.get("NRSS_SPEED_CHECKOUT", Path(__file__).resolve().parents[4])).resolve()
 SRC_PATH = REPO_ROOT / "src"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -92,6 +92,7 @@ if __name__ == "__main__":
 else:
     _EARLY_GPU_BOOTSTRAP = None
 
+import NRSS
 from NRSS import SFieldMode
 from NRSS.morphology import Material, Morphology, OpticalConstants
 from NRSS.backends import (
@@ -135,6 +136,7 @@ class SizeSpec:
     shape: tuple[int, int, int]
     phys_size_nm: float
     scale: int
+    center_z_vox: float | None = None
 
 
 @dataclass(frozen=True)
@@ -160,6 +162,13 @@ class BenchmarkCase:
     force_stderr_tty: bool = False
     validation_baseline_name: str | None = None
     notes: str | None = None
+    windowing_type: int = 0
+    rot_mask: int = 0
+    material_z: int | None = None
+    geometry: bool = False
+    transform_z: int | None = None
+    accuracy: str | None = None
+    output_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -565,7 +574,12 @@ def _build_scaled_core_shell_fields(size_spec: SizeSpec) -> dict[str, np.ndarray
     core_radius_vox = np.float32(CORE_RADIUS_VOX * scale)
     shell_thickness_vox = np.float32(SHELL_THICKNESS_VOX * scale)
     shell_radius = np.float32(core_radius_vox + shell_thickness_vox)
-    center_z = np.float32(CENTER_Z_VOX * scale)
+    if size_spec.center_z_vox is None:
+        center_z = np.float32(CENTER_Z_VOX * scale)
+    else:
+        center_z = np.float32(size_spec.center_z_vox)
+        if min(center_z, nz - 1 - center_z) < shell_radius:
+            raise ValueError(f"Material depth {nz} would clip the CoreShell fixture")
 
     a_b = np.zeros(size_spec.shape, dtype=bool)
     b_b = np.zeros(size_spec.shape, dtype=bool)
@@ -780,6 +794,8 @@ def build_scaled_core_shell_morphology(
 
 def _case_note(case: BenchmarkCase) -> str:
     size_spec = SIZE_SPECS.get(case.shape_label)
+    if case.family == "generic":
+        return "Synthetic asymmetric two-material Euler fixture with weak contrast at the middle energy."
     if case.family == "core_shell":
         return (
             f"CoreShell {case.shape_label} {size_spec.shape} PhysSize={size_spec.phys_size_nm} "
@@ -930,21 +946,60 @@ def _isotropic_representation_comparison_summary_line(
 
 
 def _prepare_core_shell_case_inputs(case: BenchmarkCase) -> dict[str, Any]:
-    if case.family != "core_shell":
-        raise AssertionError(f"Unsupported timing family: {case.family}")
-    size_spec = SIZE_SPECS[case.shape_label]
-    return {
-        "num_material": 3,
-        "materials": build_scaled_core_shell_materials(
+    if case.family == "generic":
+        materials = _generic_materials(case)
+        phys_size = 2.5
+    else:
+        size_spec = SIZE_SPECS[case.shape_label]
+        if case.material_z is not None and case.material_z != size_spec.shape[0]:
+            size_spec = replace(
+                size_spec, shape=(case.material_z, *size_spec.shape[1:]), center_z_vox=(case.material_z - 1) / 2,
+            )
+        materials = build_scaled_core_shell_materials(
             size_spec=size_spec,
             energies_ev=case.energies_ev,
             field_namespace=case.field_namespace,
             isotropic_representation=case.isotropic_representation,
-        ),
-        "phys_size": float(size_spec.phys_size_nm),
-        "config": _default_morphology_config(case.energies_ev, case.eangle_rotation),
+        )
+        phys_size = float(size_spec.phys_size_nm)
+    config = _default_morphology_config(case.energies_ev, case.eangle_rotation)
+    config.update(WindowingType=case.windowing_type, RotMask=case.rot_mask)
+    return {
+        "num_material": len(materials),
+        "materials": materials,
+        "phys_size": phys_size,
+        "config": config,
         "backend_options": case.backend_options,
     }
+
+
+def _generic_materials(case: BenchmarkCase) -> dict[int, Material]:
+    """A small deterministic, nonseparable orientation and composition fixture."""
+    nz = case.material_z if case.material_z is not None else 9
+    z, y, x = np.meshgrid(
+        *(np.linspace(-1, 1, n, dtype=np.float32) for n in (nz, 33, 35)), indexing="ij",
+    )
+    vfrac = 0.5 + 0.24 * np.sin(3.1 * x + y * z) + 0.11 * np.cos(2.8 * z - 3 * y)
+    common = np.array([1.4e-3, 2.5e-4, 1.4e-3, 2.5e-4])
+    materials = {}
+    for number, sign in ((1, 1), (2, -1)):
+        fields = _convert_fields_namespace({
+            "Vfrac": vfrac if sign == 1 else 1 - vfrac,
+            "S": 0.46 + 0.24 * np.cos(2 * z + x - sign * y),
+            "theta": 1.0 + 0.4 * np.sin(2 * y + sign * x * z),
+            "psi": 3.0 + 1.9 * np.sin(x - 2 * y + sign * z),
+        }, case.field_namespace)
+        spectra = {}
+        middle = len(case.energies_ev) // 2
+        for index, energy in enumerate(case.energies_ev):
+            scale = 0.002 if len(case.energies_ev) > 1 and index == middle else 1.0
+            contrast = np.array([4e-4, 1.0e-4, -2.5e-4, -0.6e-4]) * sign
+            dispersion = np.array([1e-4, 5e-5, -4e-5, 3e-5]) * (energy - 285.0)
+            spectra[energy] = (common + scale * (contrast + dispersion)).tolist()
+        materials[number] = Material(
+            materialID=number, energies=list(case.energies_ev), opt_constants=spectra, **fields,
+        )
+    return materials
 
 
 def _resolve_case_cuda_prewarm(case: BenchmarkCase) -> tuple[str, str | None]:
@@ -1003,6 +1058,68 @@ def _synchronize_cupy_default_stream() -> None:
     cp.cuda.Stream.null.synchronize()
 
 
+def _device_metadata():
+    import cupy as cp
+    from cupy.cuda import cufft, runtime
+
+    properties = runtime.getDeviceProperties(cp.cuda.Device().id)
+    return {
+        "name": properties["name"].decode(),
+        "uuid": f"GPU-{UUID(bytes=properties['uuid'])}",
+        "driver_version": runtime.driverGetVersion(),
+        "runtime_version": runtime.runtimeGetVersion(),
+        "cufft_version": cufft.getVersion(),
+        "cupy_version": cp.__version__,
+    }
+
+
+def _detector_demand(morphology, energies, transform_z):
+    import cupy as cp
+
+    runtime = morphology._backend_runtime
+    override = runtime._segment_c_shape_override(morphology)
+    if transform_z is not None:
+        override = (transform_z, *morphology.NumZYX[1:])
+    transform_shape = runtime._shape_tuple(morphology, shape_override=override)
+    geometry = runtime._detector_geometry(morphology, cp, shape_override=override)
+    endpoints = np.zeros(transform_shape, dtype=bool)
+    for energy in energies:
+        indices = runtime._detector_projection_geometry(morphology, energy, cp, geometry, override)
+        rows, cols = np.nonzero(cp.asnumpy(indices.valid))
+        if indices.safe_z0 is None:
+            endpoints[0, rows, cols] = True
+        else:
+            for z in (indices.safe_z0, indices.safe_z1):
+                endpoints[cp.asnumpy(z[indices.valid]), rows, cols] = True
+        runtime._discard_detector_projection_geometry(morphology, energy, shape_override=override)
+    return {
+        "material_shape": list(morphology.NumZYX),
+        "transform_shape": list(transform_shape),
+        "valid_columns": int(np.count_nonzero(endpoints.any(axis=0))),
+        "distinct_endpoints": int(np.count_nonzero(endpoints)),
+        "global_z_planes": np.flatnonzero(endpoints.any(axis=(1, 2))).tolist(),
+    }
+
+
+def _save_accuracy_output(result, mode, path):
+    output = result.to_xarray()
+    if mode == "screen":
+        count = output.sizes["energy"]
+        output = output.isel(energy=sorted({0, count // 2, count - 1}))
+    variables = output.data_vars if hasattr(output, "data_vars") else {"intensity": output}
+    arrays = {}
+    manifest = {}
+    for group, fields in (("coords", output.coords), ("values", variables)):
+        layout = {}
+        for name, field in fields.items():
+            key = f"{group}/{name}"
+            arrays[key] = field.values
+            layout[name] = {"key": key, "dims": list(field.dims), "shape": list(field.shape)}
+        manifest[group] = layout
+    np.savez(path, **arrays)
+    return manifest
+
+
 def _run_case_once(
     *,
     case: BenchmarkCase,
@@ -1014,16 +1131,10 @@ def _run_case_once(
     try:
         start_time = time.perf_counter() if collect_timing else None
         morphology = _construct_morphology_for_timing_case(case, prepared_inputs)
-        run_result: dict[str, Any] = {
-            "resolved_backend_options": dict(morphology.backend_options),
-            "kernel_backend_report": dict(getattr(morphology, "last_kernel_backend_report", {})),
-            "kernel_preload_report": dict(getattr(morphology, "last_kernel_preload_report", {})),
-        }
-        if collect_timing:
-            segment_seconds: dict[str, float] = {}
-            if "A1" in case.timing_segments and start_time is not None:
+        segment_seconds: dict[str, float] = {}
+        if collect_timing and case.timing_segments:
+            if "A1" in case.timing_segments:
                 segment_seconds["A1"] = time.perf_counter() - start_time
-
             morphology._set_private_backend_timing_segments(case.timing_segments)
 
         original_stderr_isatty = None
@@ -1039,23 +1150,33 @@ def _run_case_once(
         finally:
             if original_stderr_isatty is not None:
                 setattr(sys.stderr, "isatty", original_stderr_isatty)
+        sync_start = time.perf_counter() if "synchronization" in case.timing_segments else None
         _synchronize_cupy_default_stream()
+        finished = time.perf_counter() if collect_timing else None
 
+        run_result: dict[str, Any] = {"resolved_backend_options": dict(morphology.backend_options)}
         if collect_timing:
             backend_timings = morphology.backend_timings
             if backend_timings:
                 segment_seconds.update(backend_timings.get("segment_seconds", {}))
-
+            if sync_start is not None:
+                segment_seconds["final_stream_join"] = finished - sync_start
             run_result.update(
-                primary_seconds=time.perf_counter() - start_time,
-                segment_seconds={
-                    segment: float(segment_seconds[segment])
-                    for segment in TIMING_SEGMENTS
-                    if segment in segment_seconds
-                },
+                primary_seconds=finished - start_time,
+                segment_seconds=segment_seconds,
                 backend_timing_details=backend_timings,
             )
-        run_result["panel_shape"] = list(backend_result.to_backend_array().shape)
+            if case.timing_segments:
+                run_result["device"] = _device_metadata()
+                run_result["material_shape"] = list(morphology.NumZYX)
+                run_result["field_dtype"] = next(iter(morphology.materials.values())).Vfrac.dtype.name
+            if case.geometry:
+                run_result["detector_demand"] = _detector_demand(morphology, case.energies_ev, case.transform_z)
+        if case.accuracy:
+            run_result["arrays"] = _save_accuracy_output(backend_result, case.accuracy, case.output_path)
+        data = backend_result.to_backend_array()
+        run_result["panel_shape"] = list(data.shape)
+        run_result["result_dtype"] = data.dtype.name
         run_result["kernel_backend_report"] = dict(
             getattr(morphology, "last_kernel_backend_report", {})
         )
@@ -1094,7 +1215,7 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         "eangle_rotation": list(case.eangle_rotation),
         "timing_segments_requested": list(case.timing_segments),
         "timing_boundary": PRIMARY_TIMING_BOUNDARY,
-        "note": _case_note(case),
+        "nrss_module": str(Path(NRSS.__file__).resolve()),
         "worker_warmup_runs_requested": int(case.worker_warmup_runs),
         "run_stdout": bool(case.run_stdout),
         "run_stderr": bool(case.run_stderr),
@@ -1111,6 +1232,7 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
     morphology = None
     backend_result = None
     try:
+        result["note"] = _case_note(case)
         prewarm_mode, prewarm_note = _resolve_case_cuda_prewarm(case)
         result["cuda_prewarm_applied_mode"] = prewarm_mode
         if prewarm_note is not None:
@@ -1146,7 +1268,7 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         timed_result = _run_case_once(
             case=case,
             prepared_inputs=prepared_inputs,
-            collect_timing=True,
+            collect_timing=case.accuracy is None,
         )
         result.update(timed_result)
         result["status"] = "ok"
