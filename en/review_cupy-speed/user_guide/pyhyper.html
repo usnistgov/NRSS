@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>User Guide &#8212; NRSS 0.1.0 documentation</title>
+    <title>PyHyperScattering &#8212; NRSS 0.1.0 documentation</title>
   
   
   
@@ -44,12 +44,12 @@
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../_static/design-tabs.js?v=f930bc37"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'user_guide/idx_user_guide';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'user_guide/pyhyper';</script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="PyHyperScattering" href="pyhyper.html" />
-    <link rel="prev" title="Getting Started" href="../getting_started/idx_getting_started.html" />
+    <link rel="next" title="cupy-rsoxs Reduced-Result q Grids" href="cupy_rsoxs_result_q_grids.html" />
+    <link rel="prev" title="User Guide" href="idx_user_guide.html" />
   
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
@@ -155,7 +155,7 @@
 
 
 <li class="nav-item current active">
-  <a class="nav-link nav-internal" href="#">
+  <a class="nav-link nav-internal" href="idx_user_guide.html">
     User Guide
   </a>
 </li>
@@ -291,7 +291,7 @@
 
 
 <li class="nav-item current active">
-  <a class="nav-link nav-internal" href="#">
+  <a class="nav-link nav-internal" href="idx_user_guide.html">
     User Guide
   </a>
 </li>
@@ -381,9 +381,10 @@
 <nav class="bd-docs-nav bd-links"
      aria-label="Section Navigation">
   <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
-  <div class="bd-toc-item navbar-nav"><ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="pyhyper.html">PyHyperScattering</a></li>
+  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">PyHyperScattering</a></li>
 <li class="toctree-l1"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cupy_rsoxs_memory.html">CuPy GPU memory and material count</a></li>
 </ul>
 </div>
 </nav></div>
@@ -424,7 +425,10 @@
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">User Guide</span></li>
+    
+    <li class="breadcrumb-item"><a href="idx_user_guide.html" class="nav-link">User Guide</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">PyHyperScattering</span></li>
   </ul>
 </nav>
 </div>
@@ -441,92 +445,12 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="user-guide">
-<span id="id1"></span><h1>User Guide<a class="headerlink" href="#user-guide" title="Link to this heading">#</a></h1>
-<section id="nrss-model-usage">
-<h2>NRSS Model Usage<a class="headerlink" href="#nrss-model-usage" title="Link to this heading">#</a></h2>
-<p>The NRSS (Neutron and Resonant Soft X-ray Scattering) model is a powerful tool for simulating and analyzing scattering data. This guide covers the key aspects of using NRSS effectively.</p>
-<section id="core-components">
-<h3>Core Components<a class="headerlink" href="#core-components" title="Link to this heading">#</a></h3>
-<ol class="arabic simple">
-<li><p>Morphology Definition
-- Use the <code class="docutils literal notranslate"><span class="pre">Morphology</span></code> class to define your system structure
-- Support for various geometries including disks, spheres, and custom shapes
-- Define material properties and spatial arrangements</p></li>
-<li><p>Material Properties
-- Complex refractive indices from experimental data or theoretical calculations
-- Support for both scalar and tensor (uniaxial) optical constants
-- Integration with KKcalc for optical constant determination</p></li>
-<li><p>Simulation Parameters
-- Energy range selection for resonant scattering
-- Q-range configuration for scattering profiles
-- Resolution and accuracy settings</p></li>
-</ol>
-</section>
-<section id="common-workflows">
-<h3>Common Workflows<a class="headerlink" href="#common-workflows" title="Link to this heading">#</a></h3>
-<ol class="arabic simple">
-<li><p>Basic Simulation
-- Define system morphology
-- Set material properties
-- Configure simulation parameters
-- Run simulation and analyze results</p></li>
-<li><p>Parameter Sweeps
-- Systematic variation of model parameters
-- Analysis of parameter effects on scattering
-- Optimization of model parameters</p></li>
-<li><p>Data Analysis
-- Comparison with experimental data
-- Model refinement and validation
-- Extraction of structural parameters</p></li>
-</ol>
-</section>
-<section id="advanced-features">
-<h3>Advanced Features<a class="headerlink" href="#advanced-features" title="Link to this heading">#</a></h3>
-<ol class="arabic simple">
-<li><p>Custom Model Development
-- Creating specialized geometric models
-- Implementing new material property calculations
-- Advanced parameter sweep strategies</p></li>
-<li><p>Visualization Tools
-- 2D and 3D structure visualization
-- Scattering pattern analysis
-- Parameter sweep result visualization</p></li>
-</ol>
-</section>
-<section id="best-practices">
-<h3>Best Practices<a class="headerlink" href="#best-practices" title="Link to this heading">#</a></h3>
-<ol class="arabic simple">
-<li><p>Model Selection
-- Choose appropriate geometric models
-- Consider computational efficiency
-- Validate assumptions</p></li>
-<li><p>Parameter Optimization
-- Start with reasonable initial guesses
-- Use systematic parameter sweeps
-- Validate results against physical constraints</p></li>
-<li><p>Performance Considerations
-- Optimize mesh resolution
-- Use efficient parameter sweep strategies
-- Balance accuracy and computation time</p></li>
-</ol>
-<p>For detailed examples and implementations, refer to the tutorial notebooks in the documentation.</p>
-<div class="toctree-wrapper compound">
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="pyhyper.html">PyHyperScattering</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="pyhyper.html#cyrsoxs-loader">CyRSoXS Loader</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html#grid-modes">Grid modes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html#coordinates-and-metadata">Coordinates and metadata</a></li>
-<li class="toctree-l2"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html#q-resolution">q resolution</a></li>
-<li class="toctree-l2"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html#compatibility-and-validation">Compatibility and validation</a></li>
-</ul>
-</li>
-</ul>
-</div>
-</section>
+  <section id="pyhyperscattering">
+<h1>PyHyperScattering<a class="headerlink" href="#pyhyperscattering" title="Link to this heading">#</a></h1>
+<p><a class="reference external" href="https://github.com/usnistgov/PyHyperScattering">PyHyperScattering</a> is a library for hyperspectral x-ray and neutron scattering data loading, reduction, slicing, and visualization.</p>
+<section id="cyrsoxs-loader">
+<h2>CyRSoXS Loader<a class="headerlink" href="#cyrsoxs-loader" title="Link to this heading">#</a></h2>
+<p>PyHyperScattering has a CyRSoXS-specific loader that will load a simulation into an xarray DataArray and allow you to use the same API to analyze your experimental and simulated RSoXSs data.</p>
 </section>
 </section>
 
@@ -541,20 +465,20 @@
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="../getting_started/idx_getting_started.html"
+       href="idx_user_guide.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">Getting Started</p>
+        <p class="prev-next-title">User Guide</p>
       </div>
     </a>
     <a class="right-next"
-       href="pyhyper.html"
+       href="cupy_rsoxs_result_q_grids.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">PyHyperScattering</p>
+        <p class="prev-next-title"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -577,20 +501,14 @@
   </div>
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#nrss-model-usage">NRSS Model Usage</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#core-components">Core Components</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#common-workflows">Common Workflows</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#advanced-features">Advanced Features</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#best-practices">Best Practices</a></li>
-</ul>
-</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cyrsoxs-loader">CyRSoXS Loader</a></li>
 </ul>
   </nav></div>
 
   <div class="sidebar-secondary-item">
 
   <div class="tocsection sourcelink">
-    <a href="../_sources/user_guide/idx_user_guide.rst.txt">
+    <a href="../_sources/user_guide/pyhyper.rst.txt">
       <i class="fa-solid fa-file-lines"></i> Show Source
     </a>
   </div>

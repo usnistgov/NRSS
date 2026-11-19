@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>cupy-rsoxs Reduced-Result q Grids &#8212; NRSS 0.1.0 documentation</title>
+    <title>CuPy GPU memory and material count &#8212; NRSS 0.1.0 documentation</title>
   
   
   
@@ -44,13 +44,12 @@
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../_static/design-tabs.js?v=f930bc37"></script>
-    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'user_guide/cupy_rsoxs_result_q_grids';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'user_guide/cupy_rsoxs_memory';</script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
     <link rel="next" title="Software Reference" href="../api/idx_api.html" />
-    <link rel="prev" title="PyHyperScattering" href="pyhyper.html" />
+    <link rel="prev" title="cupy-rsoxs Reduced-Result q Grids" href="cupy_rsoxs_result_q_grids.html" />
   
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
@@ -384,7 +383,8 @@
   <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
   <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="pyhyper.html">PyHyperScattering</a></li>
-<li class="toctree-l1 current active"><a class="current reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">CuPy GPU memory and material count</a></li>
 </ul>
 </div>
 </nav></div>
@@ -428,7 +428,7 @@
     
     <li class="breadcrumb-item"><a href="idx_user_guide.html" class="nav-link">User Guide</a></li>
     
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">CuPy GPU memory and material count</span></li>
   </ul>
 </nav>
 </div>
@@ -445,94 +445,141 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="cupy-rsoxs-reduced-result-q-grids">
-<h1><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids<a class="headerlink" href="#cupy-rsoxs-reduced-result-q-grids" title="Link to this heading">#</a></h1>
-<p>The <code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> backend can reduce simulated detector panels on the GPU
-before results are streamed to host memory or retained on device. Reduced
-layouts are selected through <code class="docutils literal notranslate"><span class="pre">Morphology(...,</span> <span class="pre">backend_options=...)</span></code>:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">morph</span> <span class="o">=</span> <span class="n">Morphology</span><span class="p">(</span>
-    <span class="o">...</span><span class="p">,</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;cupy-rsoxs&quot;</span><span class="p">,</span>
-    <span class="n">backend_options</span><span class="o">=</span><span class="p">{</span>
-        <span class="s2">&quot;result_layout&quot;</span><span class="p">:</span> <span class="s2">&quot;integrated&quot;</span><span class="p">,</span>
-        <span class="s2">&quot;result_q_grid_mode&quot;</span><span class="p">:</span> <span class="s2">&quot;union&quot;</span><span class="p">,</span>
-    <span class="p">},</span>
-<span class="p">)</span>
-<span class="n">result</span> <span class="o">=</span> <span class="n">morph</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">return_xarray</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+  <section id="cupy-gpu-memory-and-material-count">
+<h1>CuPy GPU memory and material count<a class="headerlink" href="#cupy-gpu-memory-and-material-count" title="Link to this heading">#</a></h1>
+<p>For full-depth float32 simulations the CuPy backend normally uses the compact
+tensor Fourier basis for one or more energies. It builds a basis from the
+material fields once and keeps the Fourier samples required by the detector.
+The same basis also serves the electric-field directions specified by
+<code class="docutils literal notranslate"><span class="pre">EAngleRotation</span></code> in <code class="docutils literal notranslate"><span class="pre">[StartAngle,</span> <span class="pre">IncrementAngle,</span> <span class="pre">EndAngle]</span></code> order.</p>
+<p>Use <code class="docutils literal notranslate"><span class="pre">SFieldMode.ISOTROPIC</span></code> for a fully isotropic material. CuPy stages only
+its <code class="docutils literal notranslate"><span class="pre">Vfrac</span></code> field and uses one basis field. A material with orientation
+fields uses five basis fields for a single axis-aligned polarization and
+seven when the tensor requires both in-plane polarizations, as for an
+oblique direction or a sweep covering both axes. The anisotropic basis
+contains the volume fraction, the volume fraction weighted by the order
+parameter, and the required orientation products.</p>
+<section id="estimating-the-retained-basis">
+<h2>Estimating the retained basis<a class="headerlink" href="#estimating-the-retained-basis" title="Link to this heading">#</a></h2>
+<p>Let <code class="docutils literal notranslate"><span class="pre">I</span></code> and <code class="docutils literal notranslate"><span class="pre">A</span></code> count the isotropic and anisotropic materials, <code class="docutils literal notranslate"><span class="pre">C</span></code>
+be the number of tensor components (three or five), and <code class="docutils literal notranslate"><span class="pre">F</span></code> be the
+number of basis fields, <code class="docutils literal notranslate"><span class="pre">I</span> <span class="pre">+</span> <span class="pre">(2</span> <span class="pre">+</span> <span class="pre">C)</span> <span class="pre">*</span> <span class="pre">A</span></code>. Let <code class="docutils literal notranslate"><span class="pre">U</span></code> be the number of
+distinct Fourier grid points sampled by the detector across all energies.
+A single plane uses one grid point per valid detector pixel. A volume uses
+two grid points per valid pixel per energy and shares points where the
+energies map to the same endpoints. Each additional anisotropic material
+therefore costs about <code class="docutils literal notranslate"><span class="pre">8</span> <span class="pre">*</span> <span class="pre">(2</span> <span class="pre">+</span> <span class="pre">C)</span> <span class="pre">*</span> <span class="pre">U</span></code> bytes in retained Fourier
+samples and an isotropic material costs about <code class="docutils literal notranslate"><span class="pre">8</span> <span class="pre">*</span> <span class="pre">U</span></code> bytes. Including
+the shared index array and the mixing coefficients for <code class="docutils literal notranslate"><span class="pre">E</span></code> energy entries,
+the retained basis occupies <code class="docutils literal notranslate"><span class="pre">8</span> <span class="pre">*</span> <span class="pre">U</span> <span class="pre">*</span> <span class="pre">(F</span> <span class="pre">+</span> <span class="pre">1)</span> <span class="pre">+</span> <span class="pre">8</span> <span class="pre">*</span> <span class="pre">E</span> <span class="pre">*</span> <span class="pre">C</span> <span class="pre">*</span> <span class="pre">F</span></code> bytes.</p>
+<p>Peak GPU memory also includes staged material volumes, FFT buffers and
+workspace, detector geometry and panels, and any device-resident results.
+Windowed compact tensor runs retain Hann factors with shapes
+<code class="docutils literal notranslate"><span class="pre">(NumZ,</span> <span class="pre">NumY,</span> <span class="pre">1)</span></code> and <code class="docutils literal notranslate"><span class="pre">(1,</span> <span class="pre">1,</span> <span class="pre">NumX)</span></code> during basis construction.
+The compact projector reads the retained Fourier samples directly, and the
+dense tensor path stages the same material fields and reuses its transform
+workspace across materials. In a thin model where the detector samples
+most of the Fourier grid, the retained basis can outweigh the compact
+transform workspace savings. The crossover depends on the fraction of
+sampled grid points, the material mix, and the workspace selected by cuFFT.
+Increasing the in-plane dimensions with the same depth and detector
+coverage increases the basis and volume sizes together. Adding depth
+generally lowers the fraction of the volume that the detector samples.</p>
+</section>
+<section id="measured-cases">
+<h2>Measured cases<a class="headerlink" href="#measured-cases" title="Link to this heading">#</a></h2>
+<p>These runs used float32 host inputs, host detector output, and a single
+37-degree polarization on an RTX 8000. Peak VRAM is the sampled increase
+over the idle GPU, in MiB. Single-energy cases used 285 eV. The 20-energy
+scans covered 280 to 289.5 eV in 0.5 eV steps.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Shape and voxel size</p></th>
+<th class="head"><p>Materials</p></th>
+<th class="head"><p>Energies</p></th>
+<th class="head"><p>Dense peak</p></th>
+<th class="head"><p>Compact peak</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>32 × 256 × 256 at 2.5 nm</p></td>
+<td><p>6 anisotropic</p></td>
+<td><p>1</p></td>
+<td><p>614</p></td>
+<td><p>488</p></td>
+</tr>
+<tr class="row-odd"><td><p>32 × 256 × 256 at 2.5 nm</p></td>
+<td><p>8 anisotropic</p></td>
+<td><p>1</p></td>
+<td><p>694</p></td>
+<td><p>580</p></td>
+</tr>
+<tr class="row-even"><td><p>32 × 256 × 256 at 2.5 nm</p></td>
+<td><p>2 anisotropic</p></td>
+<td><p>20</p></td>
+<td><p>454</p></td>
+<td><p>304</p></td>
+</tr>
+<tr class="row-odd"><td><p>32 × 256 × 256 at 2.5 nm</p></td>
+<td><p>4 anisotropic</p></td>
+<td><p>20</p></td>
+<td><p>534</p></td>
+<td><p>398</p></td>
+</tr>
+<tr class="row-even"><td><p>32 × 256 × 256 at 2.5 nm</p></td>
+<td><p>6 anisotropic</p></td>
+<td><p>20</p></td>
+<td><p>614</p></td>
+<td><p>494</p></td>
+</tr>
+<tr class="row-odd"><td><p>32 × 256 × 256 at 2.5 nm</p></td>
+<td><p>8 anisotropic</p></td>
+<td><p>20</p></td>
+<td><p>694</p></td>
+<td><p>588</p></td>
+</tr>
+<tr class="row-even"><td><p>1 × 1024 × 1024 at 5 nm</p></td>
+<td><p>1 anisotropic</p></td>
+<td><p>1</p></td>
+<td><p>362</p></td>
+<td><p>324</p></td>
+</tr>
+<tr class="row-odd"><td><p>1 × 1024 × 1024 at 5 nm</p></td>
+<td><p>8 anisotropic</p></td>
+<td><p>1</p></td>
+<td><p>502</p></td>
+<td><p>856</p></td>
+</tr>
+<tr class="row-even"><td><p>1 × 1024 × 1024 at 5 nm</p></td>
+<td><p>2 anisotropic, 6 isotropic</p></td>
+<td><p>1</p></td>
+<td><p>406</p></td>
+<td><p>472</p></td>
+</tr>
+<tr class="row-odd"><td><p>1 × 1024 × 1024 at 5 nm</p></td>
+<td><p>8 isotropic</p></td>
+<td><p>1</p></td>
+<td><p>374</p></td>
+<td><p>344</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The one-energy volume sampled 5.7% of its Fourier grid. The 20-energy
+volume sampled 6.7%, and the single plane sampled 99.8%. With eight
+anisotropic materials, the 20-energy volume’s retained basis occupied
+61 MiB. The single plane’s basis occupied 455 MiB with eight anisotropic
+materials and 168 MiB with two anisotropic and six isotropic materials.</p>
+<p>For a thin model with broad detector coverage close to the device’s memory
+limit, measure both paths with the actual shape, material fields, and energy
+list. Pass these options to select the dense tensor path when constructing
+the <code class="docutils literal notranslate"><span class="pre">Morphology</span></code>.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">backend_options</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;execution_path&quot;</span><span class="p">:</span> <span class="s2">&quot;tensor_coeff&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;energy_basis_mode&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">}</span>
 </pre></div>
 </div>
-<p>The supported reduced layouts are <code class="docutils literal notranslate"><span class="pre">&quot;integrated&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;i_only&quot;</span></code>,
-<code class="docutils literal notranslate"><span class="pre">&quot;i_para_i_perp&quot;</span></code>, and <code class="docutils literal notranslate"><span class="pre">&quot;i_a&quot;</span></code>. Raw <code class="docutils literal notranslate"><span class="pre">&quot;detector&quot;</span></code> output has <code class="docutils literal notranslate"><span class="pre">qx</span></code> and
-<code class="docutils literal notranslate"><span class="pre">qy</span></code> coordinates rather than a shared radial coordinate, so it rejects
-<code class="docutils literal notranslate"><span class="pre">result_q_grid_mode=&quot;union&quot;</span></code>.</p>
-<section id="grid-modes">
-<h2>Grid modes<a class="headerlink" href="#grid-modes" title="Link to this heading">#</a></h2>
-<p>For multi-energy 3D results, detector-corrected <code class="docutils literal notranslate"><span class="pre">|q|</span></code> varies with energy.
-<code class="docutils literal notranslate"><span class="pre">result_q_grid_mode</span></code> determines how those per-energy radial coordinates are
-placed on one shared xarray <code class="docutils literal notranslate"><span class="pre">q</span></code> dimension:</p>
-<dl class="simple">
-<dt><code class="docutils literal notranslate"><span class="pre">&quot;intersection&quot;</span></code></dt><dd><p>The default. The shared q range is restricted to the overlap supported by
-every energy. This preserves the maintained <code class="docutils literal notranslate"><span class="pre">NRSSIntegrator</span></code> behavior and
-existing parity workflows.</p>
-</dd>
-<dt><code class="docutils literal notranslate"><span class="pre">&quot;union&quot;</span></code></dt><dd><p>The shared q range extends from the smallest finite per-energy bound to the
-largest. Values outside an individual energy’s physical q support are
-represented by <code class="docutils literal notranslate"><span class="pre">NaN</span></code>. This permits a high-energy frame, such as Cu K-alpha
-at 8047.8 eV, to retain q values that are unavailable to soft-X-ray frames
-in the same result stack.</p>
-</dd>
-</dl>
-<p>For a single energy, there is no shared-grid interpolation. In 2D
-reciprocal-plane mode, the radial coordinate is energy-independent <code class="docutils literal notranslate"><span class="pre">q_perp</span></code>.
-Consequently, union and intersection differ only for multi-energy 3D reduced
-results.</p>
-</section>
-<section id="coordinates-and-metadata">
-<h2>Coordinates and metadata<a class="headerlink" href="#coordinates-and-metadata" title="Link to this heading">#</a></h2>
-<p>The returned xarray object uses <code class="docutils literal notranslate"><span class="pre">q</span></code> as the uniform shared coordinate. For a
-multi-energy 3D reduction, <code class="docutils literal notranslate"><span class="pre">q_abs</span></code> stores the exact detector-corrected
-per-energy radial axes before common-grid interpolation. Union output also
-contains:</p>
-<ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">result_q_grid_mode</span> <span class="pre">=</span> <span class="pre">&quot;union&quot;</span></code></p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">radial_coordinate_mode</span> <span class="pre">=</span> <span class="pre">&quot;shared_q_grid_union_interpolated&quot;</span></code></p></li>
-<li><p>a <code class="docutils literal notranslate"><span class="pre">q_axis_note</span></code> describing the union and NaN support mask</p></li>
-</ul>
-<p>The data’s finite mask is the authoritative indication that an energy supports
-a shared q sample:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">supported</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">notnull</span><span class="p">()</span>
-<span class="n">hard_energy</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">sel</span><span class="p">(</span><span class="n">energy</span><span class="o">=</span><span class="mf">8047.8</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>For <code class="docutils literal notranslate"><span class="pre">Dataset</span></code> layouts, apply <code class="docutils literal notranslate"><span class="pre">notnull()</span></code> to the desired data variable.</p>
-</section>
-<section id="q-resolution">
-<h2>q resolution<a class="headerlink" href="#q-resolution" title="Link to this heading">#</a></h2>
-<p>The native Cartesian detector-axis increment is</p>
-<div class="math notranslate nohighlight">
-\[\Delta q_{x,y} = \frac{2\pi}{N\,\mathrm{PhysSize}}
-               = \frac{2\pi}{L_{\mathrm{sim}}}.\]</div>
-<p>The polar remesh has a fixed radial bin count determined by the detector’s
-pixel-space center-to-corner radius. Both common-grid modes retain that bin
-count and construct a uniform shared coordinate over their selected q range:</p>
-<div class="math notranslate nohighlight">
-\[\Delta q_{\mathrm{common}} =
-\frac{q_{\max}-q_{\min}}{N_q-1}.\]</div>
-<p>Union and intersection therefore generally do not have the same q increment.
-When a soft-X-ray energy supports only a small fraction of the numerical
-detector range, intersection mode can oversample the available native radial
-information because it places the full polar bin count inside the shorter
-overlap. Union mode spans the wider range with the same number of bins and can
-have a larger common-grid increment. This changes interpolation density, not
-the underlying simulated detector resolution.</p>
-</section>
-<section id="compatibility-and-validation">
-<h2>Compatibility and validation<a class="headerlink" href="#compatibility-and-validation" title="Link to this heading">#</a></h2>
-<p><code class="docutils literal notranslate"><span class="pre">&quot;intersection&quot;</span></code> remains the default, so existing workflows and
-<code class="docutils literal notranslate"><span class="pre">NRSSIntegrator</span></code> parity are unchanged unless union mode is requested
-explicitly. NRSS validates the option during <code class="docutils literal notranslate"><span class="pre">Morphology</span></code> construction and
-raises <code class="docutils literal notranslate"><span class="pre">BackendOptionError</span></code> for unknown grid modes or for union mode combined
-with <code class="docutils literal notranslate"><span class="pre">result_layout=&quot;detector&quot;</span></code>.</p>
 </section>
 </section>
 
@@ -547,12 +594,12 @@ with <code class="docutils literal notranslate"><span class="pre">result_layout=
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="pyhyper.html"
+       href="cupy_rsoxs_result_q_grids.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">PyHyperScattering</p>
+        <p class="prev-next-title"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</p>
       </div>
     </a>
     <a class="right-next"
@@ -583,17 +630,15 @@ with <code class="docutils literal notranslate"><span class="pre">result_layout=
   </div>
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#grid-modes">Grid modes</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#coordinates-and-metadata">Coordinates and metadata</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#q-resolution">q resolution</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#compatibility-and-validation">Compatibility and validation</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#estimating-the-retained-basis">Estimating the retained basis</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#measured-cases">Measured cases</a></li>
 </ul>
   </nav></div>
 
   <div class="sidebar-secondary-item">
 
   <div class="tocsection sourcelink">
-    <a href="../_sources/user_guide/cupy_rsoxs_result_q_grids.rst.txt">
+    <a href="../_sources/user_guide/cupy_rsoxs_memory.rst.txt">
       <i class="fa-solid fa-file-lines"></i> Show Source
     </a>
   </div>

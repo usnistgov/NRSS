@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>PyHyperScattering &#8212; NRSS 0.1.0 documentation</title>
+    <title>cupy-rsoxs Reduced-Result q Grids &#8212; NRSS 0.1.0 documentation</title>
   
   
   
@@ -44,12 +44,13 @@
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../_static/design-tabs.js?v=f930bc37"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'user_guide/pyhyper';</script>
+    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'user_guide/cupy_rsoxs_result_q_grids';</script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="cupy-rsoxs Reduced-Result q Grids" href="cupy_rsoxs_result_q_grids.html" />
-    <link rel="prev" title="User Guide" href="idx_user_guide.html" />
+    <link rel="next" title="CuPy GPU memory and material count" href="cupy_rsoxs_memory.html" />
+    <link rel="prev" title="PyHyperScattering" href="pyhyper.html" />
   
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
@@ -382,8 +383,9 @@
      aria-label="Section Navigation">
   <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
   <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
-<li class="toctree-l1 current active"><a class="current reference internal" href="#">PyHyperScattering</a></li>
-<li class="toctree-l1"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pyhyper.html">PyHyperScattering</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cupy_rsoxs_memory.html">CuPy GPU memory and material count</a></li>
 </ul>
 </div>
 </nav></div>
@@ -427,7 +429,7 @@
     
     <li class="breadcrumb-item"><a href="idx_user_guide.html" class="nav-link">User Guide</a></li>
     
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">PyHyperScattering</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</span></li>
   </ul>
 </nav>
 </div>
@@ -444,12 +446,94 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="pyhyperscattering">
-<h1>PyHyperScattering<a class="headerlink" href="#pyhyperscattering" title="Link to this heading">#</a></h1>
-<p><a class="reference external" href="https://github.com/usnistgov/PyHyperScattering">PyHyperScattering</a> is a library for hyperspectral x-ray and neutron scattering data loading, reduction, slicing, and visualization.</p>
-<section id="cyrsoxs-loader">
-<h2>CyRSoXS Loader<a class="headerlink" href="#cyrsoxs-loader" title="Link to this heading">#</a></h2>
-<p>PyHyperScattering has a CyRSoXS-specific loader that will load a simulation into an xarray DataArray and allow you to use the same API to analyze your experimental and simulated RSoXSs data.</p>
+  <section id="cupy-rsoxs-reduced-result-q-grids">
+<h1><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids<a class="headerlink" href="#cupy-rsoxs-reduced-result-q-grids" title="Link to this heading">#</a></h1>
+<p>The <code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> backend can reduce simulated detector panels on the GPU
+before results are streamed to host memory or retained on device. Reduced
+layouts are selected through <code class="docutils literal notranslate"><span class="pre">Morphology(...,</span> <span class="pre">backend_options=...)</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">morph</span> <span class="o">=</span> <span class="n">Morphology</span><span class="p">(</span>
+    <span class="o">...</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;cupy-rsoxs&quot;</span><span class="p">,</span>
+    <span class="n">backend_options</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;result_layout&quot;</span><span class="p">:</span> <span class="s2">&quot;integrated&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;result_q_grid_mode&quot;</span><span class="p">:</span> <span class="s2">&quot;union&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+<span class="p">)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">morph</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">return_xarray</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>The supported reduced layouts are <code class="docutils literal notranslate"><span class="pre">&quot;integrated&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;i_only&quot;</span></code>,
+<code class="docutils literal notranslate"><span class="pre">&quot;i_para_i_perp&quot;</span></code>, and <code class="docutils literal notranslate"><span class="pre">&quot;i_a&quot;</span></code>. Raw <code class="docutils literal notranslate"><span class="pre">&quot;detector&quot;</span></code> output has <code class="docutils literal notranslate"><span class="pre">qx</span></code> and
+<code class="docutils literal notranslate"><span class="pre">qy</span></code> coordinates rather than a shared radial coordinate, so it rejects
+<code class="docutils literal notranslate"><span class="pre">result_q_grid_mode=&quot;union&quot;</span></code>.</p>
+<section id="grid-modes">
+<h2>Grid modes<a class="headerlink" href="#grid-modes" title="Link to this heading">#</a></h2>
+<p>For multi-energy 3D results, detector-corrected <code class="docutils literal notranslate"><span class="pre">|q|</span></code> varies with energy.
+<code class="docutils literal notranslate"><span class="pre">result_q_grid_mode</span></code> determines how those per-energy radial coordinates are
+placed on one shared xarray <code class="docutils literal notranslate"><span class="pre">q</span></code> dimension:</p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">&quot;intersection&quot;</span></code></dt><dd><p>The default. The shared q range is restricted to the overlap supported by
+every energy. This preserves the maintained <code class="docutils literal notranslate"><span class="pre">NRSSIntegrator</span></code> behavior and
+existing parity workflows.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">&quot;union&quot;</span></code></dt><dd><p>The shared q range extends from the smallest finite per-energy bound to the
+largest. Values outside an individual energy’s physical q support are
+represented by <code class="docutils literal notranslate"><span class="pre">NaN</span></code>. This permits a high-energy frame, such as Cu K-alpha
+at 8047.8 eV, to retain q values that are unavailable to soft-X-ray frames
+in the same result stack.</p>
+</dd>
+</dl>
+<p>For a single energy, there is no shared-grid interpolation. In 2D
+reciprocal-plane mode, the radial coordinate is energy-independent <code class="docutils literal notranslate"><span class="pre">q_perp</span></code>.
+Consequently, union and intersection differ only for multi-energy 3D reduced
+results.</p>
+</section>
+<section id="coordinates-and-metadata">
+<h2>Coordinates and metadata<a class="headerlink" href="#coordinates-and-metadata" title="Link to this heading">#</a></h2>
+<p>The returned xarray object uses <code class="docutils literal notranslate"><span class="pre">q</span></code> as the uniform shared coordinate. For a
+multi-energy 3D reduction, <code class="docutils literal notranslate"><span class="pre">q_abs</span></code> stores the exact detector-corrected
+per-energy radial axes before common-grid interpolation. Union output also
+contains:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">result_q_grid_mode</span> <span class="pre">=</span> <span class="pre">&quot;union&quot;</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">radial_coordinate_mode</span> <span class="pre">=</span> <span class="pre">&quot;shared_q_grid_union_interpolated&quot;</span></code></p></li>
+<li><p>a <code class="docutils literal notranslate"><span class="pre">q_axis_note</span></code> describing the union and NaN support mask</p></li>
+</ul>
+<p>The data’s finite mask is the authoritative indication that an energy supports
+a shared q sample:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">supported</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">notnull</span><span class="p">()</span>
+<span class="n">hard_energy</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">sel</span><span class="p">(</span><span class="n">energy</span><span class="o">=</span><span class="mf">8047.8</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>For <code class="docutils literal notranslate"><span class="pre">Dataset</span></code> layouts, apply <code class="docutils literal notranslate"><span class="pre">notnull()</span></code> to the desired data variable.</p>
+</section>
+<section id="q-resolution">
+<h2>q resolution<a class="headerlink" href="#q-resolution" title="Link to this heading">#</a></h2>
+<p>The native Cartesian detector-axis increment is</p>
+<div class="math notranslate nohighlight">
+\[\Delta q_{x,y} = \frac{2\pi}{N\,\mathrm{PhysSize}}
+               = \frac{2\pi}{L_{\mathrm{sim}}}.\]</div>
+<p>The polar remesh has a fixed radial bin count determined by the detector’s
+pixel-space center-to-corner radius. Both common-grid modes retain that bin
+count and construct a uniform shared coordinate over their selected q range:</p>
+<div class="math notranslate nohighlight">
+\[\Delta q_{\mathrm{common}} =
+\frac{q_{\max}-q_{\min}}{N_q-1}.\]</div>
+<p>Union and intersection therefore generally do not have the same q increment.
+When a soft-X-ray energy supports only a small fraction of the numerical
+detector range, intersection mode can oversample the available native radial
+information because it places the full polar bin count inside the shorter
+overlap. Union mode spans the wider range with the same number of bins and can
+have a larger common-grid increment. This changes interpolation density, not
+the underlying simulated detector resolution.</p>
+</section>
+<section id="compatibility-and-validation">
+<h2>Compatibility and validation<a class="headerlink" href="#compatibility-and-validation" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">&quot;intersection&quot;</span></code> remains the default, so existing workflows and
+<code class="docutils literal notranslate"><span class="pre">NRSSIntegrator</span></code> parity are unchanged unless union mode is requested
+explicitly. NRSS validates the option during <code class="docutils literal notranslate"><span class="pre">Morphology</span></code> construction and
+raises <code class="docutils literal notranslate"><span class="pre">BackendOptionError</span></code> for unknown grid modes or for union mode combined
+with <code class="docutils literal notranslate"><span class="pre">result_layout=&quot;detector&quot;</span></code>.</p>
 </section>
 </section>
 
@@ -464,20 +548,20 @@
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="idx_user_guide.html"
+       href="pyhyper.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">User Guide</p>
+        <p class="prev-next-title">PyHyperScattering</p>
       </div>
     </a>
     <a class="right-next"
-       href="cupy_rsoxs_result_q_grids.html"
+       href="cupy_rsoxs_memory.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</p>
+        <p class="prev-next-title">CuPy GPU memory and material count</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -500,14 +584,17 @@
   </div>
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cyrsoxs-loader">CyRSoXS Loader</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#grid-modes">Grid modes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#coordinates-and-metadata">Coordinates and metadata</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#q-resolution">q resolution</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#compatibility-and-validation">Compatibility and validation</a></li>
 </ul>
   </nav></div>
 
   <div class="sidebar-secondary-item">
 
   <div class="tocsection sourcelink">
-    <a href="../_sources/user_guide/pyhyper.rst.txt">
+    <a href="../_sources/user_guide/cupy_rsoxs_result_q_grids.rst.txt">
       <i class="fa-solid fa-file-lines"></i> Show Source
     </a>
   </div>
