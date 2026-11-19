@@ -164,13 +164,13 @@ def _poll_process_rss_until_exit(
 def _start_gpu_memory_observer(
     *,
     output_dir: Path,
-    case: ComparisonCase,
+    case_key: str,
     gpu_device: str,
     poll_interval_s: float,
 ) -> tuple[subprocess.Popen[str], Path, Path, Path]:
-    observer_ready_path = output_dir / f"{case.key}__gpu_mem_observer_ready.json"
-    observer_trace_path = output_dir / f"{case.key}__gpu_mem_observer.json"
-    observer_stop_path = output_dir / f"{case.key}__gpu_mem_observer.stop"
+    observer_ready_path = output_dir / f"{case_key}__gpu_mem_observer_ready.json"
+    observer_trace_path = output_dir / f"{case_key}__gpu_mem_observer.json"
+    observer_stop_path = output_dir / f"{case_key}__gpu_mem_observer.stop"
     for path in (observer_ready_path, observer_trace_path, observer_stop_path):
         try:
             path.unlink()
@@ -824,7 +824,7 @@ def _run_case_subprocess(
         if monitor_memory:
             observer_proc, observer_ready_path, observer_trace_path, observer_stop_path = _start_gpu_memory_observer(
                 output_dir=output_dir,
-                case=case,
+                case_key=case.key,
                 gpu_device=gpu_device,
                 poll_interval_s=poll_interval_s,
             )

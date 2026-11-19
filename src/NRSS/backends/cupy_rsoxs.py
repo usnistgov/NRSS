@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
+from collections import Counter
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import gc
 import importlib
@@ -22,7 +23,6 @@ from .runtime import BackendRuntime
 _CUPY_KERNEL_CACHE: dict[str, Any] = {}
 _CUPY_KERNEL_BACKEND_REPORT: dict[str, str] = {}
 _CUPY_PRIVATE_TIMING_SEGMENTS_KEY = "_private_backend_timing_segments"
-_CUPY_TIMED_SEGMENTS = ("A2", "B", "C", "D", "E", "F")
 _CUPY_SEGMENT_MEASUREMENTS = {
     "A2": "wall_clock",
     "B": "cuda_event",
@@ -30,7 +30,16 @@ _CUPY_SEGMENT_MEASUREMENTS = {
     "D": "cuda_event",
     "E": "cuda_event",
     "F": "cuda_event",
+    "C+D": "cuda_event",
+    "B+C+D": "cuda_event",
+    "energy": "cuda_event",
+    "tile": "cuda_event",
+    "basis_build": "cuda_event",
+    "reduction": "cuda_event",
+    "d2h": "cuda_event",
+    "synchronization": "wall_clock",
 }
+_CUPY_TIMED_SEGMENTS = tuple(_CUPY_SEGMENT_MEASUREMENTS)
 _PYHYPER_RSOXS_ACCESSOR_STATUS: bool | None = None
 _HALF_BITS_TO_FLOAT_DEVICE_FUNCTION = r"""
 __device__ inline float nrss_half_bits_to_float(const unsigned short h) {
@@ -59,6 +68,29 @@ __device__ inline float nrss_half_bits_to_float(const unsigned short h) {
 
     return __uint_as_float(bits);
 }
+"""
+_DIRECT_PROJECTION_INTENSITY_SOURCE = r"""
+            __device__ inline float nrss_direct_projection_intensity(
+                const float a,
+                const float b,
+                const float c,
+                const float d,
+                const float2 p1,
+                const float2 p2,
+                const float2 p3
+            ) {
+                const float term1r = (-a * a + d) * p1.x - a * (b * p2.x + c * p3.x);
+                const float term1i = (-a * a + d) * p1.y - a * (b * p2.y + c * p3.y);
+                const float term2r = -(a * b) * p1.x + (-b * b + d) * p2.x - b * c * p3.x;
+                const float term2i = -(a * b) * p1.y + (-b * b + d) * p2.y - b * c * p3.y;
+                const float term3r = -(a * c) * p1.x - b * c * p2.x + (-c * c + d) * p3.x;
+                const float term3i = -(a * c) * p1.y - b * c * p2.y + (-c * c + d) * p3.y;
+                return
+                    term1r * term1r + term1i * term1i
+                    + term2r * term2r + term2i * term2i
+                    + term3r * term3r + term3i * term3i;
+            }
+
 """
 _RAWKERNEL_BACKEND_OPTION_NAMES = {
     "igor_shift": "igor_shift_backend",
@@ -132,9 +164,57 @@ class _DetectorProjectionGeometry:
     frac: Any | None
 
 
+class _ExecutionReport:
+    def __init__(self):
+        self.fft_calls = Counter()
+        self.tiles = []
+        self.basis_builds = 0
+        self.basis_cache = None
+
+    def record_fft(self, method, array):
+        self.fft_calls[method, tuple(array.shape), array.dtype.name] += 1
+
+    def record_tile(self, route, energies, fallback_reason=None):
+        self.tiles.append({"route": route, "energies": list(energies), "fallback_reason": fallback_reason})
+
+    def record_basis(self, basis):
+        self.basis_builds += 1
+        self.basis_cache = {
+            "fields": basis.values.shape[0],
+            "union_endpoints": basis.indices.size,
+            "bytes": basis.nbytes,
+        }
+
+    def as_dict(self):
+        lengths = [len(tile["energies"]) for tile in self.tiles]
+        return {
+            "routes": list(dict.fromkeys(tile["route"] for tile in self.tiles)),
+            "fallback_reasons": list(dict.fromkeys(
+                tile["fallback_reason"] for tile in self.tiles if tile["fallback_reason"] is not None
+            )),
+            "fft_count": sum(self.fft_calls.values()),
+            "ffts": [
+                {"method": method, "shape": list(shape), "dtype": dtype, "count": count}
+                for (method, shape, dtype), count in self.fft_calls.items()
+            ],
+            "basis_builds": self.basis_builds,
+            "basis_cache": self.basis_cache,
+            "distinct_energies": len({energy for tile in self.tiles for energy in tile["energies"]}),
+            "compute_tile_count": len(lengths),
+            "compute_tile_size": max(lengths, default=0),
+            "final_tile_length": lengths[-1] if lengths else 0,
+            "tiles": self.tiles,
+        }
+
+
 class _NullSegmentRecorder:
     selected_segments: tuple[str, ...] = ()
     segment_measurements: dict[str, str] = {}
+    execution = None
+
+    @staticmethod
+    def range(segment):
+        return nullcontext()
 
     def measure(self, segment: str, func):
         del segment
@@ -156,6 +236,8 @@ class _SegmentRecorder:
         }
         self._records: list[_RecordedEventRange] = []
         self._wall_totals: dict[str, float] = {}
+        self.sample_seconds: dict[str, list[float]] = {}
+        self.execution = _ExecutionReport() if "energy" in self.selected_segments else None
 
     def measure(self, segment: str, func):
         if segment not in self.selected_segments:
@@ -164,28 +246,38 @@ class _SegmentRecorder:
         if measurement == "wall_clock":
             start = time.perf_counter()
             result = func()
-            self._cp.cuda.Stream.null.synchronize()
+            if segment == "A2":
+                self._cp.cuda.get_current_stream().synchronize()
             self._wall_totals[segment] = self._wall_totals.get(segment, 0.0) + (
                 time.perf_counter() - start
             )
             return result
+        with self.range(segment):
+            return func()
+
+    @contextmanager
+    def range(self, segment):
+        if segment not in self.selected_segments:
+            yield
+            return
         start = self._cp.cuda.Event()
         stop = self._cp.cuda.Event()
         start.record()
-        result = func()
+        yield
         stop.record()
         self._records.append(_RecordedEventRange(segment=segment, start=start, stop=stop))
-        return result
 
     def finalize(self) -> tuple[dict[str, float], dict[str, str], str | None]:
         if not self._records and not self._wall_totals:
             return {}, {}, None
         totals = dict(self._wall_totals)
         if self._records:
-            self._cp.cuda.Stream.null.synchronize()
+            self._cp.cuda.get_current_stream().synchronize()
             for record in self._records:
                 elapsed_s = float(self._cp.cuda.get_elapsed_time(record.start, record.stop)) / 1000.0
                 totals[record.segment] = totals.get(record.segment, 0.0) + elapsed_s
+                if record.segment in ("energy", "tile", "basis_build"):
+                    self.sample_seconds.setdefault(record.segment, []).append(elapsed_s)
         measurement_modes = set(self.segment_measurements.values())
         if len(measurement_modes) == 1:
             measurement = next(iter(measurement_modes))
@@ -228,9 +320,9 @@ class _ReducedResultPlan:
     q_perp: np.ndarray | None
     q_abs: np.ndarray | None
     attrs: dict[str, Any]
-    needs_common_q_interpolation: bool
     device_q_axes: Any | None = None
     device_q_common: Any | None = None
+    device_q_bounds: Any | None = None
     channel_names: tuple[str, ...] = ()
     total_chi_wedge_deg: float | None = None
     device_all_chi_weights: Any | None = None
@@ -415,7 +507,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
     def prepare(self, morphology) -> None:
         self._validate_supported_config(morphology)
         morphology._backend_runtime_state.setdefault("prepared", True)
-        if self._kernel_preload_stage(morphology) == "a1" and morphology.NumZYX is not None:
+        if self._kernel_preload_stage(morphology) == "a1" and self._energy_basis_selection(morphology)[0] is None:
             cp, _ = require_cupy_modules()
             self._preload_active_rawkernels(morphology, cp, stage="a1")
 
@@ -461,9 +553,11 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         active_chunk_fill = 0
         runtime_materials = recorder.measure("A2", lambda: self._runtime_material_views(morphology, cp))
         window = None
+        energy_basis = None
+        basis_mode, basis_fallback = self._energy_basis_selection(morphology)
         result_data = None
         try:
-            if self._kernel_preload_stage(morphology) == "a2":
+            if basis_mode is None and self._kernel_preload_stage(morphology) == "a2":
                 recorder.measure(
                     "A2",
                     lambda: self._preload_active_rawkernels(morphology, cp, stage="a2"),
@@ -474,8 +568,41 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     morphology,
                     cp,
                     shape_override=self._segment_c_shape_override(morphology),
+                    separable=basis_mode == "compact_r2c",
                 ),
             )
+            if basis_mode is not None:
+                from ._cupy_energy_basis import build_energy_basis
+
+                try:
+                    energy_basis = recorder.measure(
+                        "basis_build",
+                        lambda: build_energy_basis(
+                            self, morphology, cp, runtime_materials, energies, window, basis_mode, recorder.execution,
+                        ),
+                    )
+                except cp.cuda.memory.OutOfMemoryError:
+                    if morphology._energy_basis_mode != "auto":
+                        raise
+                    basis_fallback = "energy basis allocation exceeded available GPU memory"
+                if basis_fallback is None:
+                    if recorder.execution is not None:
+                        recorder.execution.record_basis(energy_basis)
+                    runtime_materials = None
+                    window = None
+                else:
+                    # Return unused workspace to CUDA before allocating the
+                    # conventional per-energy fields.
+                    cp.cuda.get_current_stream().synchronize()
+                    cp.fft.config.clear_plan_cache()
+                    cp.get_default_memory_pool().free_all_blocks()
+                    if basis_mode == "compact_r2c" and window is not None:
+                        zy, x = window
+                        window = recorder.measure("C", lambda: zy * x)
+                        del zy, x
+                    stage = self._kernel_preload_stage(morphology)
+                    if stage != "off":
+                        recorder.measure("A2", lambda: self._preload_active_rawkernels(morphology, cp, stage=stage))
             self._emit_result_streaming_summary(
                 stdout=stdout,
                 result_residency=result_residency,
@@ -490,23 +617,31 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 stderr=stderr,
             ) as energy_iter:
                 for energy_index, energy in energy_iter:
-                    projection = self._run_single_energy(
-                        morphology=morphology,
-                        runtime_materials=runtime_materials,
-                        energy=energy,
-                        cp=cp,
-                        ndimage=ndimage,
-                        window=window,
-                        recorder=recorder,
-                    )
+                    with recorder.range("energy"):
+                        if energy_basis is None:
+                            projection = self._run_single_energy(
+                                morphology=morphology,
+                                runtime_materials=runtime_materials,
+                                energy=energy,
+                                cp=cp,
+                                ndimage=ndimage,
+                                window=window,
+                                recorder=recorder,
+                                fallback_reason=basis_fallback,
+                            )
+                        else:
+                            projection = self._run_energy_from_basis(
+                                morphology, energy_basis, basis_mode, energy_index, energy, cp, ndimage, recorder,
+                            )
                     if reduction_plan is None and self._uses_reduced_result_layout(result_layout):
-                        reduction_plan = self._reduced_result_plan(
-                            morphology=morphology,
-                            projection_shape=projection.shape,
-                            energies=energies,
-                            cp=cp,
-                            result_layout=result_layout,
-                        )
+                        with recorder.range("reduction"):
+                            reduction_plan = self._reduced_result_plan(
+                                morphology=morphology,
+                                projection_shape=projection.shape,
+                                energies=energies,
+                                cp=cp,
+                                result_layout=result_layout,
+                            )
                     if result_data is None:
                         if self._uses_reduced_result_layout(result_layout):
                             result_shape = reduction_plan.result_shape
@@ -551,34 +686,31 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                         if result_residency == "host":
                             if int(chunk_size) == 1:
                                 if pending_copy_done is not None:
-                                    pending_copy_done.synchronize()
+                                    recorder.measure("synchronization", pending_copy_done.synchronize)
                                     pending_copy_done = None
                                     if pending_host_projection is not None:
                                         del pending_host_projection
                                         pending_host_projection = None
-                                integrated_projection = self._integrate_projection_chunk(
-                                    projection[None, ...],
-                                    energy_start=energy_index,
-                                    reduction_plan=reduction_plan,
-                                    cp=cp,
-                                )[0]
-                                del projection
-                                if result_layout != "integrated":
-                                    reduced_projection = self._reduce_integrated_chunk_for_layout(
-                                        integrated_projection[None, ...],
+                                with recorder.range("reduction"):
+                                    integrated_projection = self._integrate_projection_chunk(
+                                        projection[None, ...],
+                                        energy_start=energy_index,
                                         reduction_plan=reduction_plan,
                                         cp=cp,
                                     )[0]
-                                    del integrated_projection
-                                else:
-                                    reduced_projection = integrated_projection
-                                compute_done = cp.cuda.Event()
-                                compute_done.record()
-                                copy_stream.wait_event(compute_done)
-                                with copy_stream:
-                                    reduced_projection.get(out=result_data[energy_index], blocking=False)
-                                    pending_copy_done = cp.cuda.Event()
-                                    pending_copy_done.record()
+                                    del projection
+                                    if result_layout != "integrated":
+                                        reduced_projection = self._reduce_integrated_chunk_for_layout(
+                                            integrated_projection[None, ...],
+                                            reduction_plan=reduction_plan,
+                                            cp=cp,
+                                        )[0]
+                                        del integrated_projection
+                                    else:
+                                        reduced_projection = integrated_projection
+                                pending_copy_done = self._enqueue_host_copy(
+                                    reduced_projection, result_data[energy_index], copy_stream, cp, recorder
+                                )
                                 pending_host_projection = reduced_projection
                             else:
                                 chunk_buffer = chunk_buffers[active_chunk_buffer_index]
@@ -589,70 +721,61 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                                 if active_chunk_fill == chunk_buffer.shape[0] or energy_index == len(energies) - 1:
                                     chunk_stop = active_chunk_start + active_chunk_fill
                                     if pending_copy_done is not None:
-                                        pending_copy_done.synchronize()
+                                        recorder.measure("synchronization", pending_copy_done.synchronize)
                                         pending_copy_done = None
-                                    self._integrate_projection_chunk(
-                                        chunk_buffer[:active_chunk_fill],
-                                        energy_start=active_chunk_start,
-                                        reduction_plan=reduction_plan,
-                                        cp=cp,
-                                        out=integrated_chunk_buffer[:active_chunk_fill],
-                                    )
-                                    chunk_to_copy = integrated_chunk_buffer[:active_chunk_fill]
-                                    if result_layout != "integrated":
-                                        reduced_chunk_buffer = reduced_chunk_buffers[active_chunk_buffer_index]
-                                        self._reduce_integrated_chunk_for_layout(
-                                            integrated_chunk_buffer[:active_chunk_fill],
+                                    with recorder.range("reduction"):
+                                        self._integrate_projection_chunk(
+                                            chunk_buffer[:active_chunk_fill],
+                                            energy_start=active_chunk_start,
                                             reduction_plan=reduction_plan,
                                             cp=cp,
-                                            out=reduced_chunk_buffer[:active_chunk_fill],
+                                            out=integrated_chunk_buffer[:active_chunk_fill],
                                         )
-                                        chunk_to_copy = reduced_chunk_buffer[:active_chunk_fill]
-                                    compute_done = cp.cuda.Event()
-                                    compute_done.record()
-                                    copy_stream.wait_event(compute_done)
-                                    with copy_stream:
-                                        chunk_to_copy.get(
-                                            out=result_data[active_chunk_start:chunk_stop],
-                                            blocking=False,
-                                        )
-                                        pending_copy_done = cp.cuda.Event()
-                                        pending_copy_done.record()
+                                        chunk_to_copy = integrated_chunk_buffer[:active_chunk_fill]
+                                        if result_layout != "integrated":
+                                            reduced_chunk_buffer = reduced_chunk_buffers[active_chunk_buffer_index]
+                                            self._reduce_integrated_chunk_for_layout(
+                                                integrated_chunk_buffer[:active_chunk_fill],
+                                                reduction_plan=reduction_plan,
+                                                cp=cp,
+                                                out=reduced_chunk_buffer[:active_chunk_fill],
+                                            )
+                                            chunk_to_copy = reduced_chunk_buffer[:active_chunk_fill]
+                                    pending_copy_done = self._enqueue_host_copy(
+                                        chunk_to_copy, result_data[active_chunk_start:chunk_stop], copy_stream, cp, recorder
+                                    )
                                     active_chunk_start = chunk_stop
                                     active_chunk_fill = 0
                                     active_chunk_buffer_index = 1 - active_chunk_buffer_index
                         else:
-                            integrated_projection = self._integrate_projection_chunk(
-                                projection[None, ...],
-                                energy_start=energy_index,
-                                reduction_plan=reduction_plan,
-                                cp=cp,
-                            )[0]
-                            if result_layout == "integrated":
-                                result_data[energy_index] = integrated_projection
-                            else:
-                                result_data[energy_index] = self._reduce_integrated_chunk_for_layout(
-                                    integrated_projection[None, ...],
+                            with recorder.range("reduction"):
+                                integrated_projection = self._integrate_projection_chunk(
+                                    projection[None, ...],
+                                    energy_start=energy_index,
                                     reduction_plan=reduction_plan,
                                     cp=cp,
                                 )[0]
+                                if result_layout == "integrated":
+                                    result_data[energy_index] = integrated_projection
+                                else:
+                                    result_data[energy_index] = self._reduce_integrated_chunk_for_layout(
+                                        integrated_projection[None, ...],
+                                        reduction_plan=reduction_plan,
+                                        cp=cp,
+                                    )[0]
                             del projection
                             del integrated_projection
                     elif result_residency == "host":
                         if int(chunk_size) == 1:
                             if pending_copy_done is not None:
-                                pending_copy_done.synchronize()
+                                recorder.measure("synchronization", pending_copy_done.synchronize)
                                 pending_copy_done = None
                                 if pending_host_projection is not None:
                                     del pending_host_projection
                                     pending_host_projection = None
-                            compute_done = cp.cuda.Event()
-                            compute_done.record()
-                            copy_stream.wait_event(compute_done)
-                            with copy_stream:
-                                projection.get(out=result_data[energy_index], blocking=False)
-                                pending_copy_done = cp.cuda.Event()
-                                pending_copy_done.record()
+                            pending_copy_done = self._enqueue_host_copy(
+                                projection, result_data[energy_index], copy_stream, cp, recorder
+                            )
                             pending_host_projection = projection
                         else:
                             chunk_buffer = chunk_buffers[active_chunk_buffer_index]
@@ -662,18 +785,11 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                             if active_chunk_fill == chunk_buffer.shape[0] or energy_index == len(energies) - 1:
                                 chunk_stop = active_chunk_start + active_chunk_fill
                                 if pending_copy_done is not None:
-                                    pending_copy_done.synchronize()
+                                    recorder.measure("synchronization", pending_copy_done.synchronize)
                                     pending_copy_done = None
-                                compute_done = cp.cuda.Event()
-                                compute_done.record()
-                                copy_stream.wait_event(compute_done)
-                                with copy_stream:
-                                    chunk_buffer[:active_chunk_fill].get(
-                                        out=result_data[active_chunk_start:chunk_stop],
-                                        blocking=False,
-                                    )
-                                    pending_copy_done = cp.cuda.Event()
-                                    pending_copy_done.record()
+                                pending_copy_done = self._enqueue_host_copy(
+                                    chunk_buffer[:active_chunk_fill], result_data[active_chunk_start:chunk_stop], copy_stream, cp, recorder
+                                )
                                 active_chunk_start = chunk_stop
                                 active_chunk_fill = 0
                                 active_chunk_buffer_index = 1 - active_chunk_buffer_index
@@ -682,7 +798,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                         del projection
         finally:
             if pending_copy_done is not None:
-                pending_copy_done.synchronize()
+                recorder.measure("synchronization", pending_copy_done.synchronize)
                 pending_copy_done = None
             if pending_host_projection is not None:
                 del pending_host_projection
@@ -696,10 +812,10 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 for reduced_chunk_buffer in reduced_chunk_buffers:
                     del reduced_chunk_buffer
             if copy_stream is not None:
-                copy_stream.synchronize()
+                recorder.measure("synchronization", copy_stream.synchronize)
             if window is not None:
                 del window
-            del runtime_materials
+            del runtime_materials, energy_basis
         result = recorder.measure(
             "F",
             lambda: self._assemble_and_retain_result(
@@ -717,12 +833,29 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 "segment_seconds": segment_seconds,
                 "segment_measurements": segment_measurements,
             }
+            if recorder.execution is not None:
+                morphology._backend_timings.update(
+                    execution=recorder.execution.as_dict(),
+                    sample_seconds=recorder.sample_seconds,
+                )
         morphology._simulated = True
         morphology._lock_results()
 
         if return_xarray:
             return result.to_xarray()
         return result
+
+    @staticmethod
+    def _enqueue_host_copy(source, destination, copy_stream, cp, recorder):
+        compute_done = cp.cuda.Event()
+        compute_done.record()
+        copy_stream.wait_event(compute_done)
+        with copy_stream:
+            with recorder.range("d2h"):
+                source.get(out=destination, blocking=False)
+            copy_done = cp.cuda.Event()
+            copy_done.record()
+        return copy_done
 
     def _result_residency(self, morphology) -> str:
         return str(morphology.backend_options.get("result_residency", "host"))
@@ -815,9 +948,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         q = q_perp
         q_perp_coord = None
         q_abs = None
-        needs_common_q_interpolation = False
         device_q_axes = None
         device_q_common = None
+        device_q_bounds = None
 
         if nrss_semantic_mode == "3d_detector_aware":
             q_axes = self._detector_corrected_q_batch(q_perp, np.asarray(energies, dtype=np.float64))
@@ -848,9 +981,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                             "The q dimension is a shared detector-corrected q grid spanning the overlap "
                             "of all slices. Exact per-slice q values before interpolation remain in q_abs."
                         )
-                    needs_common_q_interpolation = True
                     device_q_axes = cp.asarray(q_abs)
                     device_q_common = cp.asarray(q_common)
+                    device_q_bounds = cp.asarray(self._common_q_bounds(q_abs, q_common))
                 else:
                     q = np.arange(q_perp.size, dtype=np.int64)
                     q_perp_coord = q_perp
@@ -904,9 +1037,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             q_perp=None if q_perp_coord is None else np.asarray(q_perp_coord),
             q_abs=None if q_abs is None else np.asarray(q_abs),
             attrs=attrs,
-            needs_common_q_interpolation=needs_common_q_interpolation,
             device_q_axes=device_q_axes,
             device_q_common=device_q_common,
+            device_q_bounds=device_q_bounds,
             channel_names=channel_names,
             total_chi_wedge_deg=total_chi_wedge_deg,
             device_all_chi_weights=device_all_chi_weights,
@@ -995,13 +1128,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             radius=reduction_plan.radius,
             xp=cp,
         )
-        if reduction_plan.needs_common_q_interpolation:
-            q_axes = reduction_plan.device_q_axes[energy_start : energy_start + reduced.shape[0]]
-            reduced = self._interp_chunk_to_common_q_cupy(
+        if reduction_plan.device_q_bounds is not None:
+            energies = slice(energy_start, energy_start + reduced.shape[0])
+            return self._interp_chunk_to_common_q_cupy(
                 reduced,
-                q_axes=q_axes,
+                q_axes=reduction_plan.device_q_axes[energies],
                 q_common=reduction_plan.device_q_common,
+                bounds=reduction_plan.device_q_bounds[energies],
                 cp=cp,
+                out=out,
             )
         if out is not None:
             out[...] = reduced
@@ -1134,30 +1269,71 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return weights / step
 
     @staticmethod
-    def _interp_chunk_to_common_q_cupy(values, *, q_axes, q_common, cp):
-        output = cp.full((values.shape[0], values.shape[1], q_common.size), cp.nan, dtype=values.dtype)
-        for image_index in range(values.shape[0]):
-            q_axis = q_axes[image_index]
-            valid = cp.isfinite(q_axis)
-            q_valid = q_axis[valid]
-            if int(q_valid.size) < 2:
+    def _common_q_bounds(q_axes, q_common):
+        """Plan radial sample pairs once per energy for all azimuthal rows."""
+        bounds = np.full((len(q_axes), q_common.size, 2), -1, dtype=np.int32)
+        for index, axis in enumerate(q_axes):
+            bins = np.flatnonzero(np.isfinite(axis))
+            bins = bins[np.r_[True, np.diff(axis[bins]) > 0]] if bins.size else bins
+            if bins.size < 2:
                 continue
-            increasing = cp.concatenate(
-                (cp.asarray([True]), cp.diff(q_valid) > 0)
+            samples = axis[bins]
+            supported = (q_common >= samples[0]) & (q_common <= samples[-1])
+            lower = np.searchsorted(samples, q_common[supported], side="right") - 1
+            bounds[index, supported, 0] = bins[lower]
+            bounds[index, supported, 1] = bins[np.minimum(lower + 1, bins.size - 1)]
+        return bounds
+
+    @staticmethod
+    def _interp_chunk_to_common_q_cupy(values, *, q_axes, q_common, bounds, cp, out=None):
+        kernel = _CUPY_KERNEL_CACHE.get("interp_common_q")
+        if kernel is None:
+            kernel = cp.ElementwiseKernel(
+                "raw T values, raw float64 axes, raw float64 common, raw int32 bounds, "
+                "int64 source_count, int64 target_count, int64 chi_count, float64 invalid",
+                "T result",
+                """
+                const auto radial = i % target_count;
+                const auto ray = i / target_count;
+                const auto energy = ray / chi_count;
+                const auto pair = 2 * (energy * target_count + radial);
+                const int lower = bounds[pair], upper = bounds[pair + 1];
+                if (lower < 0) {
+                    result = invalid;
+                } else {
+                    const auto row = ray * source_count;
+                    const T y0 = values[row + lower];
+                    if (lower == upper) {
+                        result = y0;
+                    } else {
+                        const auto axis = energy * source_count;
+                        const double x = common[radial];
+                        const double x0 = axes[axis + lower], x1 = axes[axis + upper];
+                        const T y1 = values[row + upper];
+                        const double slope = (double)(y1 - y0) / (x1 - x0);
+                        double value = slope * (x - x0) + (double)y0;
+                        // Match CuPy interpolation for NaN and infinite samples.
+                        if (isnan(value)) {
+                            value = slope * (x - x1) + (double)y1;
+                            if (isnan(value) && y0 == y1) {
+                                value = y0;
+                            }
+                        }
+                        result = value;
+                    }
+                }
+                """,
+                "nrss_interp_common_q",
             )
-            q_valid = q_valid[increasing]
-            if int(q_valid.size) < 2:
-                continue
-            slice_values = values[image_index][:, valid][:, increasing]
-            for chi_index in range(values.shape[1]):
-                output[image_index, chi_index, :] = cp.interp(
-                    q_common,
-                    q_valid,
-                    slice_values[chi_index],
-                    left=cp.nan,
-                    right=cp.nan,
-                )
-        return output
+            _CUPY_KERNEL_CACHE["interp_common_q"] = kernel
+        if out is None:
+            out = cp.empty((*values.shape[:2], q_common.size), dtype=values.dtype)
+        kernel(
+            values, q_axes, q_common, bounds,
+            np.int64(values.shape[2]), np.int64(q_common.size), np.int64(values.shape[1]), np.float64(np.nan),
+            out.reshape(-1),
+        )
+        return out
 
     @staticmethod
     def _warp_polar_batched_xp(values, *, center, radius, xp):
@@ -1681,14 +1857,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         _, y, x = self._shape_tuple(morphology)
         return (1, y, x)
 
-    def _window_tensor(self, morphology, cp, shape_override=None):
+    def _window_tensor(self, morphology, cp, shape_override=None, *, separable=False):
         if morphology.WindowingType == 0:
             return None
         z, y, x = self._shape_tuple(morphology, shape_override=shape_override)
         wz = cp.asarray(np.hanning(z), dtype=cp.float32)[:, None, None]
         wy = cp.asarray(np.hanning(y), dtype=cp.float32)[None, :, None]
         wx = cp.asarray(np.hanning(x), dtype=cp.float32)[None, None, :]
-        return wz * wy * wx
+        zy = wz * wy
+        return (zy, wx) if separable else zy * wx
 
     def _is_runtime_zero_field_array(self, value, cp) -> bool:
         if value is None:
@@ -1871,10 +2048,74 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
     def _execution_path(self, morphology) -> str:
         return str(morphology.backend_options.get("execution_path", "direct_polarization"))
 
-    def _run_single_energy(self, morphology, runtime_materials, energy, cp, ndimage, window, recorder):
+    def _energy_basis_selection(self, morphology):
+        mode = morphology._energy_basis_mode
+        if mode is None:
+            return None, None
+        path = self._execution_path(morphology)
+        if mode == "direct_r2c":
+            if path != "direct_polarization":
+                return None, "direct energy basis requires direct_polarization"
+            if self._num_angles(morphology) != 1:
+                return None, "direct energy basis requires one electric-field direction"
+        elif mode != "auto" and path != "tensor_coeff":
+            return None, "explicit energy basis modes require tensor_coeff"
+        if self._z_collapse_mode(morphology) is not None or morphology._runtime_compute_contract["runtime_dtype"] != "float32":
+            return None, "energy basis requires full-depth float32 fields"
+        energies = morphology.Energies
+        energy_count = len(set(energies)) if energies is not None else 0
+        if not energy_count:
+            return None, "energy basis requires at least one energy"
+        if mode in ("compact_c2c", "direct_r2c") and energy_count < 2:
+            return None, "energy basis requires at least two distinct energies"
+        return ("compact_r2c" if mode == "auto" else mode), None
+
+    def _run_energy_from_basis(self, morphology, basis, mode, energy_index, energy, cp, ndimage, recorder):
+        from ._cupy_energy_basis import project_energy, project_energy_fused
+
+        if recorder.execution is not None:
+            recorder.execution.record_tile(mode, (energy,))
+        angles = self._angle_family_plan(morphology)
+        if mode == "direct_r2c":
+            projection = recorder.measure(
+                "D", lambda: self._project_direct_energy_basis(morphology, energy, energy_index, basis, cp),
+            )
+
+            def finish_projection():
+                matrix, offset = self._rotation_transforms(morphology, cp)[0]
+                average, counts = self._accumulate_rotated_projection(
+                    cp=cp, ndimage=ndimage, projection=projection, matrix_yx=matrix, offset_yx=offset,
+                    projection_average=None, valid_counts=None, use_rot_mask=bool(morphology.RotMask),
+                    skip_rotation=angles.angles[0].is_identity_rotation,
+                )
+                return self._finalize_rotation_average(cp, average, counts, 1)
+
+            return recorder.measure("E", finish_projection)
+        project = project_energy_fused if mode == "compact_r2c" else project_energy
+        x, y, xy = recorder.measure(
+            "D",
+            lambda: project(self, morphology, cp, basis, energy_index, energy, angles),
+        )
+        if mode == "compact_r2c" and len(angles.angles) > 1:
+            from ._cupy_compact_rotation import rotate_and_accumulate
+
+            return recorder.measure(
+                "E",
+                lambda: rotate_and_accumulate(self, morphology, cp, x, y, xy, angles),
+            )
+        return recorder.measure(
+            "E",
+            lambda: self._rotate_and_accumulate_projection_coefficients(morphology, cp, ndimage, x, y, xy, angles),
+        )
+
+    def _run_single_energy(
+        self, morphology, runtime_materials, energy, cp, ndimage, window, recorder, fallback_reason=None,
+    ):
         execution_path = self._execution_path(morphology)
         try:
             if execution_path == "tensor_coeff":
+                if recorder.execution is not None:
+                    recorder.execution.record_tile("tensor_coeff", (energy,), fallback_reason)
                 return self._run_single_energy_tensor_coeff(
                     morphology=morphology,
                     runtime_materials=runtime_materials,
@@ -1885,6 +2126,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     recorder=recorder,
                 )
             if execution_path == "direct_polarization":
+                if recorder.execution is not None:
+                    recorder.execution.record_tile("direct_polarization", (energy,), fallback_reason)
                 return self._run_single_energy_direct_polarization(
                     morphology=morphology,
                     runtime_materials=runtime_materials,
@@ -1924,27 +2167,29 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 required_components=angle_family_plan.required_nt_components,
             ),
         )
-        fft_nt = recorder.measure(
-            "C",
-            lambda: self._compute_fft_nt_components(
-                nt=nt,
-                morphology=morphology,
-                cp=cp,
-                window=window,
-                component_indices=angle_family_plan.required_nt_components,
-            ),
-        )
-        proj_x, proj_y, proj_xy = recorder.measure(
-            "D",
-            lambda: self._projection_coefficients_from_fft_nt(
-                morphology=morphology,
-                energy=energy,
-                cp=cp,
-                fft_nt=fft_nt,
-                angle_family_plan=angle_family_plan,
-                shape_override=shape_override,
-            ),
-        )
+        with recorder.range("C+D"):
+            fft_nt = recorder.measure(
+                "C",
+                lambda: self._compute_fft_nt_components(
+                    nt=nt,
+                    morphology=morphology,
+                    cp=cp,
+                    window=window,
+                    component_indices=angle_family_plan.required_nt_components,
+                    execution=recorder.execution,
+                ),
+            )
+            proj_x, proj_y, proj_xy = recorder.measure(
+                "D",
+                lambda: self._projection_coefficients_from_fft_nt(
+                    morphology=morphology,
+                    energy=energy,
+                    cp=cp,
+                    fft_nt=fft_nt,
+                    angle_family_plan=angle_family_plan,
+                    shape_override=shape_override,
+                ),
+            )
         del nt, fft_nt
         angle_projections = recorder.measure(
             "E",
@@ -2845,13 +3090,15 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         _CUPY_KERNEL_CACHE["nt_accumulate_anisotropic_precomputed_float32"] = kernel
         return kernel
 
-    def _compute_fft_nt_components(self, nt, morphology, cp, window, component_indices=None):
+    def _compute_fft_nt_components(self, nt, morphology, cp, window, component_indices=None, execution=None):
         component_indices = tuple(range(nt.shape[0])) if component_indices is None else tuple(component_indices)
         for idx in component_indices:
             component = nt[idx]
             if window is not None:
                 cp.multiply(component, window, out=component)
             fft_component = cp.fft.fftn(component)
+            if execution is not None:
+                execution.record_fft("fftn_c2c", component)
             self._replace_dc_component(fft_component)
             self._igor_shift(fft_component, morphology, cp, out=nt[idx])
             del component, fft_component
@@ -3154,30 +3401,32 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     cp=cp,
                 ),
             )
-            fft_x, fft_y, fft_z = recorder.measure(
-                "C",
-                lambda p_x=p_x, p_y=p_y, p_z=p_z: self._fft_polarization_fields(
-                    morphology=morphology,
-                    cp=cp,
-                    p_x=p_x,
-                    p_y=p_y,
-                    p_z=p_z,
-                    window=window,
-                ),
-            )
-            del p_x, p_y, p_z
-            projection = recorder.measure(
-                "D",
-                lambda fft_x=fft_x, fft_y=fft_y, fft_z=fft_z: self._projection_from_fft_polarization(
-                    morphology=morphology,
-                    energy=energy,
-                    cp=cp,
-                    fft_x=fft_x,
-                    fft_y=fft_y,
-                    fft_z=fft_z,
-                    shape_override=shape_override,
-                ),
-            )
+            with recorder.range("C+D"):
+                fft_x, fft_y, fft_z = recorder.measure(
+                    "C",
+                    lambda p_x=p_x, p_y=p_y, p_z=p_z: self._fft_polarization_fields(
+                        morphology=morphology,
+                        cp=cp,
+                        p_x=p_x,
+                        p_y=p_y,
+                        p_z=p_z,
+                        window=window,
+                        execution=recorder.execution,
+                    ),
+                )
+                del p_x, p_y, p_z
+                projection = recorder.measure(
+                    "D",
+                    lambda fft_x=fft_x, fft_y=fft_y, fft_z=fft_z: self._projection_from_fft_polarization(
+                        morphology=morphology,
+                        energy=energy,
+                        cp=cp,
+                        fft_x=fft_x,
+                        fft_y=fft_y,
+                        fft_z=fft_z,
+                        shape_override=shape_override,
+                    ),
+                )
             del fft_x, fft_y, fft_z
             projection_average, valid_counts = recorder.measure(
                 "E",
@@ -3194,7 +3443,10 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 ),
             )
             del projection
-        return self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles)
+        return recorder.measure(
+            "E",
+            lambda: self._finalize_rotation_average(cp, projection_average, valid_counts, num_angles),
+        )
 
     def _compute_direct_isotropic_base_field(self, runtime_materials, energy, cp):
         if not runtime_materials:
@@ -3829,7 +4081,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         del fft_x, fft_y, fft_z
         return projection
 
-    def _fft_polarization_fields(self, morphology, cp, p_x, p_y, p_z, window):
+    def _fft_polarization_fields(self, morphology, cp, p_x, p_y, p_z, window, execution=None):
         if window is not None:
             cp.multiply(p_x, window, out=p_x)
             cp.multiply(p_y, window, out=p_y)
@@ -3842,6 +4094,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             # complex buffer per polarization component, cuFFT in place, then an
             # in-place Igor-order swap instead of a second full shifted volume.
             plan.fft(arr, arr, cufft.CUFFT_FORWARD)
+            if execution is not None:
+                execution.record_fft("cufft_inplace_c2c", arr)
             self._replace_dc_component(arr)
             self._igor_shift_inplace(arr, morphology, cp)
         return p_x, p_y, p_z
@@ -3988,6 +4242,115 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             ),
         )
         return projection
+
+    def _project_direct_energy_basis(self, morphology, energy, energy_index, basis, cp):
+        detector = self._detector_geometry(morphology, cp)
+        try:
+            geometry = self._detector_projection_geometry(morphology, energy, cp, detector)
+            shape = (detector.y_count, detector.x_count)
+            output = cp.empty(shape, dtype=cp.float32)
+            k = np.float32(2.0 * math.pi / (1239.84197 / energy))
+            threads = 256
+            # The single-plane branch in the kernel never reads the interpolation pointers.
+            interpolation = (geometry.safe_z0, geometry.safe_z1, geometry.frac)
+            if detector.z_count == 1:
+                interpolation = (np.uintp(0),) * 3
+            self._direct_basis_projection_kernel(cp)(
+                ((output.size + threads - 1) // threads,),
+                (threads,),
+                (
+                    geometry.valid, *interpolation, detector.qx, detector.qy, detector.qz,
+                    basis.indices, basis.values, basis.coefficients[energy_index], output,
+                    np.int64(basis.indices.size), np.int32(basis.values.shape[0]),
+                    np.int32(detector.z_count), np.int32(detector.x_count), np.int64(output.size),
+                    k, np.float32(k * k), self._one_by_four_pi, np.float32(np.nan),
+                ),
+            )
+            return output
+        finally:
+            self._discard_detector_projection_geometry(morphology, energy)
+
+    def _direct_basis_projection_kernel(self, cp):
+        return self._build_rawkernel_with_fallback(
+            cp,
+            family="direct_basis_projection",
+            cache_key_base="direct_basis_projection_float32",
+            source=_DIRECT_PROJECTION_INTENSITY_SOURCE + r"""
+            __device__ inline float nrss_direct_basis_endpoint(
+                const float a, const float b, const float c, const float d,
+                const long long key, const long long* indices, const long long endpoint_count,
+                const float2* values, const float2* weights, const int fields, const float scale
+            ) {
+                // The scan union includes both endpoints of every valid detector column.
+                long long lo = 0;
+                long long hi = endpoint_count;
+                while (lo < hi) {
+                    const long long mid = lo + (hi - lo) / 2;
+                    if (indices[mid] < key) {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                float2 p[3] = {{0.0f, 0.0f}, {0.0f, 0.0f}, {0.0f, 0.0f}};
+                for (int field = 0; field < fields; ++field) {
+                    const float2 v = values[field * endpoint_count + lo];
+                    #pragma unroll
+                    for (int component = 0; component < 3; ++component) {
+                        const float2 w = weights[component * fields + field];
+                        p[component].x += w.x * v.x - w.y * v.y;
+                        p[component].y += w.x * v.y + w.y * v.x;
+                    }
+                }
+                #pragma unroll
+                for (int component = 0; component < 3; ++component) {
+                    p[component].x *= scale;
+                    p[component].y *= scale;
+                }
+                return nrss_direct_projection_intensity(a, b, c, d, p[0], p[1], p[2]);
+            }
+
+            extern "C" __global__
+            void direct_basis_projection_float32(
+                const bool* valid, const int* z0, const int* z1, const float* frac,
+                const float* qx, const float* qy, const float* qz,
+                const long long* indices, const float2* values, const float2* weights,
+                float* output, const long long endpoint_count, const int fields,
+                const int nz, const int nx, const long long plane_size,
+                const float k, const float k_squared, const float scale, const float nan_value
+            ) {
+                const long long column = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+                if (column >= plane_size) {
+                    return;
+                }
+                if (!valid[column]) {
+                    output[column] = nan_value;
+                    return;
+                }
+                const float a = qx[column % nx];
+                const float b = qy[column / nx];
+                const int lower = nz == 1 ? 0 : z0[column];
+                const float low = nrss_direct_basis_endpoint(
+                    a, b, k + qz[lower], k_squared, lower * plane_size + column,
+                    indices, endpoint_count, values, weights, fields, scale
+                );
+                if (nz == 1) {
+                    output[column] = low;
+                    return;
+                }
+                const int upper = z1[column];
+                const float high = nrss_direct_basis_endpoint(
+                    a, b, k + qz[upper], k_squared, upper * plane_size + column,
+                    indices, endpoint_count, values, weights, fields, scale
+                );
+                const float weight = frac[column];
+                output[column] = (1.0f - weight) * low + weight * high;
+            }
+            """,
+            kernel_name="direct_basis_projection_float32",
+            requested_backend="auto",
+            prefer_auto_nvcc=True,
+        )
 
     def _replace_dc_component(self, arr):
         z, y, x = arr.shape
@@ -4183,29 +4546,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             cp,
             family="direct_detector_projection",
             cache_key_base="direct_detector_projection_single_slice_float32",
-            source=r"""
-            __device__ inline float nrss_direct_projection_intensity(
-                const float a,
-                const float b,
-                const float c,
-                const float d,
-                const float2 p1,
-                const float2 p2,
-                const float2 p3
-            ) {
-                const float term1r = (-a * a + d) * p1.x - a * (b * p2.x + c * p3.x);
-                const float term1i = (-a * a + d) * p1.y - a * (b * p2.y + c * p3.y);
-                const float term2r = -(a * b) * p1.x + (-b * b + d) * p2.x - b * c * p3.x;
-                const float term2i = -(a * b) * p1.y + (-b * b + d) * p2.y - b * c * p3.y;
-                const float term3r = -(a * c) * p1.x - b * c * p2.x + (-c * c + d) * p3.x;
-                const float term3i = -(a * c) * p1.y - b * c * p2.y + (-c * c + d) * p3.y;
-                return
-                    term1r * term1r + term1i * term1i
-                    + term2r * term2r + term2i * term2i
-                    + term3r * term3r + term3i * term3i;
-            }
-
-            extern "C" __global__
+            source=_DIRECT_PROJECTION_INTENSITY_SOURCE + r"""            extern "C" __global__
             void direct_detector_projection_single_slice_float32(
                 const bool* valid,
                 const float* qx,
@@ -4260,29 +4601,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             cp,
             family="direct_detector_projection",
             cache_key_base="direct_detector_projection_interpolated_float32",
-            source=r"""
-            __device__ inline float nrss_direct_projection_intensity_interp(
-                const float a,
-                const float b,
-                const float c,
-                const float d,
-                const float2 p1,
-                const float2 p2,
-                const float2 p3
-            ) {
-                const float term1r = (-a * a + d) * p1.x - a * (b * p2.x + c * p3.x);
-                const float term1i = (-a * a + d) * p1.y - a * (b * p2.y + c * p3.y);
-                const float term2r = -(a * b) * p1.x + (-b * b + d) * p2.x - b * c * p3.x;
-                const float term2i = -(a * b) * p1.y + (-b * b + d) * p2.y - b * c * p3.y;
-                const float term3r = -(a * c) * p1.x - b * c * p2.x + (-c * c + d) * p3.x;
-                const float term3i = -(a * c) * p1.y - b * c * p2.y + (-c * c + d) * p3.y;
-                return
-                    term1r * term1r + term1i * term1i
-                    + term2r * term2r + term2i * term2i
-                    + term3r * term3r + term3i * term3i;
-            }
-
-            extern "C" __global__
+            source=_DIRECT_PROJECTION_INTENSITY_SOURCE + r"""            extern "C" __global__
             void direct_detector_projection_interpolated_float32(
                 const bool* valid,
                 const int* z0,
@@ -4334,7 +4653,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                      + (unsigned long long)y) * (unsigned long long)xdim
                     + (unsigned long long)x;
 
-                const float proj0 = nrss_direct_projection_intensity_interp(
+                const float proj0 = nrss_direct_projection_intensity(
                     a,
                     b,
                     c0,
@@ -4343,7 +4662,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     fft_y[base0],
                     fft_z[base0]
                 );
-                const float proj1 = nrss_direct_projection_intensity_interp(
+                const float proj1 = nrss_direct_projection_intensity(
                     a,
                     b,
                     c1,

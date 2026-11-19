@@ -5,6 +5,8 @@ backend and the backend-neutral seams required to support it. It consolidates
 the stable backend contract that was previously spread across
 `UPGRADE_ROADMAP.md` and the historical backend-upgrade guide.
 
+For active performance priorities, use the [current-workflow speed tickets](speed_tickets/README.md). Implementation proposals below provide design context. The ticket board sets the current order and promotion criteria.
+
 Related planning documents:
 
 - `REPO_UPGRADE_PLAN.md`

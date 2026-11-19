@@ -83,3 +83,4 @@ For detailed examples and implementations, refer to the tutorial notebooks in th
 
    pyhyper
    cupy_rsoxs_result_q_grids
+   cupy_rsoxs_memory

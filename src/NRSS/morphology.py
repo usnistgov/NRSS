@@ -315,11 +315,10 @@ class Morphology:
             - ``dtype``: only ``"float32"`` is supported.
 
             ``cupy-rsoxs`` options:
-            - ``execution_path``: ``"direct_polarization"`` (default) or
-              ``"tensor_coeff"``.
-              Selects the maintained CuPy execution path.
-              ``"direct_polarization"`` is now the default public path.
-              ``"tensor_coeff"`` remains the maintained alternate path.
+            - ``execution_path`` accepts ``"direct_polarization"`` or
+              ``"tensor_coeff"`` and selects the CuPy per-energy route.
+              When omitted, the automatic basis runs when eligible and falls
+              back to ``"direct_polarization"``.
             - ``mixed_precision_mode``: ``None`` (default) or
               ``"reduced_morphology_bit_depth"``.
               Expert-only reduced-precision morphology-input mode. This is the
@@ -356,6 +355,16 @@ class Morphology:
               is requested, ``run(stdout=True, stderr=True)`` is used, and
               stderr is attached to an interactive TTY. Any stdout or stderr
               suppression behaves the same as disabling this option.
+            - ``energy_basis_mode``: ``"auto"`` for the automatic CuPy path or
+              ``None`` to use the configured execution path at every energy.
+              Auto selects the compact real Fourier basis for full-depth
+              float32 volumes for single- and multi-energy runs.
+              Explicit direct polarization keeps its per-energy path by
+              default. The ``"compact_r2c"`` tensor option selects the same
+              compact route explicitly, and ``"compact_c2c"`` is an
+              experimental tensor basis for multiple energies.
+              ``"direct_r2c"`` is an experimental direct-polarization basis
+              for multiple energies and one electric-field direction.
             - ``result_residency``: ``"host"`` (default) or ``"device"``.
               Controls where the retained simulation result buffer lives after
               the run completes. ``"host"`` keeps the result contract
@@ -432,7 +441,8 @@ class Morphology:
         ``backend_options`` are normalized at construction time. As a result,
         :attr:`backend_options` may include defaults that were not passed
         explicitly. For example, with ``backend="cupy-rsoxs"`` and no explicit
-        ``execution_path``, the normalized defaults include
+        ``execution_path``, the normalized defaults record the per-energy
+        fallback and include
         ``execution_path="direct_polarization"``,
         ``kernel_preload_stage="a1"``,
         ``igor_shift_backend="nvcc"``,
@@ -452,7 +462,15 @@ class Morphology:
         self._backend_info = get_backend_info(self._backend)
         self._backend_runtime = get_backend_runtime(self._backend)
         self._resident_mode = _validate_resident_mode(resident_mode, self._backend)
+        backend_options = {} if backend_options is None else dict(backend_options)
         self._backend_options = normalize_backend_options(self._backend, backend_options)
+        explicit_path_options = {"execution_path", "direct_polarization_backend", "direct_isotropic_mode"}
+        automatic_basis = self._backend_options.get("execution_path") == "tensor_coeff" or not (
+            explicit_path_options & backend_options.keys()
+        )
+        self._energy_basis_mode = self._backend_options.get(
+            "energy_basis_mode", "auto" if self._backend == "cupy-rsoxs" and automatic_basis else None,
+        )
         self._backend_array_contract = resolve_backend_array_contract(
             self._backend,
             self._backend_options,

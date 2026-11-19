@@ -64,6 +64,7 @@ def _run_observer(args: argparse.Namespace) -> int:
         ready_payload = {
             "status": "ready",
             "baseline_gpu_used_mib": float(baseline_used_mib),
+            "free_gpu_mib": cp.cuda.runtime.memGetInfo()[0] / (1024.0**2),
             "sample_interval_s": float(args.sample_interval_s),
             "stabilize_window": int(args.stabilize_window),
             "stabilize_tolerance_mib": float(args.stabilize_tolerance_mib),
