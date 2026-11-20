@@ -79,12 +79,12 @@
 
 /* add menu styling for active variant */
 
-/* note: li.ntd2d_backend_cupy-cyrsoxs-clone doesn't reliably work with dotted names */
+/* note: li.ntd2d_fix_fft-grid-registration doesn't reliably work with dotted names */
 
-li[class~="ntd2d_backend_cupy-cyrsoxs-clone"] {
+li[class~="ntd2d_fix_fft-grid-registration"] {
   font-weight: bold;
 }
 
-li[class~="ntd2d_backend_cupy-cyrsoxs-clone"] a:hover {
+li[class~="ntd2d_fix_fft-grid-registration"] a:hover {
   text-decoration: none;
 }
