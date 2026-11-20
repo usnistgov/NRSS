@@ -1204,7 +1204,8 @@ def _run_case_once(
             "windowing_type": case.windowing_type,
             "window_xy": padding.get("window_xy", "hann" if case.windowing_type == 1 else "none"),
             "window_z": padding.get(
-                "window_z", "hann" if case.windowing_type == 1 and not prepared["reference_window"] else "none",
+                "window_z",
+                "hann" if case.windowing_type == 1 and not prepared_inputs["reference_window"] else "none",
             ),
         }
         if collect_timing:

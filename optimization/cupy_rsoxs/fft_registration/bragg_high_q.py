@@ -28,7 +28,7 @@ def write_rows(path, rows):
         writer.writerows(rows)
 
 
-def catalog(case):
+def catalog(case, *, basis_override=None, include_extinctions=False):
     """Vectorized equivalent of predict_bragg_spots_3d for these fixtures."""
     from tests.validation.lib import bragg
 
@@ -37,6 +37,8 @@ def catalog(case):
     az, ay, ax = axes
     a, basis = bragg.lattice_vectors_3d_nm(case.lattice_kind, case.lattice_constant_nm,
                                            case.azimuth_deg, case.tilt_x_deg, case.tilt_y_deg)
+    if basis_override is not None:
+        basis = basis_override
     reciprocal = bragg.reciprocal_vectors_nm_inv(a)
     beam = bragg.flat_detector_k_nm_inv(case.energy_eV)
     limit = int(np.ceil(2 * beam / np.linalg.norm(reciprocal, axis=1).min())) + 2
@@ -57,13 +59,14 @@ def catalog(case):
         form = bragg.sphere_form_factor_amplitude(qabs, case.particle_diameter_nm)
         for idx, p, q, f in zip(np.flatnonzero(good), qperp, qabs, form):
             indices = tuple(map(int,hkl[idx]))
-            weight = float(f*f*abs(bragg.structure_factor_amplitude(hkl[idx],basis))**2)
-            rows.append((indices, gx[idx], gy[idx], p, q, (gz[idx]-qz[idx])/(az[1]-az[0]), weight))
-    strongest = max(row[-1] for row in rows)
+            amplitude = abs(bragg.structure_factor_amplitude(hkl[idx], basis))
+            weight = float(f*f*amplitude**2)
+            rows.append((indices, gx[idx], gy[idx], p, q, (gz[idx]-qz[idx])/(az[1]-az[0]), weight, amplitude < 1.e-10))
+    strongest = max(row[-2] for row in rows)
     groups = {}
-    for hkl, gx, gy, p, q, dz, strength in rows:
+    for hkl, gx, gy, p, q, dz, strength, extinct in rows:
         relative = strength/strongest
-        if relative < 1e-12:
+        if relative < 1e-12 and not (include_extinctions and extinct):
             continue
         key = (round(float(gx),9), round(float(gy),9))
         if key not in groups:
@@ -135,13 +138,16 @@ def measure(targets, patches, ay, ax, images, anchor):
     return rows
 
 
-def spectrum_columns(field, ids):
+def spectrum_columns(field, ids, *, double_precision=False):
     nz,ny,nx = field.shape
     iy,ix = np.unravel_index(ids,(ny,nx))
-    output = np.empty((nz,len(ids)),np.complex64)
+    output = np.empty((nz,len(ids)),np.complex128 if double_precision else np.complex64)
     native_y, native_x = (iy-ny//2)%ny, (ix-nx//2)%nx
     for z in range(0,nz,4):
-        planes = fft.fft2(field[z:z+4],axes=(-2,-1),workers=3)
+        data = field[z:z+4]
+        if double_precision:
+            data = data.astype(np.float64)
+        planes = fft.fft2(data,axes=(-2,-1),workers=3)
         output[z:z+len(planes)] = planes[:,native_y,native_x]
     return output
 
