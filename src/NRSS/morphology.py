@@ -331,6 +331,7 @@ class Morphology:
             - ``virtual_z_pad_to``: opt-in centered vacuum extension, given as
               the total axial transform depth in planes. Requires full-depth
               float32 compact tensor when the depth exceeds the material depth.
+              For that extension, ``WindowingType=1`` applies Hann in XY only.
             - ``virtual_z_method``: ``"sum"`` (default) or ``"residues"``.
               The residue FFT requires an integer ratio of transform depth to
               occupied depth.

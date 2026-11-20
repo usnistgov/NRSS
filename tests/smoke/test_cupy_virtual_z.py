@@ -8,7 +8,7 @@ import pytest
 from NRSS import SFieldMode
 from NRSS.backends.contracts import BackendOptionError, normalize_backend_options
 from NRSS.morphology import Material, Morphology
-from tests.validation.lib.virtual_z_padding import explicit_vacuum_materials
+from tests.validation.lib.virtual_z_padding import explicit_vacuum_materials, xy_hann_reference
 
 
 @pytest.mark.parametrize("options", [
@@ -57,8 +57,12 @@ def _specimen(shape):
 def _morphology(materials, window, **options):
     config = dict(
         Morphology.config_default, Energies=materials[1].energies, EAngleRotation=[5., 30., 65.],
-        RotMask=0, WindowingType=window,
+        RotMask=0,
     )
+    if window is None:
+        config.pop("WindowingType")
+    else:
+        config["WindowingType"] = window
     return Morphology(
         len(materials), materials=materials, PhysSize=2.5, config=config, backend="cupy-rsoxs",
         input_policy="strict", ownership_policy="borrow", backend_options=options,
@@ -85,13 +89,18 @@ def _run(morph):
 ])
 def test_virtual_z_matches_literal_vacuum(shape, target, method, window, layout):
     materials = _specimen(shape)
-    expected, _ = _run(_morphology(explicit_vacuum_materials(materials, target), window, result_layout=layout))
+    reference = _morphology(explicit_vacuum_materials(materials, target), 0, result_layout=layout)
+    if window:
+        xy_hann_reference(reference)
+    expected, _ = _run(reference)
     morph = _morphology(materials, window, result_layout=layout, virtual_z_pad_to=target, virtual_z_method=method)
     actual, report = _run(morph)
     assert morph.NumZYX == shape
     assert actual.attrs["occupied_z"] == shape[0]
     assert actual.attrs["transform_z"] == actual.attrs["z_dim"] == target
     assert actual.attrs["z_offset"] == (target - shape[0]) // 2
+    assert actual.attrs["window_xy"] == ("hann" if window else "none")
+    assert actual.attrs["window_z"] == "none"
     assert report["routes"] == [f"virtual_z_{method}"]
     assert report["basis_builds"] == 1
     for coord in expected.coords:
@@ -178,3 +187,103 @@ def test_virtual_z_coefficients_match_dense_numpy(shape, target, method):
     output = cp.empty(indices.shape, dtype=cp.complex64)
     evaluator.capture(cp, cp.asarray(values), output, _NullSegmentRecorder())
     np.testing.assert_allclose(cp.asnumpy(output), expected, rtol=2.e-6, atol=2.e-6 * np.max(abs(expected)))
+
+
+def _scalar_materials(fraction):
+    energies = [285.]
+    return {
+        key: Material(
+            key, Vfrac=values, S=SFieldMode.ISOTROPIC, energies=energies,
+            opt_constants={285.: optics},
+        )
+        for key, values, optics in (
+            (1, fraction, [.003, .002] * 2), (2, 1 - fraction, [0.] * 4),
+        )
+    }
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff")
+@pytest.mark.usefixtures("nrss_path")
+@pytest.mark.parametrize("seam", (False, True), ids=("edge_matched_scalar", "discontinuous_anisotropic"))
+def test_film_window_selection_is_manual(seam, monkeypatch):
+    from NRSS.backends import _cupy_energy_basis
+
+    shape = (5, 16, 17)
+    if seam:
+        materials = _specimen(shape)
+        fraction = materials[1].Vfrac
+        fraction[..., :8] = .25
+        fraction[..., 8:] = .75
+        materials[2].Vfrac = 1 - fraction
+        # The scalar case uses the fused projector. Exercise the other
+        # projector with the same weighted complex anisotropic basis.
+        monkeypatch.setattr(_cupy_energy_basis, "project_energy_fused", _cupy_energy_basis.project_energy)
+    else:
+        materials = _scalar_materials(np.full(shape, .5, dtype=np.float32))
+    omitted, _ = _run(_morphology(materials, None, virtual_z_pad_to=13))
+    no_window, _ = _run(_morphology(materials, 0, virtual_z_pad_to=13))
+    hann, _ = _run(_morphology(materials, 1, virtual_z_pad_to=13))
+    reference = _morphology(explicit_vacuum_materials(materials, 13), 0)
+    xy_hann_reference(reference)
+    expected, _ = _run(reference)
+    np.testing.assert_array_equal(omitted.values, no_window.values)
+    assert omitted.attrs["window_xy"] == no_window.attrs["window_xy"] == "none"
+    assert hann.attrs["window_xy"] == "hann"
+    assert hann.attrs["window_z"] == "none"
+    assert not np.allclose(hann.values, no_window.values, rtol=1.e-4, atol=0, equal_nan=True)
+    np.testing.assert_array_equal(np.isfinite(hann.values), np.isfinite(expected.values))
+    np.testing.assert_allclose(
+        hann.values, expected.values, rtol=2.e-5, atol=2.e-7 * np.nanmax(expected.values),
+    )
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff")
+@pytest.mark.usefixtures("nrss_path")
+@pytest.mark.parametrize(("method", "target"), (("sum", 257), ("residues", 256)))
+@pytest.mark.parametrize("window", (0, 1))
+def test_film_window_face_scatterer_phases(method, target, window, monkeypatch):
+    import cupy as cp
+
+    from NRSS.backends import _cupy_virtual_z
+    from tests.validation.dev.cupy_rsoxs_virtual_zpad import check_film_window as oracle
+
+    original_union = _cupy_virtual_z.sparse_endpoint_union
+    original_capture = _cupy_virtual_z.VirtualZEvaluator.capture
+    nz, ny, nx = oracle.NZ, oracle.NY, oracle.NX
+    y, x = (ny // 2 - oracle.KY) % ny, (nx // 2 - oracle.KX) % nx
+    bins = (target // 2 - cp.arange(target)) % target
+    requested = (bins * ny + y) * nx + x
+    half_x = nx // 2 + 1
+    captured = []
+
+    def include_probe_bins(*args):
+        return cp.union1d(original_union(*args), requested)
+
+    def capture(evaluator, xp, field, out, recorder):
+        original_capture(evaluator, xp, field, out, recorder)
+        columns = ny * half_x
+        selected = (evaluator.native % columns == oracle.KY * half_x + oracle.KX) & ~evaluator.reflect
+        modes = cp.asnumpy(evaluator.native[selected] // columns)
+        ordered = np.empty(target, dtype=np.complex64)
+        assert modes.size == target
+        ordered[modes] = cp.asnumpy(out[selected])
+        captured.append(ordered)
+
+    monkeypatch.setattr(_cupy_virtual_z, "sparse_endpoint_union", include_probe_bins)
+    monkeypatch.setattr(_cupy_virtual_z.VirtualZEvaluator, "capture", capture)
+    lateral = "hann" if window else "none"
+    for planes in ((0,), (nz // 2,), (nz - 1,), (0, nz - 1)):
+        fraction = np.zeros((nz, ny, nx), dtype=np.float32)
+        fraction[list(planes), oracle.Y, oracle.X] = 1.
+        captured.clear()
+        result, _ = _run(_morphology(
+            _scalar_materials(fraction), window, virtual_z_pad_to=target, virtual_z_method=method,
+        ))
+        offset = (target - nz) // 2
+        assert result.attrs["z_offset"] == offset
+        expected = oracle.expected_coefficients(target, offset, planes, lateral)
+        np.testing.assert_allclose(captured[0], expected, rtol=2.e-6, atol=3.e-7)
+        if len(planes) == 1:
+            np.testing.assert_allclose(abs(captured[0]) ** 2, 1 / 16 if window else 1, rtol=2.e-6)

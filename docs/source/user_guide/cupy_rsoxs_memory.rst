@@ -152,5 +152,8 @@ the occupied depth runs the native transform.
 
 For an extended depth, use the full-depth float32 compact tensor path. Detector
 and reduced results report ``occupied_z``, ``transform_z``, ``z_offset``, and
-the evaluator in ``virtual_z_method``. With a Hann window, the occupied planes
-use their corresponding weights from the target-depth window.
+the evaluator in ``virtual_z_method``. For an extended film, ``WindowingType=0``
+is the default and leaves all axes unweighted. ``WindowingType=1`` applies
+Hann weights in XY; every occupied Z plane has unit axial weight. Native
+transforms, including an identity pad, retain the ordinary XYZ Hann behavior
+for ``WindowingType=1``.

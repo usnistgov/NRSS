@@ -587,8 +587,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     cp,
                     shape_override=virtual_shape or self._segment_c_shape_override(morphology),
                     separable=basis_mode == "compact_r2c",
-                    z_slice=slice(padding_attrs["z_offset"], padding_attrs["z_offset"] + morphology.NumZYX[0])
-                    if virtual_shape is not None else None,
+                    lateral_only=virtual_shape is not None,
                 ),
             )
             if basis_mode is not None:
@@ -1912,6 +1911,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             "transform_z": target,
             "z_offset": (target - occupied) // 2,
             "virtual_z_method": morphology.backend_options.get("virtual_z_method", "sum"),
+            "window_xy": "hann" if morphology.WindowingType == 1 else "none",
+            "window_z": "none",
         }
 
     def _z_collapse_mode(self, morphology) -> str | None:
@@ -1923,17 +1924,17 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         _, y, x = self._shape_tuple(morphology)
         return (1, y, x)
 
-    def _window_tensor(self, morphology, cp, shape_override=None, *, separable=False, z_slice=None):
+    def _window_tensor(self, morphology, cp, shape_override=None, *, separable=False, lateral_only=False):
         if morphology.WindowingType == 0:
             return None
         z, y, x = self._shape_tuple(morphology, shape_override=shape_override)
-        z_window = np.hanning(z)
-        if z_slice is not None:
-            z_window = z_window[z_slice]
-        wz = cp.asarray(z_window, dtype=cp.float32)[:, None, None]
         wy = cp.asarray(np.hanning(y), dtype=cp.float32)[None, :, None]
         wx = cp.asarray(np.hanning(x), dtype=cp.float32)[None, None, :]
-        zy = wz * wy
+        if lateral_only:
+            zy = wy
+        else:
+            wz = cp.asarray(np.hanning(z), dtype=cp.float32)[:, None, None]
+            zy = wz * wy
         return (zy, wx) if separable else zy * wx
 
     def _is_runtime_zero_field_array(self, value, cp) -> bool:

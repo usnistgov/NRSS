@@ -46,3 +46,17 @@ def explicit_vacuum_materials(materials, transform_z, xp=np):
             opt_constants={energy: [0.] * 4 for energy in first.energies}, name="vacuum",
         )
     return padded
+
+
+def xy_hann_reference(morphology):
+    """Weight literal-box scattering fields in XY with the backend XYZ window disabled."""
+    if morphology.WindowingType != 0:
+        raise ValueError("Disable the normal XYZ window for the explicit XY Hann reference.")
+
+    def window(morph, cp, shape_override=None, *, separable=False, **_options):
+        _, ny, nx = shape_override or morph.NumZYX
+        wy = cp.asarray(np.hanning(ny), dtype=cp.float32)[None, :, None]
+        wx = cp.asarray(np.hanning(nx), dtype=cp.float32)[None, None, :]
+        return (wy, wx) if separable else wy * wx
+
+    morphology._backend_runtime._window_tensor = window

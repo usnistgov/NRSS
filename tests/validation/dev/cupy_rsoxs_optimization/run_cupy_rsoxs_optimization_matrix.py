@@ -964,6 +964,7 @@ def _prepare_core_shell_case_inputs(case: BenchmarkCase) -> dict[str, Any]:
         )
         phys_size = float(size_spec.phys_size_nm)
     occupied_z = next(iter(materials.values())).Vfrac.shape[0]
+    reference_window = None
     if case.explicit_pad_z is not None:
         if (case.backend_options or {}).get("virtual_z_pad_to") is not None:
             raise ValueError("Choose either explicit or virtual axial padding for a worker.")
@@ -971,7 +972,7 @@ def _prepare_core_shell_case_inputs(case: BenchmarkCase) -> dict[str, Any]:
         # imported from a pinned baseline that predates the fixture helper.
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
         try:
-            from virtual_z_padding import explicit_vacuum_materials
+            from virtual_z_padding import explicit_vacuum_materials, xy_hann_reference
         finally:
             sys.path.pop(0)
 
@@ -980,8 +981,10 @@ def _prepare_core_shell_case_inputs(case: BenchmarkCase) -> dict[str, Any]:
         else:
             xp = np
         materials = explicit_vacuum_materials(materials, case.explicit_pad_z, xp=xp)
+        if case.windowing_type == 1:
+            reference_window = xy_hann_reference
     config = _default_morphology_config(case.energies_ev, case.eangle_rotation)
-    config.update(WindowingType=case.windowing_type, RotMask=case.rot_mask)
+    config.update(WindowingType=0 if reference_window else case.windowing_type, RotMask=case.rot_mask)
     return {
         "num_material": len(materials),
         "materials": materials,
@@ -989,6 +992,7 @@ def _prepare_core_shell_case_inputs(case: BenchmarkCase) -> dict[str, Any]:
         "config": config,
         "backend_options": case.backend_options,
         "occupied_z": occupied_z,
+        "reference_window": reference_window,
     }
 
 
@@ -1057,7 +1061,7 @@ def _prewarm_cuda_runtime_for_host_staging(
 
 
 def _construct_morphology_for_timing_case(case: BenchmarkCase, prepared: dict[str, Any]) -> Morphology:
-    return Morphology(
+    morphology = Morphology(
         prepared["num_material"],
         materials=prepared["materials"],
         PhysSize=prepared["phys_size"],
@@ -1069,6 +1073,9 @@ def _construct_morphology_for_timing_case(case: BenchmarkCase, prepared: dict[st
         input_policy=case.input_policy,
         ownership_policy=case.ownership_policy,
     )
+    if prepared["reference_window"] is not None:
+        prepared["reference_window"](morphology)
+    return morphology
 
 
 def _synchronize_cupy_default_stream() -> None:
@@ -1195,6 +1202,10 @@ def _run_case_once(
                 getattr(sys.modules[type(backend_result).__module__], "_DETECTOR_GRID_CONVENTION", None),
             ),
             "windowing_type": case.windowing_type,
+            "window_xy": padding.get("window_xy", "hann" if case.windowing_type == 1 else "none"),
+            "window_z": padding.get(
+                "window_z", "hann" if case.windowing_type == 1 and not prepared["reference_window"] else "none",
+            ),
         }
         if collect_timing:
             backend_timings = morphology.backend_timings
