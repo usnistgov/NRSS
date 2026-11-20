@@ -216,9 +216,13 @@ def _cyrsoxs_detector_axis(n: int, phys_size_nm: float) -> np.ndarray:
 
 
 @lru_cache(maxsize=1)
-def _detector_annulus_mask() -> np.ndarray:
+def _legacy_detector_annulus_mask() -> np.ndarray:
     qy = _cyrsoxs_detector_axis(SHAPE[1], PHYS_SIZE_NM)
     qx = _cyrsoxs_detector_axis(SHAPE[2], PHYS_SIZE_NM)
+    return _detector_annulus_mask(qy, qx)
+
+
+def _detector_annulus_mask(qy: np.ndarray, qx: np.ndarray) -> np.ndarray:
     qx_grid, qy_grid = np.meshgrid(qx, qy)
     q = np.sqrt(qx_grid * qx_grid + qy_grid * qy_grid)
     mask = np.logical_and.reduce(
@@ -233,14 +237,14 @@ def _detector_annulus_mask() -> np.ndarray:
     return mask
 
 
-def _detector_annulus_intensity(detector_image: np.ndarray) -> float:
+def _detector_annulus_intensity(detector_image: np.ndarray, annulus_mask: np.ndarray) -> float:
     img = np.asarray(detector_image, dtype=np.float64)
     if img.shape != (SHAPE[1], SHAPE[2]):
         raise AssertionError(f"Unexpected detector image shape {img.shape!r}.")
 
     mask = np.logical_and.reduce(
         [
-            _detector_annulus_mask(),
+            annulus_mask,
             np.isfinite(img),
             img >= 0.0,
         ]
@@ -331,10 +335,14 @@ def _run_sphere_scenario(
         scattering = morph.run(stdout=False, stderr=False, return_xarray=True)
         if scattering is None:
             raise AssertionError("Orientational contrast backend run returned no scattering data.")
+        if scattering.attrs.get("detector_grid_convention") == "fft_bins_v1":
+            annulus_mask = _detector_annulus_mask(scattering.qy.values, scattering.qx.values)
+        else:
+            annulus_mask = _legacy_detector_annulus_mask()
         intensities = {}
         for family in FAMILY_SPECS:
             detector_image = np.asarray(scattering.sel(energy=float(family.energy_ev)).values, dtype=np.float64)
-            intensities[family.name] = _detector_annulus_intensity(detector_image)
+            intensities[family.name] = _detector_annulus_intensity(detector_image, annulus_mask)
         return intensities
     finally:
         morph.release_runtime()

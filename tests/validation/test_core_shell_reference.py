@@ -166,16 +166,14 @@ def test_core_shell_sim_regression_pybind(nrss_path: ComputationPath):
 def test_core_shell_sim_regression_cupy_z_collapse_relaxed(nrss_path: ComputationPath):
     """
     Compare the maintained cupy-rsoxs CoreShell A-wedge with
-    `z_collapse_mode="mean"` to the local sim-derived regression golden using
-    relaxed collapse-specific thresholds.
+    `z_collapse_mode="mean"` to the full-depth result on the same path using
+    the collapse-specific thresholds.
     """
     if not has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for CoreShell z-collapse validation.")
-    if not SIM_REFERENCE_PATH.exists():
-        pytest.skip(f"CoreShell sim reference not found: {SIM_REFERENCE_PATH}")
 
     awedge = _zcollapse_awedge(nrss_path.id, "mean")
-    reference = load_sim_reference_awedge()
+    reference = _baseline_awedge(nrss_path.id)
     comparison = awedge_comparison_slices(awedge=awedge, reference=reference)
     metrics = compute_awedge_metrics(comparison)
     passed, failures = metrics_within_thresholds(metrics, Z_COLLAPSE_SIM_THRESHOLDS)
@@ -184,14 +182,10 @@ def test_core_shell_sim_regression_cupy_z_collapse_relaxed(nrss_path: Computatio
         plot_core_shell_validation_panel(
             comparison=comparison,
             metrics=metrics,
-            out_path=PLOT_DIR / f"{nrss_path.id}__core_shell_zcollapse_mean_vs_sim_reference.png",
+            out_path=PLOT_DIR / f"{nrss_path.id}__core_shell_zcollapse_mean_vs_full_depth.png",
             scenario=BASELINE_SCENARIO,
-            reference_label=SIM_REFERENCE_LABEL,
-            reference_citation=(
-                "Sim-derived regression golden generated from the maintained baseline "
-                "CoreShell scenario. Relaxed z-collapse thresholds intentionally allow "
-                "high-q deviation relative to the full 3D baseline."
-            ),
+            reference_label=f"{nrss_path.id} full depth",
+            reference_citation="Full-depth simulation with the same detector-grid convention.",
             model_label=f"{nrss_path.id} z-collapse",
         )
 
