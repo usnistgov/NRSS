@@ -315,6 +315,7 @@ class _ReducedResultPlan:
     result_shape: tuple[int, ...]
     center: tuple[float, float]
     radius: float
+    radial_step_pixels: tuple[float, float]
     chi: np.ndarray
     q: np.ndarray
     q_perp: np.ndarray | None
@@ -922,15 +923,21 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             self._axis_center_from_q_axis(qy),
             self._axis_center_from_q_axis(qx),
         )
-        radius = float(
-            np.sqrt((projection_shape[0] - center[0]) ** 2 + (projection_shape[1] - center[1]) ** 2)
-        )
+        extent_y = projection_shape[0] - center[0]
+        extent_x = projection_shape[1] - center[1]
+        radius = math.hypot(extent_y, extent_x)
         q_count = int(np.ceil(radius))
         if q_count <= 0:
             raise ValueError(f"Integrated result computed a non-positive polar radius {radius!r}.")
 
         chi = np.linspace(-179.5, 179.5, 360, dtype=np.float64)
-        q_perp = self._q_perp_axis_from_detector_axes(qx, qy, q_count)
+        d = float(morphology.PhysSize)
+        dq_y = 2.0 * math.pi / (qy.size * d)
+        dq_x = 2.0 * math.pi / (qx.size * d)
+        radial_step_q = math.hypot(extent_y * dq_y, extent_x * dq_x) / q_count
+        q_perp = np.arange(q_count, dtype=np.float64) * radial_step_q
+        # A circle in q has different pixel radii when the detector is rectangular.
+        radial_step_pixels = (radial_step_q / dq_y, radial_step_q / dq_x)
         z_dim = int(morphology.NumZYX[0])
         nrss_semantic_mode = "2d_reciprocal_plane" if z_dim == 1 else "3d_detector_aware"
         attrs: dict[str, Any] = {
@@ -938,6 +945,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             "source_integrator": "cupy-rsoxs",
             "integration_compatibility": "NRSSIntegrator",
             "detector_grid_convention": _DETECTOR_GRID_CONVENTION,
+            "radial_grid_convention": "sampled_q_v1",
             "nrss_semantic_mode": nrss_semantic_mode,
             "phys_size_nm": float(morphology.PhysSize),
             "z_dim": z_dim,
@@ -1034,6 +1042,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             result_shape=result_shape,
             center=center,
             radius=radius,
+            radial_step_pixels=radial_step_pixels,
             chi=chi,
             q=np.asarray(q),
             q_perp=None if q_perp_coord is None else np.asarray(q_perp_coord),
@@ -1060,11 +1069,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         qy = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(ny, d=d))
         qx = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(nx, d=d))
         return qy, qx
-
-    @staticmethod
-    def _q_perp_axis_from_detector_axes(qx: np.ndarray, qy: np.ndarray, n_points: int) -> np.ndarray:
-        q = np.sqrt(qy[:, None] ** 2 + qx[None, :] ** 2)
-        return np.linspace(0.0, float(np.nanmax(q)), int(n_points), dtype=np.float64)
 
     @staticmethod
     def _detector_corrected_q_batch(q_perp_axis: np.ndarray, energies: np.ndarray) -> np.ndarray:
@@ -1128,6 +1132,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             projections,
             center=reduction_plan.center,
             radius=reduction_plan.radius,
+            radial_step_pixels=reduction_plan.radial_step_pixels,
             xp=cp,
         )
         if reduction_plan.device_q_bounds is not None:
@@ -1338,7 +1343,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return out
 
     @staticmethod
-    def _warp_polar_batched_xp(values, *, center, radius, xp):
+    def _warp_polar_batched_xp(values, *, center, radius, radial_step_pixels, xp):
         values = xp.asarray(values)
         n_images, n_rows, n_cols = values.shape
         n_theta = 360
@@ -1347,12 +1352,12 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             raise ValueError(f"Integrated result computed a non-positive polar radius {radius!r}.")
 
         center_row, center_col = center
+        step_row, step_col = radial_step_pixels
         theta = xp.deg2rad(xp.arange(n_theta, dtype=xp.float64))
-        radial = xp.arange(n_radius, dtype=xp.float64) * (float(radius) / n_radius)
-        radial_grid, theta_grid = xp.meshgrid(radial, theta)
+        radial = xp.arange(n_radius, dtype=xp.float64)
 
-        row_coords = radial_grid * xp.sin(theta_grid) + center_row
-        col_coords = radial_grid * xp.cos(theta_grid) + center_col
+        row_coords = (radial * step_row)[None, :] * xp.sin(theta)[:, None] + center_row
+        col_coords = (radial * step_col)[None, :] * xp.cos(theta)[:, None] + center_col
 
         row0 = xp.floor(row_coords).astype(xp.int64)
         col0 = xp.floor(col_coords).astype(xp.int64)

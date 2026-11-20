@@ -12,6 +12,7 @@ from tests.validation.lib.core_shell import (
     EXPERIMENTAL_REFERENCE_CITATION,
     EXPERIMENTAL_REFERENCE_LABEL,
     EXPERIMENTAL_THRESHOLDS,
+    FFT_BINS_SIM_REFERENCE_PATH,
     SIM_REFERENCE_LABEL,
     SIM_REFERENCE_PATH,
     SIM_THRESHOLDS,
@@ -125,17 +126,16 @@ def test_core_shell_experimental_reference_pybind(nrss_path: ComputationPath):
 @pytest.mark.toolchain_validation
 def test_core_shell_sim_regression_pybind(nrss_path: ComputationPath):
     """
-    Compare the maintained historical pybind+WPIntegrator CoreShell A-wedge to
-    the local sim-derived regression golden stored alongside the experimental
-    reference.
+    Compare the WPIntegrator CoreShell A-wedge to the simulation reference for
+    the detector grid used by the selected backend.
     """
     if not has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for CoreShell sim-regression validation.")
-    if not SIM_REFERENCE_PATH.exists():
-        pytest.skip(f"CoreShell sim reference not found: {SIM_REFERENCE_PATH}")
+    reference_path = FFT_BINS_SIM_REFERENCE_PATH if nrss_path.category == "cupy" else SIM_REFERENCE_PATH
+    assert reference_path.is_file(), f"CoreShell simulation reference missing at {reference_path}"
 
     awedge = _baseline_awedge(nrss_path.id)
-    reference = load_sim_reference_awedge()
+    reference = load_sim_reference_awedge(reference_path)
     comparison = awedge_comparison_slices(awedge=awedge, reference=reference)
     metrics = compute_awedge_metrics(comparison)
     passed, failures = metrics_within_thresholds(metrics, SIM_THRESHOLDS)
@@ -146,7 +146,9 @@ def test_core_shell_sim_regression_pybind(nrss_path: ComputationPath):
             metrics=metrics,
             out_path=PLOT_DIR / f"{nrss_path.id}__core_shell_baseline_pytest_vs_sim_reference.png",
             scenario=BASELINE_SCENARIO,
-            reference_label=SIM_REFERENCE_LABEL,
+            reference_label=(
+                "FFT-bin CuPy simulation reference" if nrss_path.category == "cupy" else SIM_REFERENCE_LABEL
+            ),
             reference_citation=(
                 "Sim-derived regression golden generated from the maintained baseline "
                 "CoreShell scenario. This artifact guards implementation stability, "
