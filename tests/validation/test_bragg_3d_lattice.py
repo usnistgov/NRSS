@@ -123,22 +123,22 @@ def _path_runtime_kwargs(nrss_path: ComputationPath) -> dict[str, object]:
     }
 
 
-def _pyhyper_iq(scattering) -> tuple[np.ndarray, np.ndarray, dict[str, object]]:
+def _pyhyper_iq(scattering, case: Bragg3DCase) -> tuple[np.ndarray, np.ndarray, dict[str, object]]:
     from PyHyperScattering.integrate import NRSSIntegrator
 
     integrator = NRSSIntegrator(use_chunked_processing=False, force_np_backend=True)
     remeshed = integrator.integrateImageStack(
         scattering,
-        phys_size_nm=PHYS_SIZE_NM,
-        shape_zyx=SHAPE,
-        energy_ev=ENERGY_EV,
+        phys_size_nm=case.phys_size_nm,
+        shape_zyx=case.shape,
+        energy_ev=case.energy_eV,
     )
     if "chi" not in remeshed.dims:
         raise AssertionError("PyHyperScattering output missing chi dimension.")
     qdim = next((dim for dim in remeshed.dims if dim == "q" or dim.startswith("q")), None)
     if qdim is None:
         raise AssertionError("PyHyperScattering output missing q dimension.")
-    iq = remeshed.sel(energy=float(ENERGY_EV)).mean("chi")
+    iq = remeshed.sel(energy=float(case.energy_eV)).mean("chi")
     return (
         np.asarray(iq.coords[qdim].values, dtype=np.float64),
         np.asarray(iq.values, dtype=np.float64),
@@ -566,7 +566,7 @@ def _evaluate_case(case: Bragg3DCase, nrss_path: ComputationPath) -> dict[str, o
     )
 
     t3 = perf_counter()
-    radial_q, radial_iq, radial_attrs = _pyhyper_iq(scattering)
+    radial_q, radial_iq, radial_attrs = _pyhyper_iq(scattering, case)
     t4 = perf_counter()
     shell_qs = radial_shells_from_spots(
         predicted_spots,
@@ -723,3 +723,23 @@ def test_bragg_3d_lattice_pybind(case_id: str, nrss_path: ComputationPath):
 
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
     _run_case_subprocess(case_id, nrss_path)
+
+
+@pytest.mark.path_subset("cupy_tensor_coeff", "cupy_direct_polarization")
+@pytest.mark.gpu
+@pytest.mark.physics_validation
+def test_bragg_off_axis_registration(nrss_path: ComputationPath):
+    """Check both signed grating orders at an exact axial bin and at a half step."""
+    from tests.validation.lib.ewald_registration import grating_measurements, plot_grating
+
+    measured = grating_measurements(nrss_path)
+    if WRITE_VALIDATION_PLOTS:
+        plot_grating(measured, nrss_path.id, PLOT_DIR)
+    assert {(m["order"], m["depth"]) for m in measured} == {
+        (-64, 1.), (-64, 1.5), (64, 1.), (64, 1.5),
+    }
+    for m in measured:
+        assert m["qx"] == 0.
+        assert m["qy"] == pytest.approx(m["expected_qy"], abs=1.e-8)
+        assert m["bright"] == pytest.approx(m["expected"], rel=1.e-4), m
+        assert abs(m["dark"]) < 2.e-6, m
