@@ -7,6 +7,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from uuid import UUID
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -18,6 +19,33 @@ def _sample_gpu_used_mib(cp, device_index: int) -> float:
     cp.cuda.Device(device_index).use()
     free_b, total_b = cp.cuda.runtime.memGetInfo()
     return float(total_b - free_b) / (1024.0**2)
+
+
+def _process_sampler(cp, device_index):
+    """Use NVML process accounting when available alongside the device probe."""
+    try:
+        import pynvml
+    except ImportError:
+        return None
+    try:
+        pynvml.nvmlInit()
+        uuid = UUID(bytes=cp.cuda.runtime.getDeviceProperties(device_index)["uuid"])
+        handle = pynvml.nvmlDeviceGetHandleByUUID(f"GPU-{uuid}")
+        pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+    except (pynvml.NVMLError, KeyError):
+        return None
+
+    def sample():
+        try:
+            return {
+                str(process.pid): process.usedGpuMemory / (1024.0**2)
+                for process in pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+                if process.usedGpuMemory is not None
+            }
+        except pynvml.NVMLError:
+            return {}
+
+    return sample
 
 
 def _stabilize_observer(cp, args: argparse.Namespace) -> tuple[float, list[float], int]:
@@ -76,10 +104,15 @@ def _run_observer(args: argparse.Namespace) -> int:
 
         samples: list[dict[str, float]] = []
         peak_used_mib = baseline_used_mib
+        sample_processes = _process_sampler(cp, args.device_index)
+        process_peaks = {}
         while not stop_path.exists():
             sample_time = time.monotonic()
             used_mib = _sample_gpu_used_mib(cp, args.device_index)
             peak_used_mib = max(peak_used_mib, used_mib)
+            if sample_processes is not None:
+                for pid, used in sample_processes().items():
+                    process_peaks[pid] = max(process_peaks.get(pid, 0.0), used)
             samples.append(
                 {
                     "t_monotonic_s": float(sample_time),
@@ -97,6 +130,7 @@ def _run_observer(args: argparse.Namespace) -> int:
             "baseline_gpu_used_mib": float(baseline_used_mib),
             "peak_gpu_used_mib": float(peak_used_mib),
             "peak_gpu_delta_mib": float(max(0.0, peak_used_mib - baseline_used_mib)),
+            "peak_gpu_process_mib": process_peaks,
             "sample_count": int(len(samples)),
             "warmup_sample_count": int(warmup_sample_count),
             "stable_window_mib": stable_window_mib,

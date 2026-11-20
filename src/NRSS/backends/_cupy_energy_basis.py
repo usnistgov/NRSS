@@ -148,6 +148,9 @@ class EnergyBasis:
     values: Any
     coefficients: Any
     components: tuple[int, ...]
+    shape_override: tuple[int, int, int] | None = None
+    virtual_method: str | None = None
+    virtual_residues: int = 0
 
     @property
     def nbytes(self):
@@ -231,12 +234,28 @@ def _windowed_basis_kernels(cp):
     return _WINDOWED_BASIS_KERNELS
 
 
-def build_energy_basis(runtime, morphology, cp, materials, energies, window, mode, execution):
-    detector = runtime._detector_geometry(morphology, cp)
-    indices = _detector_endpoint_union(runtime, morphology, cp, energies, detector)
+def build_energy_basis(
+    runtime, morphology, cp, materials, energies, window, mode, execution, *, shape_override=None, recorder=None,
+):
+    detector = runtime._detector_geometry(morphology, cp, shape_override=shape_override)
     shape = tuple(morphology.NumZYX)
     real_transform = mode != "compact_c2c"
-    native, reflect = _native_indices(runtime, cp, shape, indices, real_transform)
+    virtual = None
+    if shape_override is None:
+        indices = _detector_endpoint_union(runtime, morphology, cp, energies, detector)
+        native, reflect = _native_indices(runtime, cp, shape, indices, real_transform)
+    else:
+        from ._cupy_virtual_z import VirtualZEvaluator, dc_indices, sparse_endpoint_union
+
+        with recorder.range("zpad_plan"):
+            indices = sparse_endpoint_union(runtime, morphology, cp, energies, detector, shape_override)
+            stencil = cp.asarray(dc_indices(shape_override))
+            indices = cp.union1d(indices, stencil)
+            native, reflect = _native_indices(runtime, cp, shape_override, indices, real_transform)
+            virtual = VirtualZEvaluator(
+                cp, shape[0], shape_override, native, reflect, cp.searchsorted(indices, stencil),
+                morphology.backend_options.get("virtual_z_method", "sum"),
+            )
     angle_family = runtime._angle_family_plan(morphology)
     direct = mode == "direct_r2c"
     if direct:
@@ -270,6 +289,9 @@ def build_energy_basis(runtime, morphology, cp, materials, energies, window, mod
     def capture(row):
         if window is not None and not fused_window:
             cp.multiply(buffer, window, out=buffer)
+        if virtual is not None:
+            virtual.capture(cp, buffer, values[row], recorder)
+            return
         transformed = _transform_basis(runtime, cp, buffer, plan, shape, execution)
         samples = transformed.ravel()[native]
         if reflect is not None:
@@ -319,7 +341,10 @@ def build_energy_basis(runtime, morphology, cp, materials, energies, window, mod
             capture(row)
             row += 1
         del phi, axes
-    return EnergyBasis(indices, values, cp.asarray(coefficients), components)
+    return EnergyBasis(
+        indices, values, cp.asarray(coefficients), components, shape_override,
+        virtual.method if virtual is not None else None, len(virtual.residues) if virtual is not None else 0,
+    )
 
 
 def mix_endpoint_tensor(cp, basis, energy_index, endpoints):
@@ -329,9 +354,10 @@ def mix_endpoint_tensor(cp, basis, energy_index, endpoints):
 
 
 def project_energy(runtime, morphology, cp, basis, energy_index, energy, angle_family):
-    detector = runtime._detector_geometry(morphology, cp)
+    shape_override = basis.shape_override
+    detector = runtime._detector_geometry(morphology, cp, shape_override=shape_override)
     try:
-        projection = runtime._detector_projection_geometry(morphology, energy, cp, detector)
+        projection = runtime._detector_projection_geometry(morphology, energy, cp, detector, shape_override=shape_override)
         columns, z0, z1 = _detector_columns(cp, projection)
         nx = detector.x_count
         panel_shape = (detector.y_count, nx)
@@ -374,7 +400,7 @@ def project_energy(runtime, morphology, cp, basis, energy_index, energy, angle_f
             return panels[0], None, None
         return panels[0], panels[1], panels[2] if angle_family.needs_proj_xy else None
     finally:
-        runtime._discard_detector_projection_geometry(morphology, energy)
+        runtime._discard_detector_projection_geometry(morphology, energy, shape_override=shape_override)
 
 
 def project_energy_fused(runtime, morphology, cp, basis, energy_index, energy, angles):
@@ -384,9 +410,10 @@ def project_energy_fused(runtime, morphology, cp, basis, energy_index, energy, a
         _COMPACT_TENSOR_PROJECTION_KERNEL = cp.RawKernel(
             _COMPACT_TENSOR_PROJECTION_SOURCE, "compact_tensor_projection",
         )
-    detector = runtime._detector_geometry(morphology, cp)
+    shape_override = basis.shape_override
+    detector = runtime._detector_geometry(morphology, cp, shape_override=shape_override)
     try:
-        geometry = runtime._detector_projection_geometry(morphology, energy, cp, detector)
+        geometry = runtime._detector_projection_geometry(morphology, energy, cp, detector, shape_override=shape_override)
         panel_shape = (detector.y_count, detector.x_count)
         plane_size = math.prod(panel_shape)
         channels = int(angles.needs_proj_x) + int(angles.needs_proj_y) + int(angles.needs_proj_xy)
@@ -414,4 +441,4 @@ def project_energy_fused(runtime, morphology, cp, basis, energy_index, energy, a
             return panels[0], None, None
         return panels[0], panels[1], panels[2] if angles.needs_proj_xy else None
     finally:
-        runtime._discard_detector_projection_geometry(morphology, energy)
+        runtime._discard_detector_projection_geometry(morphology, energy, shape_override=shape_override)

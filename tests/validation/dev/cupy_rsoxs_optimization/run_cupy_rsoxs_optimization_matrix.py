@@ -169,6 +169,7 @@ class BenchmarkCase:
     transform_z: int | None = None
     accuracy: str | None = None
     output_path: str | None = None
+    explicit_pad_z: int | None = None
 
 
 @dataclass(frozen=True)
@@ -962,6 +963,23 @@ def _prepare_core_shell_case_inputs(case: BenchmarkCase) -> dict[str, Any]:
             isotropic_representation=case.isotropic_representation,
         )
         phys_size = float(size_spec.phys_size_nm)
+    occupied_z = next(iter(materials.values())).Vfrac.shape[0]
+    if case.explicit_pad_z is not None:
+        if (case.backend_options or {}).get("virtual_z_pad_to") is not None:
+            raise ValueError("Choose either explicit or virtual axial padding for a worker.")
+        # The worker script belongs to the harness checkout even when NRSS is
+        # imported from a pinned baseline that predates the fixture helper.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+        try:
+            from virtual_z_padding import explicit_vacuum_materials
+        finally:
+            sys.path.pop(0)
+
+        if case.field_namespace == "cupy":
+            import cupy as xp
+        else:
+            xp = np
+        materials = explicit_vacuum_materials(materials, case.explicit_pad_z, xp=xp)
     config = _default_morphology_config(case.energies_ev, case.eangle_rotation)
     config.update(WindowingType=case.windowing_type, RotMask=case.rot_mask)
     return {
@@ -970,6 +988,7 @@ def _prepare_core_shell_case_inputs(case: BenchmarkCase) -> dict[str, Any]:
         "phys_size": phys_size,
         "config": config,
         "backend_options": case.backend_options,
+        "occupied_z": occupied_z,
     }
 
 
@@ -1078,26 +1097,34 @@ def _detector_demand(morphology, energies, transform_z):
 
     runtime = morphology._backend_runtime
     override = runtime._segment_c_shape_override(morphology)
+    if hasattr(runtime, "_virtual_z_shape"):
+        override = runtime._virtual_z_shape(morphology) or override
     if transform_z is not None:
         override = (transform_z, *morphology.NumZYX[1:])
     transform_shape = runtime._shape_tuple(morphology, shape_override=override)
     geometry = runtime._detector_geometry(morphology, cp, shape_override=override)
-    endpoints = np.zeros(transform_shape, dtype=bool)
-    for energy in energies:
+    plane_size = int(np.prod(transform_shape[1:]))
+    endpoints = np.empty(0, dtype=np.int64)
+    valid_columns = np.zeros(plane_size, dtype=bool)
+    for energy in dict.fromkeys(energies):
         indices = runtime._detector_projection_geometry(morphology, energy, cp, geometry, override)
-        rows, cols = np.nonzero(cp.asnumpy(indices.valid))
+        columns = np.flatnonzero(cp.asnumpy(indices.valid).ravel())
+        valid_columns[columns] = True
         if indices.safe_z0 is None:
-            endpoints[0, rows, cols] = True
+            requested = columns
         else:
-            for z in (indices.safe_z0, indices.safe_z1):
-                endpoints[cp.asnumpy(z[indices.valid]), rows, cols] = True
+            requested = np.concatenate([
+                cp.asnumpy(z[indices.valid]).astype(np.int64) * plane_size + columns
+                for z in (indices.safe_z0, indices.safe_z1)
+            ])
+        endpoints = np.union1d(endpoints, requested)
         runtime._discard_detector_projection_geometry(morphology, energy, shape_override=override)
     return {
         "material_shape": list(morphology.NumZYX),
         "transform_shape": list(transform_shape),
-        "valid_columns": int(np.count_nonzero(endpoints.any(axis=0))),
-        "distinct_endpoints": int(np.count_nonzero(endpoints)),
-        "global_z_planes": np.flatnonzero(endpoints.any(axis=(1, 2))).tolist(),
+        "valid_columns": int(np.count_nonzero(valid_columns)),
+        "distinct_endpoints": int(endpoints.size),
+        "global_z_planes": np.unique(endpoints // plane_size).tolist(),
     }
 
 
@@ -1155,6 +1182,20 @@ def _run_case_once(
         finished = time.perf_counter() if collect_timing else None
 
         run_result: dict[str, Any] = {"resolved_backend_options": dict(morphology.backend_options)}
+        padding = getattr(backend_result, "padding_attrs", None) or getattr(backend_result, "attrs", {})
+        occupied_z = prepared_inputs["occupied_z"]
+        transform_z = padding.get("transform_z", int(morphology.NumZYX[0]))
+        run_result["z_padding"] = {
+            "occupied_z": occupied_z,
+            "transform_z": transform_z,
+            "offset": (transform_z - occupied_z) // 2,
+            "route": padding.get("virtual_z_method", "explicit" if case.explicit_pad_z else "native"),
+            "detector_grid_convention": padding.get(
+                "detector_grid_convention",
+                getattr(sys.modules[type(backend_result).__module__], "_DETECTOR_GRID_CONVENTION", None),
+            ),
+            "windowing_type": case.windowing_type,
+        }
         if collect_timing:
             backend_timings = morphology.backend_timings
             if backend_timings:
@@ -1222,6 +1263,7 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         "force_stderr_tty": bool(case.force_stderr_tty),
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
         "gpu_bootstrap": _EARLY_GPU_BOOTSTRAP,
+        "worker_pid": os.getpid(),
         "status": "error",
     }
 
@@ -1251,14 +1293,15 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
         for _ in range(case.worker_warmup_runs):
             warmup_started = time.perf_counter()
             warmup_result = _run_case_once(
-                case=case,
+                case=replace(case, timing_segments=(), geometry=False),
                 prepared_inputs=prepared_inputs,
-                collect_timing=False,
+                collect_timing=True,
             )
             warmup_seconds_total += time.perf_counter() - warmup_started
             warmup_runs_completed += 1
             if "resolved_backend_options" not in result:
                 result["resolved_backend_options"] = warmup_result["resolved_backend_options"]
+                result["first_call_seconds"] = warmup_result["primary_seconds"]
             del warmup_result
 
         result["worker_warmup_runs_completed"] = warmup_runs_completed
@@ -1271,6 +1314,10 @@ def _worker_main(case_path: Path, result_path: Path) -> int:
             collect_timing=case.accuracy is None,
         )
         result.update(timed_result)
+        if sys.platform.startswith("linux"):
+            import resource
+
+            result["peak_host_rss_mib"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
         result["status"] = "ok"
 
     except BaseException as exc:  # noqa: BLE001 - worker must serialize failures

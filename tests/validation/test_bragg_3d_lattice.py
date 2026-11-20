@@ -754,6 +754,22 @@ def test_bragg_explicit_vacuum_padding_reference(explicit_z, nrss_path: Computat
     from tests.validation.lib.ewald_registration import grating_measurements
 
     measured = grating_measurements(nrss_path, explicit_z=explicit_z)
+    _assert_padded_grating(measured)
+
+
+@pytest.mark.path_subset("cupy_tensor_coeff")
+@pytest.mark.gpu
+@pytest.mark.physics_validation
+@pytest.mark.parametrize("target_z", (256, 1024))
+@pytest.mark.parametrize("method", ("sum", "residues"))
+def test_bragg_virtual_vacuum_padding_reference(method, target_z, nrss_path: ComputationPath):
+    """Check virtual padding with the signed finite-film grating sentinel."""
+    from tests.validation.lib.ewald_registration import grating_measurements
+
+    _assert_padded_grating(grating_measurements(nrss_path, virtual_z=target_z, method=method))
+
+
+def _assert_padded_grating(measured):
     assert {(m["order"], m["depth"]) for m in measured} == {
         (-64, 1.), (-64, 1.5), (64, 1.), (64, 1.5),
     }

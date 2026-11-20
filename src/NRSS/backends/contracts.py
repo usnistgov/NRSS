@@ -107,6 +107,8 @@ _BACKEND_ARRAY_CONTRACTS = {
         "supported_backend_options": (
             "execution_path",
             "energy_basis_mode",
+            "virtual_z_pad_to",
+            "virtual_z_method",
             "mixed_precision_mode",
             "z_collapse_mode",
             "kernel_preload_stage",
@@ -417,6 +419,16 @@ def normalize_backend_options(
                 "energy_basis_mode must be None, 'auto', 'compact_c2c', 'compact_r2c', or 'direct_r2c'."
             )
         normalized_options["energy_basis_mode"] = mode
+    if "virtual_z_pad_to" in options:
+        depth = options["virtual_z_pad_to"]
+        if isinstance(depth, (bool, np.bool_)) or not isinstance(depth, (int, np.integer)) or depth < 1:
+            raise BackendOptionError("virtual_z_pad_to must be a positive integer.")
+        normalized_options["virtual_z_pad_to"] = int(depth)
+    if "virtual_z_method" in options:
+        method = options["virtual_z_method"]
+        if "virtual_z_pad_to" not in options or method not in ("sum", "residues"):
+            raise BackendOptionError("virtual_z_method requires virtual_z_pad_to and must be 'sum' or 'residues'.")
+        normalized_options["virtual_z_method"] = method
     if "mixed_precision_mode" in spec["supported_backend_options"]:
         mixed_precision_mode = normalize_mixed_precision_mode_name(
             options.get("mixed_precision_mode", spec["default_mixed_precision_mode"])

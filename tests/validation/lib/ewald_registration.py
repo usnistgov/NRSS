@@ -10,7 +10,7 @@ DELTA = 1 / 32
 CHI = (1 - DELTA) ** 2 - 1
 
 
-def detector_run(fraction, energies, nrss_path, *, explicit_z=None):
+def detector_run(fraction, energies, nrss_path, *, explicit_z=None, virtual_z=None, method="sum"):
     cp = pytest.importorskip("cupy")
     fraction = cp.ascontiguousarray(cp.asarray(fraction, dtype=cp.float32))
     occupied_z = fraction.shape[0]
@@ -28,8 +28,11 @@ def detector_run(fraction, energies, nrss_path, *, explicit_z=None):
     }
     config = dict(Morphology.config_default, Energies=energies, EAngleRotation=[0.,0.,0.],
                   RotMask=0, WindowingType=0)
+    options = dict(nrss_path.backend_options)
+    if virtual_z is not None:
+        options.update(virtual_z_pad_to=virtual_z, virtual_z_method=method)
     morph = Morphology(2, materials=materials, PhysSize=1., config=config,
-                       backend=nrss_path.backend, backend_options=dict(nrss_path.backend_options),
+                       backend=nrss_path.backend, backend_options=options,
                        resident_mode="device", input_policy="strict", ownership_policy="borrow")
     try:
         return morph.run(stdout=False, stderr=False, return_xarray=True).copy(deep=True)
@@ -43,8 +46,9 @@ def intensity(energy, amplitude):
     return k**4 * (CHI * amplitude / (4*np.pi))**2
 
 
-def grating_measurements(nrss_path, *, explicit_z=None):
+def grating_measurements(nrss_path, *, explicit_z=None, virtual_z=None, method="sum"):
     nz, ny, nx = 128, 1024, 9
+    target_z = virtual_z or explicit_z or nz
     z,y = np.ogrid[:nz,:ny]
     measurements = []
     for signed_order in (-64,64):
@@ -54,14 +58,18 @@ def grating_measurements(nrss_path, *, explicit_z=None):
         depths = np.array([1., 1.5])
         qz = -depths*2*np.pi/nz
         energies = (-(qy**2+qz**2)/(2*qz) * HC_EV_NM/(2*np.pi)).tolist()
-        panel = detector_run(field, energies, nrss_path, explicit_z=explicit_z)
+        panel = detector_run(field, energies, nrss_path, explicit_z=explicit_z, virtual_z=virtual_z, method=method)
         expected_qx = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(nx))
         expected_qy = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(ny))
         np.testing.assert_array_equal(panel.energy.values, energies)
         np.testing.assert_allclose(panel.qx.values, expected_qx, rtol=0, atol=1e-8)
         np.testing.assert_allclose(panel.qy.values, expected_qy, rtol=0, atol=1e-8)
         assert panel.attrs["detector_grid_convention"] == "fft_bins_v1"
-        assert panel.attrs["z_dim"] == (nz if explicit_z is None else explicit_z)
+        assert panel.attrs["z_dim"] == target_z
+        if virtual_z is not None and target_z > nz:
+            assert panel.attrs["occupied_z"] == nz
+            assert panel.attrs["z_offset"] == (target_z - nz) // 2
+            assert panel.attrs["virtual_z_method"] == method
         iy,ix = ny//2+signed_order, nx//2
         opposite = ny//2-signed_order
         for depth, energy, expected in zip(depths,energies,(1.,.5)):
@@ -76,10 +84,10 @@ def grating_measurements(nrss_path, *, explicit_z=None):
             valid[:, -1] = False
             np.testing.assert_array_equal(np.isfinite(frame.values), valid)
             expected_dark = 0.
-            if explicit_z is not None and explicit_z > nz:
-                target_bin = depth * explicit_z / nz
+            if target_z > nz:
+                target_bin = depth * target_z / nz
                 lower = np.floor(target_bin)
-                sampled_depths = np.array([lower, lower + 1]) * nz / explicit_z
+                sampled_depths = np.array([lower, lower + 1]) * nz / target_z
                 detuning = sampled_depths - np.array([[1.], [-1.]])
                 weights = np.array([1 - (target_bin - lower), target_bin - lower])
                 expected, expected_dark = ((np.sinc(detuning) / np.sinc(detuning / nz)) ** 2) @ weights

@@ -328,6 +328,12 @@ class Morphology:
               Expert-only effective-2D approximation. The public morphology
               shape is not mutated. This mode is currently incompatible with
               ``mixed_precision_mode``.
+            - ``virtual_z_pad_to``: opt-in centered vacuum extension, given as
+              the total axial transform depth in planes. Requires full-depth
+              float32 compact tensor when the depth exceeds the material depth.
+            - ``virtual_z_method``: ``"sum"`` (default) or ``"residues"``.
+              The residue FFT requires an integer ratio of transform depth to
+              occupied depth.
             - ``kernel_preload_stage``: ``"a1"`` by default on the
               ``"direct_polarization"`` path, otherwise ``"off"`` unless set
               explicitly. Supported values are ``"off"``, ``"a1"``, and

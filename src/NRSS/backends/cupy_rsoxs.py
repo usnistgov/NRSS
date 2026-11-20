@@ -35,6 +35,12 @@ _CUPY_SEGMENT_MEASUREMENTS = {
     "energy": "cuda_event",
     "tile": "cuda_event",
     "basis_build": "cuda_event",
+    "zpad_plan": "cuda_event",
+    "zpad_xy": "cuda_event",
+    "zpad_layout": "cuda_event",
+    "zpad_phase": "cuda_event",
+    "zpad_axial": "cuda_event",
+    "zpad_gather": "cuda_event",
     "reduction": "cuda_event",
     "d2h": "cuda_event",
     "synchronization": "wall_clock",
@@ -184,6 +190,12 @@ class _ExecutionReport:
             "union_endpoints": basis.indices.size,
             "bytes": basis.nbytes,
         }
+        if basis.shape_override is not None:
+            self.basis_cache.update(
+                transform_shape=basis.shape_override,
+                axial_evaluator=basis.virtual_method,
+                residues=basis.virtual_residues,
+            )
 
     def as_dict(self):
         lengths = [len(tile["energies"]) for tile in self.tiles]
@@ -369,6 +381,7 @@ class CupyScatteringResult:
     energies: tuple[float, ...]
     phys_size: float
     num_zyx: tuple[int, int, int]
+    padding_attrs: dict[str, Any] | None = None
 
     def to_backend_array(self):
         return self.data
@@ -387,6 +400,7 @@ class CupyScatteringResult:
                 "phys_size_nm": float(self.phys_size),
                 "z_dim": int(self.num_zyx[0]),
                 "detector_grid_convention": _DETECTOR_GRID_CONVENTION,
+                **(self.padding_attrs or {}),
             },
         )
 
@@ -556,6 +570,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         window = None
         energy_basis = None
         basis_mode, basis_fallback = self._energy_basis_selection(morphology)
+        virtual_shape = self._virtual_z_shape(morphology)
+        padding_attrs = self._virtual_z_metadata(morphology, virtual_shape)
+        virtual_options = {"shape_override": virtual_shape, "recorder": recorder} if padding_attrs else {}
         result_data = None
         try:
             if basis_mode is None and self._kernel_preload_stage(morphology) == "a2":
@@ -568,8 +585,10 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 lambda: self._window_tensor(
                     morphology,
                     cp,
-                    shape_override=self._segment_c_shape_override(morphology),
+                    shape_override=virtual_shape or self._segment_c_shape_override(morphology),
                     separable=basis_mode == "compact_r2c",
+                    z_slice=slice(padding_attrs["z_offset"], padding_attrs["z_offset"] + morphology.NumZYX[0])
+                    if virtual_shape is not None else None,
                 ),
             )
             if basis_mode is not None:
@@ -580,9 +599,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                         "basis_build",
                         lambda: build_energy_basis(
                             self, morphology, cp, runtime_materials, energies, window, basis_mode, recorder.execution,
+                            **virtual_options,
                         ),
                     )
-                except cp.cuda.memory.OutOfMemoryError:
+                except cp.cuda.memory.OutOfMemoryError as exc:
+                    if virtual_shape is not None:
+                        raise RuntimeError(
+                            f"Virtual z padding to {virtual_shape[0]} planes exceeded available GPU memory."
+                        ) from exc
                     if morphology._energy_basis_mode != "auto":
                         raise
                     basis_fallback = "energy basis allocation exceeded available GPU memory"
@@ -642,6 +666,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                                 energies=energies,
                                 cp=cp,
                                 result_layout=result_layout,
+                                shape_override=virtual_shape,
+                                padding_attrs=padding_attrs,
                             )
                     if result_data is None:
                         if self._uses_reduced_result_layout(result_layout):
@@ -824,6 +850,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 result_data=result_data,
                 energies=energies,
                 reduction_plan=reduction_plan,
+                shape_override=virtual_shape,
+                padding_attrs=padding_attrs,
             ),
         )
         segment_seconds, segment_measurements, measurement = recorder.finalize()
@@ -916,6 +944,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         energies: tuple[float, ...],
         cp,
         result_layout: str,
+        shape_override=None,
+        padding_attrs=None,
     ) -> _ReducedResultPlan:
         qy, qx = self._detector_q_axes(morphology, projection_shape)
         center = (
@@ -931,7 +961,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
         chi = np.linspace(-179.5, 179.5, 360, dtype=np.float64)
         q_perp = self._q_perp_axis_from_detector_axes(qx, qy, q_count)
-        z_dim = int(morphology.NumZYX[0])
+        shape_zyx = self._shape_tuple(morphology, shape_override)
+        z_dim = shape_zyx[0]
         nrss_semantic_mode = "2d_reciprocal_plane" if z_dim == 1 else "3d_detector_aware"
         attrs: dict[str, Any] = {
             "radial_semantics": "q_perp" if z_dim == 1 else "q_abs_detector_corrected",
@@ -941,8 +972,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             "nrss_semantic_mode": nrss_semantic_mode,
             "phys_size_nm": float(morphology.PhysSize),
             "z_dim": z_dim,
-            "shape_zyx": tuple(int(v) for v in morphology.NumZYX),
+            "shape_zyx": shape_zyx,
             "result_layout": result_layout,
+            **(padding_attrs or {}),
         }
         if energies:
             attrs["energy_ev"] = float(energies[0])
@@ -1515,13 +1547,16 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             if progress is not None:
                 progress.close()
 
-    def _assemble_and_retain_result(self, morphology, result_data, energies, reduction_plan=None):
+    def _assemble_and_retain_result(
+        self, morphology, result_data, energies, reduction_plan=None, shape_override=None, padding_attrs=None,
+    ):
         if reduction_plan is None:
             result = CupyScatteringResult(
                 data=result_data,
                 energies=energies,
                 phys_size=float(morphology.PhysSize),
-                num_zyx=tuple(int(v) for v in morphology.NumZYX),
+                num_zyx=self._shape_tuple(morphology, shape_override),
+                padding_attrs=padding_attrs,
             )
         elif reduction_plan.result_layout == "integrated":
             result = CupyIntegratedResult(
@@ -1838,6 +1873,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             raise ValueError("Morphology.PhysSize must be set before running cupy-rsoxs.")
         if morphology.NumZYX is None:
             raise ValueError("Morphology.NumZYX must be set before running cupy-rsoxs.")
+        self._virtual_z_shape(morphology)
 
         start_angle, increment_angle, end_angle = map(float, morphology.EAngleRotation)
         if increment_angle == 0.0 and start_angle != end_angle:
@@ -1850,6 +1886,34 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             return tuple(int(v) for v in shape_override)
         return tuple(int(v) for v in morphology.NumZYX)
 
+    def _virtual_z_shape(self, morphology):
+        target = morphology.backend_options.get("virtual_z_pad_to")
+        if target is None:
+            return None
+        occupied, ny, nx = self._shape_tuple(morphology)
+        if target < occupied:
+            raise ValueError("virtual_z_pad_to must be at least the occupied morphology depth.")
+        if target == occupied:
+            return None
+        if self._energy_basis_selection(morphology)[0] != "compact_r2c" or min(ny, nx) < 2:
+            raise ValueError("Virtual z padding requires full-depth float32 compact tensor and two non-singleton XY axes.")
+        if morphology.backend_options.get("virtual_z_method") == "residues" and target % occupied:
+            raise ValueError("The residues method requires virtual_z_pad_to to be a multiple of the occupied depth.")
+        return (target, ny, nx)
+
+    @staticmethod
+    def _virtual_z_metadata(morphology, shape_override):
+        if shape_override is None:
+            return None
+        occupied = int(morphology.NumZYX[0])
+        target = shape_override[0]
+        return {
+            "occupied_z": occupied,
+            "transform_z": target,
+            "z_offset": (target - occupied) // 2,
+            "virtual_z_method": morphology.backend_options.get("virtual_z_method", "sum"),
+        }
+
     def _z_collapse_mode(self, morphology) -> str | None:
         return morphology.z_collapse_mode
 
@@ -1859,11 +1923,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         _, y, x = self._shape_tuple(morphology)
         return (1, y, x)
 
-    def _window_tensor(self, morphology, cp, shape_override=None, *, separable=False):
+    def _window_tensor(self, morphology, cp, shape_override=None, *, separable=False, z_slice=None):
         if morphology.WindowingType == 0:
             return None
         z, y, x = self._shape_tuple(morphology, shape_override=shape_override)
-        wz = cp.asarray(np.hanning(z), dtype=cp.float32)[:, None, None]
+        z_window = np.hanning(z)
+        if z_slice is not None:
+            z_window = z_window[z_slice]
+        wz = cp.asarray(z_window, dtype=cp.float32)[:, None, None]
         wy = cp.asarray(np.hanning(y), dtype=cp.float32)[None, :, None]
         wx = cp.asarray(np.hanning(x), dtype=cp.float32)[None, None, :]
         zy = wz * wy
@@ -2076,7 +2143,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         from ._cupy_energy_basis import project_energy, project_energy_fused
 
         if recorder.execution is not None:
-            recorder.execution.record_tile(mode, (energy,))
+            route = mode if basis.virtual_method is None else f"virtual_z_{basis.virtual_method}"
+            recorder.execution.record_tile(route, (energy,))
         angles = self._angle_family_plan(morphology)
         if mode == "direct_r2c":
             projection = recorder.measure(

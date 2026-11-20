@@ -128,3 +128,29 @@ the ``Morphology``.
        "execution_path": "tensor_coeff",
        "energy_basis_mode": None,
    }
+
+Virtual z padding for films
+---------------------------
+
+Set ``virtual_z_pad_to`` to the total axial transform depth when constructing
+a CuPy ``Morphology``. For example, the options below center a film in a
+1024-plane vacuum box. Use the film's original material arrays and voxel pitch.
+
+.. code-block:: python
+
+   backend_options = {
+       "execution_path": "tensor_coeff",
+       "virtual_z_pad_to": 1024,
+       "virtual_z_method": "residues",
+   }
+
+The calculation transforms the occupied planes and evaluates the axial bins
+used by the detector. The default evaluator, ``"sum"``, supports any target
+depth at least as large as the occupied depth. The ``"residues"`` evaluator
+requires an integer ratio between the two depths. Setting the target equal to
+the occupied depth runs the native transform.
+
+For an extended depth, use the full-depth float32 compact tensor path. Detector
+and reduced results report ``occupied_z``, ``transform_z``, ``z_offset``, and
+the evaluator in ``virtual_z_method``. With a Hann window, the occupied planes
+use their corresponding weights from the target-depth window.

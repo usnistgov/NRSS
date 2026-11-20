@@ -40,7 +40,18 @@ PATHS = ("tensor_coeff", "direct_polarization", "default")
 STAGES = [
     "A1", "A2", "B", "C", "D", "E", "F", "C+D", "B+C+D", "energy", "tile", "basis_build",
     "reduction", "d2h", "synchronization",
+    "zpad_plan", "zpad_xy", "zpad_layout", "zpad_phase", "zpad_axial", "zpad_gather",
 ]
+
+
+def _parse_z_padding(value):
+    method, separator, depth = value.partition(":")
+    if not separator or method not in ("explicit", "sum", "residues") or not depth.isascii() or not depth.isdecimal():
+        raise argparse.ArgumentTypeError("Use explicit:M, sum:M or residues:M, with positive integer M.")
+    target = int(depth)
+    if target < 1:
+        raise argparse.ArgumentTypeError("The transform depth must be positive.")
+    return method, target
 
 
 def parse_args():
@@ -75,6 +86,8 @@ def parse_args():
     parser.add_argument("--material-z", type=int, help="Change the material depth at fixed XY and voxel size")
     parser.add_argument("--geometry", action="store_true", help="Measure detector demand after a stage run")
     parser.add_argument("--transform-z", type=int, help="Probe detector geometry for a distinct transform depth")
+    parser.add_argument("--baseline-z-padding", type=_parse_z_padding, metavar="METHOD:M")
+    parser.add_argument("--candidate-z-padding", type=_parse_z_padding, metavar="METHOD:M")
     parser.add_argument("--gpu", help="One GPU index or UUID, defaults to inherited selection or 0")
     parser.add_argument("--repeats", type=int, default=3)
     mode = parser.add_mutually_exclusive_group()
@@ -106,13 +119,16 @@ def parse_args():
         parser.error("--transform-z requires --geometry")
     if any(depth is not None and depth < 1 for depth in (args.material_z, args.transform_z)):
         parser.error("material and transform depths must be positive")
-    if args.accuracy and not (args.aa or args.candidate_root or args.candidate_path or args.candidate_options):
+    if args.accuracy and not (args.aa or args.candidate_root or args.candidate_path or args.candidate_options
+                              or args.candidate_z_padding):
         parser.error("accuracy comparison requires two arms")
     if any(not math.isfinite(tol) or tol < 0 for tol in (args.accuracy_rtol, args.accuracy_atol)):
         parser.error("accuracy tolerances must be finite and nonnegative")
     if not math.isfinite(args.memory_poll_interval) or args.memory_poll_interval <= 0:
         parser.error("memory sampling interval must be finite and positive")
-    if not isinstance(args.candidate_options, dict) or (args.aa and (args.candidate_options or args.candidate_path)):
+    if not isinstance(args.candidate_options, dict) or (
+        args.aa and (args.candidate_options or args.candidate_path or args.candidate_z_padding)
+    ):
         parser.error("candidate options must be a JSON object and A/A uses identical paths and options")
     if set(args.candidate_options) & {"execution_path", "result_layout", "result_chunk_size",
                                      "result_residency", "z_collapse_mode", "mixed_precision_mode",
@@ -147,6 +163,14 @@ def case_payload(args, label, candidate):
         options["execution_path"] = path
     if candidate:
         options.update(args.candidate_options)
+    padding = args.candidate_z_padding if candidate and not args.aa else args.baseline_z_padding
+    explicit_pad_z = None
+    if padding is not None:
+        method, target = padding
+        if method == "explicit":
+            explicit_pad_z = target
+        else:
+            options.update(virtual_z_pad_to=target, virtual_z_method=method)
     return dict(label=label, family=args.fixture, backend="cupy-rsoxs", shape_label=args.shape_label or size,
                 energies_ev=args.energies, eangle_rotation=angles,
                 field_namespace="cupy" if args.resident == "device" else "numpy",
@@ -155,7 +179,8 @@ def case_payload(args, label, candidate):
                 backend_options=options, timing_segments=STAGES if args.stages else [],
                 worker_warmup_runs=0 if args.accuracy else 1, run_stdout=False, run_stderr=False,
                 accuracy=args.accuracy, material_z=args.material_z, geometry=args.geometry,
-                transform_z=args.transform_z, windowing_type=args.windowing_type, rot_mask=args.rot_mask)
+                transform_z=args.transform_z, windowing_type=args.windowing_type, rot_mask=args.rot_mask,
+                explicit_pad_z=explicit_pad_z)
 
 
 def write_json(path, value):
@@ -203,7 +228,10 @@ def observe_memory(folder, label, gpu, interval):
             raise RuntimeError(f"GPU memory observer failed ({trace_path})")
         measurement.update(
             free_gpu_mib_at_launch=ready["free_gpu_mib"],
+            baseline_gpu_used_mib=trace["baseline_gpu_used_mib"],
+            peak_gpu_used_mib=trace["peak_gpu_used_mib"],
             peak_gpu_delta_mib=trace["peak_gpu_delta_mib"],
+            process_peaks_mib=trace["peak_gpu_process_mib"],
             sample_interval_s=trace["sample_interval_s"],
             sample_count=trace["sample_count"],
             trace=str(trace_path),
@@ -248,12 +276,18 @@ def run_worker(root, spec, folder, env, args):
             raise RuntimeError(f"{label}: worker resolved a different {option} ({result_file})")
     if result.get("energies_ev") != spec["energies_ev"] or result.get("eangle_rotation") != spec["eangle_rotation"]:
         raise RuntimeError(f"{label}: energy or angle selection changed ({result_file})")
+    target = spec["explicit_pad_z"] or spec["backend_options"].get("virtual_z_pad_to")
+    if target is not None and result.get("z_padding", {}).get("transform_z") != target:
+        raise RuntimeError(f"{label}: expected executed transform depth {target} ({result_file})")
     shape = result.get("panel_shape", [])
     if not shape or shape[0] != len(spec["energies_ev"]):
         raise RuntimeError(f"{label}: returned shape {shape} has the wrong energy count")
     if args.accuracy and (not result.get("arrays") or not Path(spec["output_path"]).is_file()):
         raise RuntimeError(f"{label}: missing accuracy output ({result_file})")
     if measurement is not None:
+        peak = measurement.pop("process_peaks_mib").get(str(result["worker_pid"]))
+        if peak is not None:
+            measurement["peak_gpu_worker_mib"] = peak
         result["memory"] = measurement
         write_json(result_file, result)
     return result
@@ -321,7 +355,7 @@ def main():
     if not gpu.strip() or "," in gpu:
         raise SystemExit("Select one available GPU with --gpu or CUDA_VISIBLE_DEVICES")
     roots = {"A": args.baseline_root.resolve()}
-    if args.aa or args.candidate_root or args.candidate_path or args.candidate_options:
+    if args.aa or args.candidate_root or args.candidate_path or args.candidate_options or args.candidate_z_padding:
         roots["B"] = (args.candidate_root or args.baseline_root).resolve()
     for root in set(roots.values()):
         if not (root / "src" / "NRSS" / "backends" / "cupy_rsoxs.py").is_file():
