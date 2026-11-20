@@ -743,3 +743,22 @@ def test_bragg_off_axis_registration(nrss_path: ComputationPath):
         assert m["qy"] == pytest.approx(m["expected_qy"], abs=1.e-8)
         assert m["bright"] == pytest.approx(m["expected"], rel=1.e-4), m
         assert abs(m["dark"]) < 2.e-6, m
+
+
+@pytest.mark.path_subset("cupy_tensor_coeff", "cupy_direct_polarization")
+@pytest.mark.gpu
+@pytest.mark.physics_validation
+@pytest.mark.parametrize("explicit_z", (256, 1024))
+def test_bragg_explicit_vacuum_padding_reference(explicit_z, nrss_path: ComputationPath):
+    """Check both signed grating columns against the finite-film Fourier sum."""
+    from tests.validation.lib.ewald_registration import grating_measurements
+
+    measured = grating_measurements(nrss_path, explicit_z=explicit_z)
+    assert {(m["order"], m["depth"]) for m in measured} == {
+        (-64, 1.), (-64, 1.5), (64, 1.), (64, 1.5),
+    }
+    for m in measured:
+        assert m["qx"] == 0.
+        assert m["qy"] == pytest.approx(m["expected_qy"], abs=1.e-8)
+        assert m["bright"] == pytest.approx(m["expected"], rel=1.e-4), m
+        assert m["dark"] == pytest.approx(m["expected_dark"], rel=1.e-4, abs=2.e-6), m

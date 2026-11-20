@@ -10,9 +10,17 @@ DELTA = 1 / 32
 CHI = (1 - DELTA) ** 2 - 1
 
 
-def detector_run(fraction, energies, nrss_path):
+def detector_run(fraction, energies, nrss_path, *, explicit_z=None):
     cp = pytest.importorskip("cupy")
     fraction = cp.ascontiguousarray(cp.asarray(fraction, dtype=cp.float32))
+    occupied_z = fraction.shape[0]
+    if explicit_z is not None and explicit_z != occupied_z:
+        if explicit_z < occupied_z:
+            raise ValueError("The explicit vacuum box must contain all occupied planes.")
+        offset = (explicit_z - occupied_z) // 2
+        padded = cp.zeros((explicit_z, *fraction.shape[1:]), dtype=fraction.dtype)
+        padded[offset:offset + occupied_z] = fraction
+        fraction = padded
     materials = {
         i: Material(i, Vfrac=field, S=SFieldMode.ISOTROPIC, energies=energies,
                     opt_constants={e: [delta, 0., delta, 0.] for e in energies})
@@ -35,7 +43,7 @@ def intensity(energy, amplitude):
     return k**4 * (CHI * amplitude / (4*np.pi))**2
 
 
-def grating_measurements(nrss_path):
+def grating_measurements(nrss_path, *, explicit_z=None):
     nz, ny, nx = 128, 1024, 9
     z,y = np.ogrid[:nz,:ny]
     measurements = []
@@ -46,15 +54,38 @@ def grating_measurements(nrss_path):
         depths = np.array([1., 1.5])
         qz = -depths*2*np.pi/nz
         energies = (-(qy**2+qz**2)/(2*qz) * HC_EV_NM/(2*np.pi)).tolist()
-        panel = detector_run(field, energies, nrss_path)
+        panel = detector_run(field, energies, nrss_path, explicit_z=explicit_z)
+        expected_qx = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(nx))
+        expected_qy = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(ny))
+        np.testing.assert_array_equal(panel.energy.values, energies)
+        np.testing.assert_allclose(panel.qx.values, expected_qx, rtol=0, atol=1e-8)
+        np.testing.assert_allclose(panel.qy.values, expected_qy, rtol=0, atol=1e-8)
+        assert panel.attrs["detector_grid_convention"] == "fft_bins_v1"
+        assert panel.attrs["z_dim"] == (nz if explicit_z is None else explicit_z)
         iy,ix = ny//2+signed_order, nx//2
         opposite = ny//2-signed_order
         for depth, energy, expected in zip(depths,energies,(1.,.5)):
             frame = panel.sel(energy=energy).transpose("qy","qx")
             scale = intensity(energy,field.size/4)
+            k = 2 * np.pi * energy / HC_EV_NM
+            # Here k < π at unit voxel pitch, so the forward Ewald support
+            # lies within the negative axial FFT edge at all tested depths.
+            assert k < np.pi
+            valid = expected_qy[:, None] ** 2 + expected_qx[None, :] ** 2 <= k ** 2
+            valid[-1, :] = False
+            valid[:, -1] = False
+            np.testing.assert_array_equal(np.isfinite(frame.values), valid)
+            expected_dark = 0.
+            if explicit_z is not None and explicit_z > nz:
+                target_bin = depth * explicit_z / nz
+                lower = np.floor(target_bin)
+                sampled_depths = np.array([lower, lower + 1]) * nz / explicit_z
+                detuning = sampled_depths - np.array([[1.], [-1.]])
+                weights = np.array([1 - (target_bin - lower), target_bin - lower])
+                expected, expected_dark = ((np.sinc(detuning) / np.sinc(detuning / nz)) ** 2) @ weights
             measurements.append(dict(order=signed_order, depth=depth, energy=energy,
                                      qx=float(frame.qx[ix]), qy=float(frame.qy[iy]),
-                                     expected_qy=qy, expected=expected,
+                                     expected_qy=qy, expected=expected, expected_dark=expected_dark,
                                      bright=float(frame.values[iy,ix]/scale),
                                      dark=float(frame.values[opposite,ix]/scale)))
     return measurements
