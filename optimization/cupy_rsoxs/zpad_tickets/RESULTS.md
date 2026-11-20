@@ -20,6 +20,8 @@ The S04 selected-z prototype is available in the local historical checkout at `/
 
 ## Virtual padding GPU gate
 
+The Hann measurements in this section use the earlier target-box XYZ weights and establish explicit-box compatibility. The ZP04 section records the final XY-only film behavior.
+
 Implementation revision `26ee3423c3947dedb0a4c006fa3b9044dd47b02c` on `perf/virtual-z-pad`. The paired clean parent is `3c4c14d`. The selected sum supports noninteger pad ratios. The residue FFT supports integer ratios. Both build one occupied XY Fourier basis across all energies, use a sparse endpoint union, and evaluate and phase the target-grid DC stencil before replacement.
 
 ### Full-width timing and peak VRAM
@@ -62,3 +64,46 @@ All accuracy comparisons required exact detector coordinates, energy ordering an
 [Worst residual locations](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/next-gate.UZPccu/residual-locations.json) · [CPU smoke](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/cpu-smoke-candidate.log) · [Compact GPU smoke](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/next-gate.UZPccu/smoke-cupy_tensor_coeff.log) · [Direct GPU smoke](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/next-gate.UZPccu/smoke-cupy_direct_polarization.log)
 
 The public opt-in is `backend_options={"virtual_z_pad_to": 1024}` with the eligible compact tensor path. The next validation covers indexed high-q HCP/BCC accuracy and the full promotion panel in [ZP03](ZP03-high-q.md).
+
+## ZP03 and ZP04 · Indexed films and the manual XY window
+
+The ZP04 implementation is `8f1fd82`. The high-q and matched-box evaluation is in `3db18f3`. For an extended film, omitted `WindowingType` and explicit `0` both give unit weights. Explicit `1` applies lateral Hann weights before the XY transform and uses unit axial weights on every occupied plane. Identity padding retains the native window.
+
+The submitted NumPy oracle passed 40 literal FFT, 40 selected-sum and 32 residue comparisons, including odd depth 257. The updated GPU coefficient and detector checks passed through both evaluators. At the prescribed scatterer position the non-DC intensity factor was 1/16 on either face and the middle plane. The two-face complex coefficients reproduced the independent thickness-fringe calculation. Public edge-matched scalar and discontinuous anisotropic fixtures gave identical results for omission and explicit `0`. Their explicit `1` results agreed with the literal-box XY reference with both projectors exercised. [CPU oracle](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/film-window-cpu.json) · [GPU checks](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/film-window-gpu.log)
+
+### Indexed Bragg accuracy
+
+The tests used fixed 128 × 1024² specimens at 1 nm pitch. HCP and BCC each ran at both tilts with the window off. The tilted HCP Hann specimen used matched XY weights in the native, explicit, virtual and continuous-reference arms. Recorded axes, mask counts, anchor indices, indexed intensities, centroid residuals, integrated intensities and RMS widths are available at every transform depth. Both maintained 256 × 1024² anchor cases were replayed at native depth. [All bands](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/review/band-overview.csv) · [Indexed counts at all three floors](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/review/indexed-counts.csv) · [Per-case captures](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/high-q)
+
+| 570 eV, q⊥ 1.90–2.40 nm⁻¹ | Native error | 512-plane error | 1024-plane error | Native → 1024 matched peaks |
+| --- | ---: | ---: | ---: | ---: |
+| Tilted HCP | 32.57% | 3.00% | 0.67% | 257 → 280 of 280 |
+| Tilted BCC | 36.30% | 3.30% | 0.72% | 10 → 12 of 12 |
+| Tilted HCP with XY Hann | 35.74% | 3.00% | 0.73% | 261 → 288 of 288 |
+
+Errors are relative L2 in detector intensity against the continuous Ewald sum. Counts use the 10⁻⁴ floor relative to each direct anchor. The BCC anchor is a verified allowed member of {110} for each tilt and energy. BCC odd-only candidates are tabulated separately. In the tilted BCC outer band the largest odd-only maximum was 3.49 × 10⁻⁸ of the allowed anchor in the continuous reference and 3.45 × 10⁻⁸ at 1024 planes. Both tilted unwindowed cases had zero lost reference peaks and zero unmatched detections at 1024 planes at this floor. Tilted HCP already matched all 280 peaks at 512, with two unmatched detections. Its median absolute peak-height error fell from 20.17% at native depth to 0.55% at 1024 planes.
+
+[Depth versus error](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/review/high-q-depth-error.pdf) · [Tilted HCP maps](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/review/hcp_tilted-outer-band.pdf) · [Tilted BCC maps](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/review/bcc_tilted-outer-band.pdf) · [XY-Hann HCP maps](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/review/hcp_hann-outer-band.pdf) · [Near-bin and between-bin cuts](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/review/hcp_tilted-signed-cuts.pdf)
+
+### Matched XY-Hann performance and parity
+
+The 128 × 1024² CoreShell-derived model used 1024 transform planes on the A6000 with the same lateral weights and unit axial weight in both arms. Over three alternating pairs at 20 energies and 12 directions, warm medians were 8.943 s explicit and 1.036 s virtual, an 8.64× median paired speedup. A separate 10 ms NVML pass measured 45,338 MiB explicit and 5,396 MiB virtual peak worker VRAM. [Timing](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/film-wide-20-hann-timing/20261120T191145Z-energy20-qluhtf88/summary.json) · [Memory](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/film-wide-20-hann-memory/20261120T191833Z-energy20-vh183tzg/summary.json)
+
+The full 101-energy 1024-plane XY-Hann comparison passed with exact detector coordinates and finite masks. Its worst relative L2 error was 7.39 × 10⁻⁷ at 283.3 eV. Separate small anisotropic 101-energy checks passed with both window choices and with one or 12 directions. [101-energy XY-Hann details](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/film-wide-101-hann/20261120T190825Z-energy101-e9r3f6hf/summary.json)
+
+The direct-polarization report generator hit an NFS stale-file-handle error after all four steps had been recorded. Its Markdown summary was regenerated with the repository's summary writer from the completed records. [Original run log](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/default-cupy_direct_polarization.log)
+
+Across all five film configurations, the largest full-detector relative L2 difference between the explicit and virtual paths was 3.93e-07. All requested depths passed the exact detector-coordinate and finite-mask comparisons.
+
+### Promotion panels
+
+The default report used the installed PyHyperScattering and the pinned FFT-grid parent conventions. The opt-in audit replayed eligible compact-tensor morphologies at twice their occupied depth through both public padding routes. It kept the native returns for the maintained assertions and logged the padded comparisons independently. The GPU-hidden CPU smoke ran 102 tests with 3 skips. The split native report also ran the path-specific CPU lanes and environment checks.
+
+| Panel | GPU smoke | Physics | Report |
+| --- | --- | --- | --- |
+| Legacy CyRSoXS | 36 passed, 25 skipped | 14 passed, 11 skipped | [Summary](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/default-legacy_cyrsoxs/20261120T192057Z/summary.md) |
+| Default compact tensor | 51 passed, 10 skipped | 21 passed, 4 failed | [Summary](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/default-cupy_tensor_coeff/20261120T191236Z/summary.md) |
+| Default direct polarization | 31 passed, 30 skipped | 17 passed, 4 failed, 4 skipped | [Summary](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/default-direct/20261120T191946Z/summary.md) |
+| Compact tensor with opt-in parity audit | 51 passed, 10 skipped | 21 passed, 4 failed | [Summary](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/opt-in-film-report/20261120T193416Z/summary.md) |
+
+All 92 padded comparisons passed. They covered raw detector results, integrated results, and the three observable layouts. The worst relative L2 error was 1.04e-06 on MWCNT. The inherited native failures are the two analytical sphere sizes and the two CoreShell reference checks. The reviewed radial-coordinate and CoreShell fixes live in the separate FFT-grid follow-up. Promotion remains gated on their integration. The film option remains opt-in. [Padded audit](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/opt-in-film.jsonl) · [Audit summary](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-virtual-zpad/test-reports/virtual-zpad/zp03-zp04/review/film-audit-summary.json) · [Reviewed FFT-grid follow-up](/homes/deand/dev/NRSS_speed/test-reports/fft-registration-followup.ArgvS1/review/VALIDATION_GATES.md)
