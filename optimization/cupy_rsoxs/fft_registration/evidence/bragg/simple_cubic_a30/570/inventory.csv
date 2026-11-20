@@ -1,0 +1,3 @@
+case,energy,band,allowed_hkl,distinct_xy,asserted_hkl
+simple_cubic_a30,570.0,common,40,40,0
+simple_cubic_a30,570.0,570-only,124,124,0

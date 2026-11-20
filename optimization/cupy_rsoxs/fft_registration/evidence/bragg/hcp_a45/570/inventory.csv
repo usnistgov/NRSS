@@ -1,0 +1,3 @@
+case,energy,band,allowed_hkl,distinct_xy,asserted_hkl
+hcp_a45,570.0,common,156,90,0
+hcp_a45,570.0,570-only,526,306,0
