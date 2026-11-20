@@ -3263,7 +3263,7 @@ def test_cyrsoxs_release_runtime_unlocks_mutation_and_rebuilds_pybind_objects():
 @pytest.mark.gpu
 @pytest.mark.path_subset("cupy_tensor_coeff", "cupy_direct_polarization")
 def test_cupy_return_xarray_includes_minimal_reduction_metadata(nrss_path: ComputationPath):
-    """Ensure detached cupy-rsoxs xarray results carry the minimal attrs needed for reduction."""
+    """Ensure detached CuPy results carry reduction metadata and the detector-grid convention."""
     if not _has_visible_gpu():
         pytest.skip("No visible NVIDIA GPU found for cupy xarray metadata smoke test.")
 
@@ -3276,7 +3276,11 @@ def test_cupy_return_xarray_includes_minimal_reduction_metadata(nrss_path: Compu
     )
     try:
         scattering = morph.run(stdout=False, stderr=False, return_xarray=True)
-        assert scattering.attrs == {"phys_size_nm": 5.0, "z_dim": 4}
+        assert scattering.attrs == {
+            "phys_size_nm": 5.0,
+            "z_dim": 4,
+            "detector_grid_convention": "fft_bins_v1",
+        }
         assert scattering.dims == ("energy", "qy", "qx")
     finally:
         morph.release_runtime()

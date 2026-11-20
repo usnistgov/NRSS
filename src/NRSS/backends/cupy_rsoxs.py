@@ -41,6 +41,7 @@ _CUPY_SEGMENT_MEASUREMENTS = {
 }
 _CUPY_TIMED_SEGMENTS = tuple(_CUPY_SEGMENT_MEASUREMENTS)
 _PYHYPER_RSOXS_ACCESSOR_STATUS: bool | None = None
+_DETECTOR_GRID_CONVENTION = "fft_bins_v1"
 _HALF_BITS_TO_FLOAT_DEVICE_FUNCTION = r"""
 __device__ inline float nrss_half_bits_to_float(const unsigned short h) {
     const unsigned int sign = ((unsigned int)h & 0x8000u) << 16;
@@ -152,8 +153,7 @@ class _DetectorGeometry:
     z_count: int
     y_count: int
     x_count: int
-    qz0: np.float32
-    dz: np.float32
+    dz: float
 
 
 @dataclass(frozen=True)
@@ -386,6 +386,7 @@ class CupyScatteringResult:
             attrs={
                 "phys_size_nm": float(self.phys_size),
                 "z_dim": int(self.num_zyx[0]),
+                "detector_grid_convention": _DETECTOR_GRID_CONVENTION,
             },
         )
 
@@ -936,6 +937,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             "radial_semantics": "q_perp" if z_dim == 1 else "q_abs_detector_corrected",
             "source_integrator": "cupy-rsoxs",
             "integration_compatibility": "NRSSIntegrator",
+            "detector_grid_convention": _DETECTOR_GRID_CONVENTION,
             "nrss_semantic_mode": nrss_semantic_mode,
             "phys_size_nm": float(morphology.PhysSize),
             "z_dim": z_dim,
@@ -4767,6 +4769,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         z, y, x = self._shape_tuple(morphology, shape_override=shape_override)
         cache_key = (
             "detector_projection_geometry_current",
+            _DETECTOR_GRID_CONVENTION,
             z,
             y,
             x,
@@ -4777,36 +4780,32 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
     def _detector_geometry(self, morphology, cp, shape_override=None):
         z, y, x = self._shape_tuple(morphology, shape_override=shape_override)
-        phys = np.float32(morphology.PhysSize)
-        cache_key = ("detector_geometry", z, y, x, float(phys))
+        phys = float(morphology.PhysSize)
+        cache_key = ("detector_geometry", _DETECTOR_GRID_CONVENTION, z, y, x, phys)
         cached = morphology._backend_runtime_state.get(cache_key)
         if cached is not None:
             return cached
 
-        start = np.float32(-math.pi / float(phys))
-        x_step = np.float32((2.0 * math.pi / float(phys)) / max(x - 1, 1))
-        y_step = np.float32((2.0 * math.pi / float(phys)) / max(y - 1, 1))
-        qx = start + cp.arange(x, dtype=cp.float32) * x_step
-        qy = start + cp.arange(y, dtype=cp.float32) * y_step
-        if z == 1:
-            qz = cp.asarray([0.0], dtype=cp.float32)
-            qz0 = np.float32(0.0)
-            dz = np.float32(0.0)
-        else:
-            z_step = np.float32((2.0 * math.pi / float(phys)) / max(z - 1, 1))
-            qz = start + cp.arange(z, dtype=cp.float32) * z_step
-            qz0 = start
-            dz = z_step
+        def axis(count):
+            step = 2.0 * math.pi / (count * phys)
+            bins = cp.arange(count, dtype=cp.float64) - count // 2
+            return bins * step, step
+
+        qx, _ = axis(x)
+        qy, _ = axis(y)
+        qz, dz = axis(z)
 
         x_idx = cp.arange(x, dtype=cp.int32)[None, :]
         y_idx = cp.arange(y, dtype=cp.int32)[:, None]
         border_valid = (x_idx != (x - 1)) & (y_idx != (y - 1))
-        radius_sq = qx[None, :] * qx[None, :] + qy[:, None] * qy[:, None]
+        # Round the physical radius once so exact support boundaries agree
+        # with the radius limits computed from the axial grid.
+        radius_sq = (qx[None, :] ** 2 + qy[:, None] ** 2).astype(cp.float32)
 
         detector_geometry = _DetectorGeometry(
-            qx=qx,
-            qy=qy,
-            qz=qz,
+            qx=qx.astype(cp.float32),
+            qy=qy.astype(cp.float32),
+            qz=qz.astype(cp.float32),
             x_idx=x_idx,
             y_idx=y_idx,
             border_valid=border_valid,
@@ -4814,7 +4813,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             z_count=z,
             y_count=y,
             x_count=x,
-            qz0=qz0,
             dz=dz,
         )
         morphology._backend_runtime_state[cache_key] = detector_geometry
@@ -4831,6 +4829,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         z, y, x = self._shape_tuple(morphology, shape_override=shape_override)
         cache_key = (
             "detector_projection_geometry_current",
+            _DETECTOR_GRID_CONVENTION,
             z,
             y,
             x,
@@ -4841,9 +4840,13 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         if cached is not None:
             return cached
 
-        k = np.float32(2.0 * math.pi / (1239.84197 / float(energy)))
-        val = np.float32(k * k) - detector_geometry.radius_sq
-        valid = (val >= 0) & detector_geometry.border_valid
+        k = 2.0 * math.pi / (1239.84197 / float(energy))
+        mid = detector_geometry.z_count // 2
+        depth = min(k, mid * detector_geometry.dz) if mid else k
+        # On the forward branch, q_perp² = depth * (2k - depth).
+        # Limit depth by both the Ewald sphere and the first sampled z bin.
+        radius_limit_sq = np.float32(depth * (2.0 * k - depth))
+        valid = (detector_geometry.radius_sq <= radius_limit_sq) & detector_geometry.border_valid
 
         if detector_geometry.z_count == 1:
             projection_geometry = _DetectorProjectionGeometry(
@@ -4855,16 +4858,18 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             morphology._backend_runtime_state[cache_key] = projection_geometry
             return projection_geometry
 
-        pos_z = -k + cp.sqrt(cp.where(valid, val, 0), dtype=cp.float32)
-        z_float = (pos_z - detector_geometry.qz0) / detector_geometry.dz
-        z0 = cp.floor(z_float).astype(cp.int32)
-        z1 = z0 + 1
-        valid &= z0 >= 0
-        valid &= z1 < detector_geometry.z_count
+        # The rationalized forward root retains small axial offsets near DC.
+        val = np.float32(k * k) - detector_geometry.radius_sq
+        root = cp.sqrt(cp.maximum(val, np.float32(0.0)), dtype=cp.float32)
+        pos_z = -detector_geometry.radius_sq / (np.float32(k) + root)
+        z_offset = pos_z / np.float32(detector_geometry.dz)
+        last = detector_geometry.z_count - 1
 
-        safe_z0 = cp.clip(z0, 0, detector_geometry.z_count - 1)
-        safe_z1 = cp.clip(z1, 0, detector_geometry.z_count - 1)
-        frac = z_float - safe_z0.astype(cp.float32)
+        z_offset = cp.where(valid, cp.maximum(z_offset, np.float32(-mid)), np.float32(0.0))
+        lower = cp.floor(z_offset)
+        safe_z0 = lower.astype(cp.int32) + mid
+        safe_z1 = cp.minimum(safe_z0 + 1, last)
+        frac = z_offset - lower
 
         projection_geometry = _DetectorProjectionGeometry(
             valid=valid,
