@@ -41,6 +41,10 @@ python "$speed" --baseline-root "$base" --path default --case depth --material-z
 | [ZP01](ZP01-reference.md) | Establish the explicit-vacuum and independent Fourier references, then extend the signed Bragg fixture. | Coefficient errors, analytic grating intensities, raw masks and detector coordinates |
 | [ZP02](ZP02-gpu.md) | Prototype two ways to evaluate the required axial bins. Preserve the existing reuse across energies. | Paired speed and peak VRAM for the current workflow, explicit pad and virtual pad |
 | [ZP03](ZP03-high-q.md) | Measure HCP/BCC peak recovery and complete the promotion panels. | Indexed peak evidence, high-q error, full compatibility results and opt-in decision |
+| [ZP04](ZP04-film-window.md) | Apply the specified manual XY window to the extended film. | Face and thickness-fringe checks, matched XY-Hann references and final validation |
+
+ZP04 governs the film's user-facing window. The earlier target-box XYZ Hann
+comparisons establish compatibility with that explicit-box calculation.
 
 | Arm | Occupied planes | Transform depth | What it establishes |
 |---|---:|---:|---|

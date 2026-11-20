@@ -11,6 +11,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
+from matplotlib.ticker import NullFormatter
 import numpy as np
 
 
@@ -57,6 +58,7 @@ def depth_errors(root, output):
                     lw=1.7, label=label)
         ax.set(xscale="log", yscale="log", xticks=depths, xticklabels=[str(m) for m in depths],
                xlabel="Axial transform depth (planes)", title=title)
+        ax.xaxis.set_minor_formatter(NullFormatter())
         ax.grid(alpha=.20, which="both")
     axes[0].set_ylabel("Relative L2 intensity error (%)")
     axes[-1].legend(frameon=False, loc="upper right", fontsize=13)
@@ -71,8 +73,9 @@ def maps(root, output, name):
         q_perp = np.hypot(qx[None, :], qy[:, None])
         band = (q_perp >= 1.9) & (q_perp < 2.4)
         images = [np.where(band, capture[route] / anchor["intensity"], np.nan) for route in ROUTES]
-    vmax = max(np.nanmax(frame) for frame in images)
-    norm = LogNorm(vmin=vmax / 4000, vmax=vmax)
+    shown = np.concatenate([frame[np.isfinite(frame) & (frame > 0)] for frame in images])
+    vmax = np.percentile(shown, 99.95)
+    norm = LogNorm(vmin=vmax / 10000, vmax=vmax)
     fig, axes = plt.subplots(1, 3, figsize=(19.2, 10.8), sharex=True, sharey=True, layout="constrained")
     fig.suptitle(f"{TITLES[name]} · 570 eV · 1.90–2.40 nm⁻¹", fontsize=22)
     step = qx[1] - qx[0]
@@ -81,7 +84,7 @@ def maps(root, output, name):
                        extent=(qx[0]-step/2, qx[-1]+step/2, qy[0]-step/2, qy[-1]+step/2), rasterized=True)
         ax.set(title=label, xlim=(-2.43, 2.43), ylim=(-2.43, 2.43), xlabel=r"$q_x$ (nm$^{-1}$)")
     axes[0].set_ylabel(r"$q_y$ (nm$^{-1}$)")
-    cbar = fig.colorbar(im, ax=axes, shrink=.69)
+    cbar = fig.colorbar(im, ax=axes, shrink=.69, extend="max")
     cbar.set_label(f"Intensity / direct {tuple(anchor['hkl'])} peak")
     save(fig, output, name + "-outer-band")
 
@@ -115,12 +118,13 @@ def line_cuts(root, output, name):
             triplet = (int(spot["h"]), int(spot["k"]), int(spot["l"]))
             for mode, route_label, color in zip(ROUTES, ROUTE_LABELS, ROUTE_COLORS):
                 intensity = capture[mode][y_index, cx] / anchor["intensity"]
-                ax.plot(offset, intensity, color=color, lw=1.6, label=route_label)
+                ax.plot(offset, intensity, color=color, lw=1.6, ls="--" if mode == "direct" else "-",
+                        label=route_label)
                 output_rows.extend(dict(group=label, contributors=spot["contributors"], mode=mode,
                                         qx=float(x), qy=float(qy[y_index]), qx_offset=float(dx), intensity=float(v))
                                    for x, dx, v in zip(qx[cx], offset, intensity))
             ax.axvline(0, color="white", ls=":", lw=1, alpha=.5)
-            ax.set(yscale="log", title=f"{label} · {triplet}", xlabel=r"$q_x - q_{x,mathrm{pred}}$ (nm$^{-1}$)")
+            ax.set(yscale="log", title=f"{label} · {triplet}", xlabel=r"$q_x - q_{x,\mathrm{pred}}$ (nm$^{-1}$)")
             ax.grid(alpha=.18)
     axes[0].set_ylabel(f"Intensity / direct {tuple(anchor['hkl'])} peak")
     axes[0].legend(frameon=False)
