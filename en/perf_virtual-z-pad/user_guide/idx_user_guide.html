@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>CuPy GPU memory and material count &#8212; NRSS 0.1.0 documentation</title>
+    <title>User Guide &#8212; NRSS 0.1.0 documentation</title>
   
   
   
@@ -44,12 +44,12 @@
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../_static/design-tabs.js?v=f930bc37"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'user_guide/cupy_rsoxs_memory';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'user_guide/idx_user_guide';</script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Software Reference" href="../api/idx_api.html" />
-    <link rel="prev" title="cupy-rsoxs Reduced-Result q Grids" href="cupy_rsoxs_result_q_grids.html" />
+    <link rel="next" title="PyHyperScattering" href="pyhyper.html" />
+    <link rel="prev" title="Getting Started" href="../getting_started/idx_getting_started.html" />
   
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
@@ -155,7 +155,7 @@
 
 
 <li class="nav-item current active">
-  <a class="nav-link nav-internal" href="idx_user_guide.html">
+  <a class="nav-link nav-internal" href="#">
     User Guide
   </a>
 </li>
@@ -291,7 +291,7 @@
 
 
 <li class="nav-item current active">
-  <a class="nav-link nav-internal" href="idx_user_guide.html">
+  <a class="nav-link nav-internal" href="#">
     User Guide
   </a>
 </li>
@@ -381,10 +381,10 @@
 <nav class="bd-docs-nav bd-links"
      aria-label="Section Navigation">
   <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
-  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+  <div class="bd-toc-item navbar-nav"><ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="pyhyper.html">PyHyperScattering</a></li>
 <li class="toctree-l1"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</a></li>
-<li class="toctree-l1 current active"><a class="current reference internal" href="#">CuPy GPU memory and material count</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cupy_rsoxs_memory.html">CuPy GPU memory and material count</a></li>
 </ul>
 </div>
 </nav></div>
@@ -425,10 +425,7 @@
         <i class="fa-solid fa-home"></i>
       </a>
     </li>
-    
-    <li class="breadcrumb-item"><a href="idx_user_guide.html" class="nav-link">User Guide</a></li>
-    
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">CuPy GPU memory and material count</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">User Guide</span></li>
   </ul>
 </nav>
 </div>
@@ -445,141 +442,98 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="cupy-gpu-memory-and-material-count">
-<h1>CuPy GPU memory and material count<a class="headerlink" href="#cupy-gpu-memory-and-material-count" title="Link to this heading">#</a></h1>
-<p>For full-depth float32 simulations the CuPy backend normally uses the compact
-tensor Fourier basis for one or more energies. It builds a basis from the
-material fields once and keeps the Fourier samples required by the detector.
-The same basis also serves the electric-field directions specified by
-<code class="docutils literal notranslate"><span class="pre">EAngleRotation</span></code> in <code class="docutils literal notranslate"><span class="pre">[StartAngle,</span> <span class="pre">IncrementAngle,</span> <span class="pre">EndAngle]</span></code> order.</p>
-<p>Use <code class="docutils literal notranslate"><span class="pre">SFieldMode.ISOTROPIC</span></code> for a fully isotropic material. CuPy stages only
-its <code class="docutils literal notranslate"><span class="pre">Vfrac</span></code> field and uses one basis field. A material with orientation
-fields uses five basis fields for a single axis-aligned polarization and
-seven when the tensor requires both in-plane polarizations, as for an
-oblique direction or a sweep covering both axes. The anisotropic basis
-contains the volume fraction, the volume fraction weighted by the order
-parameter, and the required orientation products.</p>
-<section id="estimating-the-retained-basis">
-<h2>Estimating the retained basis<a class="headerlink" href="#estimating-the-retained-basis" title="Link to this heading">#</a></h2>
-<p>Let <code class="docutils literal notranslate"><span class="pre">I</span></code> and <code class="docutils literal notranslate"><span class="pre">A</span></code> count the isotropic and anisotropic materials, <code class="docutils literal notranslate"><span class="pre">C</span></code>
-be the number of tensor components (three or five), and <code class="docutils literal notranslate"><span class="pre">F</span></code> be the
-number of basis fields, <code class="docutils literal notranslate"><span class="pre">I</span> <span class="pre">+</span> <span class="pre">(2</span> <span class="pre">+</span> <span class="pre">C)</span> <span class="pre">*</span> <span class="pre">A</span></code>. Let <code class="docutils literal notranslate"><span class="pre">U</span></code> be the number of
-distinct Fourier grid points sampled by the detector across all energies.
-A single plane uses one grid point per valid detector pixel. A volume uses
-two grid points per valid pixel per energy and shares points where the
-energies map to the same endpoints. Each additional anisotropic material
-therefore costs about <code class="docutils literal notranslate"><span class="pre">8</span> <span class="pre">*</span> <span class="pre">(2</span> <span class="pre">+</span> <span class="pre">C)</span> <span class="pre">*</span> <span class="pre">U</span></code> bytes in retained Fourier
-samples and an isotropic material costs about <code class="docutils literal notranslate"><span class="pre">8</span> <span class="pre">*</span> <span class="pre">U</span></code> bytes. Including
-the shared index array and the mixing coefficients for <code class="docutils literal notranslate"><span class="pre">E</span></code> energy entries,
-the retained basis occupies <code class="docutils literal notranslate"><span class="pre">8</span> <span class="pre">*</span> <span class="pre">U</span> <span class="pre">*</span> <span class="pre">(F</span> <span class="pre">+</span> <span class="pre">1)</span> <span class="pre">+</span> <span class="pre">8</span> <span class="pre">*</span> <span class="pre">E</span> <span class="pre">*</span> <span class="pre">C</span> <span class="pre">*</span> <span class="pre">F</span></code> bytes.</p>
-<p>Peak GPU memory also includes staged material volumes, FFT buffers and
-workspace, detector geometry and panels, and any device-resident results.
-Windowed compact tensor runs retain Hann factors with shapes
-<code class="docutils literal notranslate"><span class="pre">(NumZ,</span> <span class="pre">NumY,</span> <span class="pre">1)</span></code> and <code class="docutils literal notranslate"><span class="pre">(1,</span> <span class="pre">1,</span> <span class="pre">NumX)</span></code> during basis construction.
-The compact projector reads the retained Fourier samples directly, and the
-dense tensor path stages the same material fields and reuses its transform
-workspace across materials. In a thin model where the detector samples
-most of the Fourier grid, the retained basis can outweigh the compact
-transform workspace savings. The crossover depends on the fraction of
-sampled grid points, the material mix, and the workspace selected by cuFFT.
-Increasing the in-plane dimensions with the same depth and detector
-coverage increases the basis and volume sizes together. Adding depth
-generally lowers the fraction of the volume that the detector samples.</p>
+  <section id="user-guide">
+<span id="id1"></span><h1>User Guide<a class="headerlink" href="#user-guide" title="Link to this heading">#</a></h1>
+<section id="nrss-model-usage">
+<h2>NRSS Model Usage<a class="headerlink" href="#nrss-model-usage" title="Link to this heading">#</a></h2>
+<p>The NRSS (Neutron and Resonant Soft X-ray Scattering) model is a powerful tool for simulating and analyzing scattering data. This guide covers the key aspects of using NRSS effectively.</p>
+<section id="core-components">
+<h3>Core Components<a class="headerlink" href="#core-components" title="Link to this heading">#</a></h3>
+<ol class="arabic simple">
+<li><p>Morphology Definition
+- Use the <code class="docutils literal notranslate"><span class="pre">Morphology</span></code> class to define your system structure
+- Support for various geometries including disks, spheres, and custom shapes
+- Define material properties and spatial arrangements</p></li>
+<li><p>Material Properties
+- Complex refractive indices from experimental data or theoretical calculations
+- Support for both scalar and tensor (uniaxial) optical constants
+- Integration with KKcalc for optical constant determination</p></li>
+<li><p>Simulation Parameters
+- Energy range selection for resonant scattering
+- Q-range configuration for scattering profiles
+- Resolution and accuracy settings</p></li>
+</ol>
 </section>
-<section id="measured-cases">
-<h2>Measured cases<a class="headerlink" href="#measured-cases" title="Link to this heading">#</a></h2>
-<p>These runs used float32 host inputs, host detector output, and a single
-37-degree polarization on an RTX 8000. Peak VRAM is the sampled increase
-over the idle GPU, in MiB. Single-energy cases used 285 eV. The 20-energy
-scans covered 280 to 289.5 eV in 0.5 eV steps.</p>
-<div class="pst-scrollable-table-container"><table class="table">
-<thead>
-<tr class="row-odd"><th class="head"><p>Shape and voxel size</p></th>
-<th class="head"><p>Materials</p></th>
-<th class="head"><p>Energies</p></th>
-<th class="head"><p>Dense peak</p></th>
-<th class="head"><p>Compact peak</p></th>
-</tr>
-</thead>
-<tbody>
-<tr class="row-even"><td><p>32 × 256 × 256 at 2.5 nm</p></td>
-<td><p>6 anisotropic</p></td>
-<td><p>1</p></td>
-<td><p>614</p></td>
-<td><p>488</p></td>
-</tr>
-<tr class="row-odd"><td><p>32 × 256 × 256 at 2.5 nm</p></td>
-<td><p>8 anisotropic</p></td>
-<td><p>1</p></td>
-<td><p>694</p></td>
-<td><p>580</p></td>
-</tr>
-<tr class="row-even"><td><p>32 × 256 × 256 at 2.5 nm</p></td>
-<td><p>2 anisotropic</p></td>
-<td><p>20</p></td>
-<td><p>454</p></td>
-<td><p>304</p></td>
-</tr>
-<tr class="row-odd"><td><p>32 × 256 × 256 at 2.5 nm</p></td>
-<td><p>4 anisotropic</p></td>
-<td><p>20</p></td>
-<td><p>534</p></td>
-<td><p>398</p></td>
-</tr>
-<tr class="row-even"><td><p>32 × 256 × 256 at 2.5 nm</p></td>
-<td><p>6 anisotropic</p></td>
-<td><p>20</p></td>
-<td><p>614</p></td>
-<td><p>494</p></td>
-</tr>
-<tr class="row-odd"><td><p>32 × 256 × 256 at 2.5 nm</p></td>
-<td><p>8 anisotropic</p></td>
-<td><p>20</p></td>
-<td><p>694</p></td>
-<td><p>588</p></td>
-</tr>
-<tr class="row-even"><td><p>1 × 1024 × 1024 at 5 nm</p></td>
-<td><p>1 anisotropic</p></td>
-<td><p>1</p></td>
-<td><p>362</p></td>
-<td><p>324</p></td>
-</tr>
-<tr class="row-odd"><td><p>1 × 1024 × 1024 at 5 nm</p></td>
-<td><p>8 anisotropic</p></td>
-<td><p>1</p></td>
-<td><p>502</p></td>
-<td><p>856</p></td>
-</tr>
-<tr class="row-even"><td><p>1 × 1024 × 1024 at 5 nm</p></td>
-<td><p>2 anisotropic, 6 isotropic</p></td>
-<td><p>1</p></td>
-<td><p>406</p></td>
-<td><p>472</p></td>
-</tr>
-<tr class="row-odd"><td><p>1 × 1024 × 1024 at 5 nm</p></td>
-<td><p>8 isotropic</p></td>
-<td><p>1</p></td>
-<td><p>374</p></td>
-<td><p>344</p></td>
-</tr>
-</tbody>
-</table>
+<section id="common-workflows">
+<h3>Common Workflows<a class="headerlink" href="#common-workflows" title="Link to this heading">#</a></h3>
+<ol class="arabic simple">
+<li><p>Basic Simulation
+- Define system morphology
+- Set material properties
+- Configure simulation parameters
+- Run simulation and analyze results</p></li>
+<li><p>Parameter Sweeps
+- Systematic variation of model parameters
+- Analysis of parameter effects on scattering
+- Optimization of model parameters</p></li>
+<li><p>Data Analysis
+- Comparison with experimental data
+- Model refinement and validation
+- Extraction of structural parameters</p></li>
+</ol>
+</section>
+<section id="advanced-features">
+<h3>Advanced Features<a class="headerlink" href="#advanced-features" title="Link to this heading">#</a></h3>
+<ol class="arabic simple">
+<li><p>Custom Model Development
+- Creating specialized geometric models
+- Implementing new material property calculations
+- Advanced parameter sweep strategies</p></li>
+<li><p>Visualization Tools
+- 2D and 3D structure visualization
+- Scattering pattern analysis
+- Parameter sweep result visualization</p></li>
+</ol>
+</section>
+<section id="best-practices">
+<h3>Best Practices<a class="headerlink" href="#best-practices" title="Link to this heading">#</a></h3>
+<ol class="arabic simple">
+<li><p>Model Selection
+- Choose appropriate geometric models
+- Consider computational efficiency
+- Validate assumptions</p></li>
+<li><p>Parameter Optimization
+- Start with reasonable initial guesses
+- Use systematic parameter sweeps
+- Validate results against physical constraints</p></li>
+<li><p>Performance Considerations
+- Optimize mesh resolution
+- Use efficient parameter sweep strategies
+- Balance accuracy and computation time</p></li>
+</ol>
+<p>For detailed examples and implementations, refer to the tutorial notebooks in the documentation.</p>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="pyhyper.html">PyHyperScattering</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="pyhyper.html#cyrsoxs-loader">CyRSoXS Loader</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html#grid-modes">Grid modes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html#coordinates-and-metadata">Coordinates and metadata</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html#q-resolution">q resolution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cupy_rsoxs_result_q_grids.html#compatibility-and-validation">Compatibility and validation</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="cupy_rsoxs_memory.html">CuPy GPU memory and material count</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="cupy_rsoxs_memory.html#estimating-the-retained-basis">Estimating the retained basis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cupy_rsoxs_memory.html#measured-cases">Measured cases</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cupy_rsoxs_memory.html#virtual-z-padding-for-films">Virtual z padding for films</a></li>
+</ul>
+</li>
+</ul>
 </div>
-<p>The one-energy volume sampled 5.7% of its Fourier grid. The 20-energy
-volume sampled 6.7%, and the single plane sampled 99.8%. With eight
-anisotropic materials, the 20-energy volume’s retained basis occupied
-61 MiB. The single plane’s basis occupied 455 MiB with eight anisotropic
-materials and 168 MiB with two anisotropic and six isotropic materials.</p>
-<p>For a thin model with broad detector coverage close to the device’s memory
-limit, measure both paths with the actual shape, material fields, and energy
-list. Pass these options to select the dense tensor path when constructing
-the <code class="docutils literal notranslate"><span class="pre">Morphology</span></code>.</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">backend_options</span> <span class="o">=</span> <span class="p">{</span>
-    <span class="s2">&quot;execution_path&quot;</span><span class="p">:</span> <span class="s2">&quot;tensor_coeff&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;energy_basis_mode&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
-<span class="p">}</span>
-</pre></div>
-</div>
+</section>
 </section>
 </section>
 
@@ -594,20 +548,20 @@ the <code class="docutils literal notranslate"><span class="pre">Morphology</spa
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="cupy_rsoxs_result_q_grids.html"
+       href="../getting_started/idx_getting_started.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title"><code class="docutils literal notranslate"><span class="pre">cupy-rsoxs</span></code> Reduced-Result q Grids</p>
+        <p class="prev-next-title">Getting Started</p>
       </div>
     </a>
     <a class="right-next"
-       href="../api/idx_api.html"
+       href="pyhyper.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">Software Reference</p>
+        <p class="prev-next-title">PyHyperScattering</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -630,15 +584,20 @@ the <code class="docutils literal notranslate"><span class="pre">Morphology</spa
   </div>
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#estimating-the-retained-basis">Estimating the retained basis</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#measured-cases">Measured cases</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#nrss-model-usage">NRSS Model Usage</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#core-components">Core Components</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#common-workflows">Common Workflows</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#advanced-features">Advanced Features</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#best-practices">Best Practices</a></li>
+</ul>
+</li>
 </ul>
   </nav></div>
 
   <div class="sidebar-secondary-item">
 
   <div class="tocsection sourcelink">
-    <a href="../_sources/user_guide/cupy_rsoxs_memory.rst.txt">
+    <a href="../_sources/user_guide/idx_user_guide.rst.txt">
       <i class="fa-solid fa-file-lines"></i> Show Source
     </a>
   </div>
