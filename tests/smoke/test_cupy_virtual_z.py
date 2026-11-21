@@ -101,6 +101,8 @@ def test_virtual_z_matches_literal_vacuum(shape, target, method, window, layout)
     assert actual.attrs["z_offset"] == (target - shape[0]) // 2
     assert actual.attrs["window_xy"] == ("hann" if window else "none")
     assert actual.attrs["window_z"] == "none"
+    if layout != "detector":
+        assert actual.attrs["radial_grid_convention"] == "sampled_q_v1"
     assert report["routes"] == [f"virtual_z_{method}"]
     assert report["basis_builds"] == 1
     for coord in expected.coords:

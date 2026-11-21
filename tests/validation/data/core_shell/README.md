@@ -10,6 +10,11 @@ Files:
   netCDF backends
 - `CS_sim_reference.h5`: sim-derived regression golden generated from the
   maintained pybind + WPIntegrator + manual A-wedge baseline workflow
+- `CS_sim_reference_fft_bins_v1.h5`: sim-derived regression golden for the
+  FFT-bin CuPy detector grid, reduced through the same WPIntegrator A-wedge
+  workflow. The tensor coefficient and direct polarization paths agreed to
+  within `3.5e-7` over the full finite A-wedge before the tensor result was saved.
+  The HDF5 attributes record the backend source hash and input file hashes.
 
 Historical reduction note:
 - The maintained CoreShell pytest path intentionally stays on

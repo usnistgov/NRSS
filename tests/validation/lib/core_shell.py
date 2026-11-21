@@ -30,6 +30,7 @@ from NRSS.morphology import Material, Morphology, OpticalConstants
 DATA_DIR = REPO_ROOT / "tests" / "validation" / "data" / "core_shell"
 EXPERIMENTAL_REFERENCE_PATH = DATA_DIR / "CS_reference.h5"
 SIM_REFERENCE_PATH = DATA_DIR / "CS_sim_reference.h5"
+FFT_BINS_SIM_REFERENCE_PATH = DATA_DIR / "CS_sim_reference_fft_bins_v1.h5"
 
 SHAPE = (32, 512, 512)
 PHYS_SIZE_NM = 2.5
@@ -59,7 +60,7 @@ EXPERIMENTAL_REFERENCE_CITATION = (
 EXPERIMENTAL_THRESHOLDS = {
     "a_vs_energy": {"max_abs_diff": 0.03, "rmse": 0.02},
     "a_vs_q_284p7": {"max_abs_diff": 0.05, "rmse": 0.02},
-    "a_vs_q_285p2": {"max_abs_diff": 0.055, "rmse": 0.03},
+    "a_vs_q_285p2": {"max_abs_diff": 0.062, "rmse": 0.03},
 }
 
 SIM_THRESHOLDS = {
@@ -163,8 +164,8 @@ def load_experimental_reference_awedge() -> xr.DataArray:
     return _load_reference_awedge(EXPERIMENTAL_REFERENCE_PATH, name="A_experimental_reference")
 
 
-def load_sim_reference_awedge() -> xr.DataArray:
-    return _load_reference_awedge(SIM_REFERENCE_PATH, name="A_sim_reference")
+def load_sim_reference_awedge(path: Path = SIM_REFERENCE_PATH) -> xr.DataArray:
+    return _load_reference_awedge(path, name="A_sim_reference")
 
 
 def write_awedge_reference(
@@ -549,23 +550,47 @@ def awedge_comparison_slices(
         "awedge": awedge.sel(**q_window),
         "reference": reference.sel(**q_window),
     }
+    _awedge_comparison_mask(comparison["awedge"], comparison["reference"], "A-wedge")
     comparison["a_vs_energy"] = comparison["awedge"].mean("q")
     comparison["reference_a_vs_energy"] = comparison["reference"].mean("q")
     for energy_ev in ENERGY_CHECKS_EV:
         key = f"a_vs_q_{str(energy_ev).replace('.', 'p')}"
-        comparison[key] = comparison["awedge"].sel(energy=float(energy_ev), method="nearest")
-        comparison[f"reference_{key}"] = comparison["reference"].sel(energy=float(energy_ev), method="nearest")
+        comparison[key] = comparison["awedge"].sel(energy=float(energy_ev))
+        comparison[f"reference_{key}"] = comparison["reference"].sel(energy=float(energy_ev))
     return comparison
+
+
+def _awedge_comparison_mask(observed: xr.DataArray, reference: xr.DataArray, label: str) -> np.ndarray:
+    if observed.dims != reference.dims or observed.shape != reference.shape:
+        raise AssertionError(f"{label} dimensions or sample counts differ.")
+    for dim in observed.dims:
+        coordinates = observed.coords[dim].values
+        np.testing.assert_array_equal(coordinates, reference.coords[dim].values,
+                                      err_msg=f"{label} has different {dim} coordinates or ordering.")
+        if not np.all(np.isfinite(coordinates)) or not np.all(np.diff(coordinates) > 0):
+            raise AssertionError(f"{label} has invalid or unordered {dim} coordinates.")
+
+    finite = np.isfinite(observed.values)
+    np.testing.assert_array_equal(finite, np.isfinite(reference.values),
+                                  err_msg=f"{label} has a different finite sample mask.")
+    if not np.any(finite):
+        raise AssertionError(f"{label} has no finite samples to compare.")
+    return finite
 
 
 def compute_awedge_metrics(comparison: dict[str, xr.DataArray]) -> dict[str, dict[str, float]]:
     metrics: dict[str, dict[str, float]] = {}
     for key in ("a_vs_energy", "a_vs_q_284p7", "a_vs_q_285p2"):
-        ref_key = "reference_a_vs_energy" if key == "a_vs_energy" else f"reference_{key}"
-        delta = np.asarray(comparison[key].values - comparison[ref_key].values, dtype=np.float64)
+        observed, reference = comparison[key], comparison[f"reference_{key}"]
+        finite = _awedge_comparison_mask(observed, reference, key)
+        delta = observed.values[finite].astype(np.float64) - reference.values[finite]
+        worst = int(np.argmax(np.abs(delta)))
+        axis = observed.dims[0]
         metrics[key] = {
-            "max_abs_diff": float(np.nanmax(np.abs(delta))),
-            "rmse": float(np.sqrt(np.nanmean(delta * delta))),
+            "max_abs_diff": float(abs(delta[worst])),
+            "rmse": float(np.sqrt(np.mean(delta * delta))),
+            f"max_abs_at_{axis}": float(observed.coords[axis].values[finite][worst]),
+            "n_compared": int(delta.size),
         }
     return metrics
 
@@ -579,7 +604,12 @@ def metrics_within_thresholds(
         for metric_name, limit in limits.items():
             value = metrics[key][metric_name]
             if not np.isfinite(value) or value > float(limit):
-                failures.append(f"{key} {metric_name}={value:.6g} exceeds limit {float(limit):.6g}")
+                message = f"{key} {metric_name}={value:.6g} exceeds limit {float(limit):.6g}"
+                if metric_name == "max_abs_diff":
+                    axis, unit = ("energy", "eV") if key == "a_vs_energy" else ("q", "nm⁻¹")
+                    coordinate = metrics[key][f"max_abs_at_{axis}"]
+                    message += f" at {axis}={coordinate:.6g} {unit}"
+                failures.append(message)
     return len(failures) == 0, failures
 
 

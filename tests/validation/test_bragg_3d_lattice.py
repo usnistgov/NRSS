@@ -100,6 +100,19 @@ CASE_THRESHOLDS = {
     },
 }
 
+# Isolated high-q spots confirmed by the finite-voxel Fourier survey in RG01B.
+# The fixed (1, 0, 0) anchors come from its independent 285 eV calculation.
+HIGH_Q_SPOTS = {
+    "hcp_a45": ((5, 8, -6), (-5, -8, -6)),
+    "simple_cubic_a30": ((4, 3, -2), (-4, -3, -2)),
+}
+HIGH_Q_DIRECT_ANCHORS = {
+    "hcp_a45": 2538.6962808928974,
+    "simple_cubic_a30": 8531.267273319569,
+}
+HIGH_Q_FLOOR_RATIO = 1e-4
+HCP_WEAK_CONTROL = (4, 7, -4)
+
 
 def _sanitize_scattering(arr: np.ndarray) -> np.ndarray:
     arr = np.asarray(arr, dtype=np.float64)
@@ -206,6 +219,32 @@ def _match_expected_spots(
         "median_peak_ratio": float(np.median(peak_ratios)),
         "min_peak_intensity": float(min(match["peak_intensity"] for match in matches)),
     }
+
+
+def _assert_high_q_detector_spots(case, detector, qx, qy, predicted_spots):
+    asserted = HIGH_Q_SPOTS[case.case_id]
+    indices = (*asserted, HCP_WEAK_CONTROL) if case.case_id == "hcp_a45" else asserted
+    by_hkl = {(spot["h"], spot["k"], spot["l"]): spot for spot in predicted_spots}
+    selected = [by_hkl[hkl] for hkl in indices]
+    half_width = int(ANNULUS_OUTER_PIXELS) + 1
+    anchor = HIGH_Q_DIRECT_ANCHORS[case.case_id]
+    contrast_limit = CASE_THRESHOLDS[case.case_id]["peak_ratio_min"]
+    matches = _match_expected_spots(detector, qx, qy, selected)["matches"]
+    for hkl, match in zip(indices, matches):
+        row = np.argmin(abs(qy - match["qy_expected"]))
+        col = np.argmin(abs(qx - match["qx_expected"]))
+        roi = detector[row-half_width:row+half_width+1, col-half_width:col+half_width+1]
+        assert roi.shape == (2 * half_width + 1,) * 2 and np.isfinite(roi).all(), hkl
+        height = match["peak_intensity"] / anchor
+        print(f"high-q {case.case_id} {hkl} · peak/anchor={height:.6g} · "
+              f"peak/background={match['peak_ratio']:.6g} · dq={match['abs_dq']:.6g}")
+        if hkl in asserted:
+            assert height >= HIGH_Q_FLOOR_RATIO, (hkl, height)
+            assert match["peak_ratio"] >= contrast_limit, (hkl, match["peak_ratio"])
+            row = np.argmin(abs(qy - match["qy_found"]))
+            col = np.argmin(abs(qx - match["qx_found"]))
+            neighborhood = detector[row-1:row+2, col-1:col+2]
+            assert detector[row, col] == neighborhood.max(), hkl
 
 
 def _find_unexpected_peaks(
@@ -519,7 +558,8 @@ def _evaluate_case(case: Bragg3DCase, nrss_path: ComputationPath) -> dict[str, o
     scattering = morph.run(stdout=False, stderr=False, return_xarray=True, validate=False)
     t2 = perf_counter()
 
-    image = _sanitize_scattering(scattering.sel(energy=float(case.energy_eV)).values)
+    detector = scattering.sel(energy=float(case.energy_eV)).values
+    image = _sanitize_scattering(detector)
     qx = np.asarray(scattering.coords["qx"].values, dtype=np.float64)
     qy = np.asarray(scattering.coords["qy"].values, dtype=np.float64)
 
@@ -536,6 +576,8 @@ def _evaluate_case(case: Bragg3DCase, nrss_path: ComputationPath) -> dict[str, o
     )
     if not all_predicted_spots:
         raise AssertionError(f"No detector-visible 3D Bragg spots were predicted for case {case.case_id}.")
+    if nrss_path.category == "cupy" and case.energy_eV == ENERGY_EV and case.case_id in HIGH_Q_SPOTS:
+        _assert_high_q_detector_spots(case, detector, qx, qy, all_predicted_spots)
 
     all_shell_qs = radial_shells_from_spots(
         all_predicted_spots,
