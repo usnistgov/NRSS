@@ -109,6 +109,9 @@ extern "C" __global__ void compact_tensor_projection(
     float *output, const long long endpoints, const int fields,
     const int components, const int channels, const int nx, const int nz,
     const long long plane_size, const float scale, const float nan_value
+#ifdef NRSS_PIXEL_RECTANGLE
+    , const int origin_y, const int origin_x, const int width, const long long logical_plane
+#endif
 ) {
     const long long column = (long long)blockIdx.x * blockDim.x + threadIdx.x;
     if (column >= plane_size) {
@@ -121,13 +124,21 @@ extern "C" __global__ void compact_tensor_projection(
         }
         return;
     }
-    const float a = qx[column % nx], b = qy[column / nx];
+#ifdef NRSS_PIXEL_RECTANGLE
+    const int iy = origin_y + column / width, ix = origin_x + column % width;
+    const long long global_column = (long long)iy * nx + ix;
+    const long long plane_stride = logical_plane;
+#else
+    const int iy = column / nx, ix = column % nx;
+    const long long global_column = column, plane_stride = plane_size;
+#endif
+    const float a = qx[ix], b = qy[iy];
     const float d = wave_number * wave_number;
     const int lower = nz == 1 ? 0 : z0[column];
 #ifdef NRSS_SPAN_LOOKUP
-    const long long lo = offsets[column] + lower - first[column];
+    const long long lo = offsets[global_column] + lower - first[global_column];
 #else
-    const long long lo = index_of(indices, endpoints, lower * plane_size + column);
+    const long long lo = index_of(indices, endpoints, lower * plane_stride + global_column);
 #endif
     const bool cross = channels == 3;
     Coefficients low = components == 3
@@ -140,7 +151,7 @@ extern "C" __global__ void compact_tensor_projection(
 #ifdef NRSS_SPAN_LOOKUP
         const long long hi = lo + upper - lower;
 #else
-        const long long hi = index_of(indices, endpoints, upper * plane_size + column);
+        const long long hi = index_of(indices, endpoints, upper * plane_stride + global_column);
 #endif
         const Coefficients high = components == 3
             ? project_endpoint<3>(hi, values, weights, endpoints, fields,
@@ -194,12 +205,14 @@ def _detector_columns(cp, projection):
     return columns, projection.safe_z0.ravel()[columns], projection.safe_z1.ravel()[columns]
 
 
-def _detector_endpoint_union(runtime, morphology, cp, energies, detector):
-    plane_size = detector.y_count * detector.x_count
+def _detector_endpoint_union(runtime, morphology, cp, energies, detector, pixel_region=None):
+    logical_plane = detector.y_count * detector.x_count
+    plane_size = logical_plane if pixel_region is None else pixel_region.size
+    region_options = {} if pixel_region is None else {"pixel_region": pixel_region}
     used = cp.zeros(detector.z_count * plane_size, dtype=cp.bool_)
     for energy in dict.fromkeys(energies):
         try:
-            projection = runtime._detector_projection_geometry(morphology, energy, cp, detector)
+            projection = runtime._detector_projection_geometry(morphology, energy, cp, detector, **region_options)
             columns, z0, z1 = _detector_columns(cp, projection)
             if z0 is None:
                 used[columns] = True
@@ -208,7 +221,11 @@ def _detector_endpoint_union(runtime, morphology, cp, energies, detector):
                     used[indices.astype(columns.dtype) * plane_size + columns] = True
         finally:
             runtime._discard_detector_projection_geometry(morphology, energy)
-    return cp.flatnonzero(used)
+    indices = cp.flatnonzero(used)
+    if pixel_region is not None:
+        depth, columns = cp.divmod(indices, plane_size)
+        indices = depth * logical_plane + pixel_region.global_columns(columns, detector.x_count)
+    return indices
 
 
 def _native_indices(runtime, cp, shape, indices, real_transform):
@@ -321,7 +338,7 @@ def _nonzero_basis_rows(runtime, cp, materials, counts, coefficients):
 
 def build_energy_basis(
     runtime, morphology, cp, materials, energies, window, mode, execution, *,
-    shape_override=None, recorder=None, xyz_plan=None,
+    shape_override=None, recorder=None, xyz_plan=None, pixel_region=None,
 ):
     detector = runtime._detector_geometry(morphology, cp, shape_override=shape_override)
     shape = tuple(morphology.NumZYX)
@@ -330,6 +347,7 @@ def build_energy_basis(
     virtual_mode = None
     logical_window = window
     column_spans = endpoint_plan = None
+    region_options = {} if pixel_region is None else {"pixel_region": pixel_region}
     angle_family = runtime._angle_family_plan(morphology)
     direct = mode == "direct_r2c"
     components = (0, 1, 2) if direct else angle_family.required_nt_components
@@ -354,7 +372,9 @@ def build_energy_basis(
         zero_fields_skipped = None
         destinations = np.arange(field_count, dtype=np.intp)
     if shape_override is None:
-        indices = _detector_endpoint_union(runtime, morphology, cp, energies, detector)
+        indices = _detector_endpoint_union(runtime, morphology, cp, energies, detector, **region_options)
+        if pixel_region is not None:
+            endpoint_plan = {"layout": "bitmap", "planner_arrays_bytes": pixel_region.size * detector.z_count}
         native, reflect = _native_indices(runtime, cp, shape, indices, real_transform)
     else:
         from ._cupy_virtual_z import VirtualZEvaluator, dc_indices, sparse_endpoint_union
@@ -371,10 +391,15 @@ def build_energy_basis(
                     requested=morphology._backend_runtime_state.get(
                         XYZ_ENDPOINT_PLAN_KEY, xyz_plan.endpoint_plan if xyz_plan is not None else "legacy",
                     ),
+                    **region_options,
                 )
             else:
-                indices = sparse_endpoint_union(runtime, morphology, cp, energies, detector, shape_override, recorder)
+                indices = sparse_endpoint_union(
+                    runtime, morphology, cp, energies, detector, shape_override, recorder, **region_options,
+                )
                 indices = cp.union1d(indices, cp.asarray(stencil))
+                if pixel_region is not None:
+                    endpoint_plan = {"layout": "sparse"}
             native, reflect = _native_indices(runtime, cp, shape_override, indices, real_transform)
             stencil = cp.asarray(stencil)
             dc_positions = (
@@ -382,14 +407,18 @@ def build_energy_basis(
                 else column_spans.positions(stencil)
             )
             if xyz:
-                from ._cupy_virtual_xyz import XYZ_FACTORED_XY_KEY, VirtualXYZEvaluator
+                from ._cupy_virtual_xyz import XYZ_FACTORED_XY_KEY, VirtualXYZEvaluator, full_detector_kx
 
                 virtual_mode = "3d"
+                factored = morphology._backend_runtime_state.get(
+                    XYZ_FACTORED_XY_KEY, xyz_plan.factored_xy if xyz_plan is not None else False,
+                )
+                transform_kx = None
+                if factored and pixel_region is not None:
+                    transform_kx = full_detector_kx(runtime, cp, energies, detector, shape_override, stencil)
                 virtual = VirtualXYZEvaluator(
                     cp, shape, shape_override, native, reflect, dc_positions,
-                    factored=morphology._backend_runtime_state.get(
-                        XYZ_FACTORED_XY_KEY, xyz_plan.factored_xy if xyz_plan is not None else False,
-                    ),
+                    factored=factored, transform_kx=transform_kx,
                 )
                 if window is not None:
                     wy, wx = window
@@ -564,26 +593,35 @@ def project_energy(runtime, morphology, cp, basis, energy_index, energy, angle_f
         runtime._discard_detector_projection_geometry(morphology, energy, shape_override=shape_override)
 
 
-def project_energy_fused(runtime, morphology, cp, basis, energy_index, energy, angles, recorder):
+def project_energy_fused(runtime, morphology, cp, basis, energy_index, energy, angles, recorder, pixel_region=None):
     """Mix and project a detector pixel directly from its cached Fourier samples."""
     packed = basis.column_spans is not None
-    kernel = _COMPACT_TENSOR_PROJECTION_KERNELS.get(packed)
+    key = (packed, pixel_region is not None)
+    kernel = _COMPACT_TENSOR_PROJECTION_KERNELS.get(key)
     if kernel is None:
+        options = []
+        if packed:
+            options.append("-DNRSS_SPAN_LOOKUP")
+        if pixel_region is not None:
+            options.append("-DNRSS_PIXEL_RECTANGLE")
         kernel = cp.RawKernel(
             _COMPACT_TENSOR_PROJECTION_SOURCE, "compact_tensor_projection",
-            options=("-DNRSS_SPAN_LOOKUP",) if packed else (),
+            options=tuple(options),
         )
-        _COMPACT_TENSOR_PROJECTION_KERNELS[packed] = kernel
+        _COMPACT_TENSOR_PROJECTION_KERNELS[key] = kernel
     shape_override = basis.shape_override
     detector = runtime._detector_geometry(morphology, cp, shape_override=shape_override)
+    region_options = {} if pixel_region is None else {"pixel_region": pixel_region}
     try:
         geometry = recorder.measure(
             "zpad_projection_geometry",
             lambda: runtime._detector_projection_geometry(
-                morphology, energy, cp, detector, shape_override=shape_override,
+                morphology, energy, cp, detector, shape_override=shape_override, **region_options,
             ),
         )
-        panel_shape = (detector.y_count, detector.x_count)
+        logical_shape = (detector.y_count, detector.x_count)
+        panel_shape = logical_shape if pixel_region is None else pixel_region.shape
+        region_args = () if pixel_region is None else (*pixel_region.kernel_args, np.int64(math.prod(logical_shape)))
         plane_size = math.prod(panel_shape)
         channels = int(angles.needs_proj_x) + int(angles.needs_proj_y) + int(angles.needs_proj_xy)
         panels = cp.empty((channels, *panel_shape), dtype=cp.float32)
@@ -604,6 +642,7 @@ def project_energy_fused(runtime, morphology, cp, basis, energy_index, energy, a
                     np.int64(basis.indices.size), np.int32(basis.values.shape[0]), np.int32(len(basis.components)),
                     np.int32(channels), np.int32(detector.x_count), np.int32(detector.z_count), np.int64(plane_size),
                     np.float32(runtime._one_by_four_pi), np.float32(np.nan),
+                    *region_args,
                 ),
             )
         return projection_channels(panels, angles)

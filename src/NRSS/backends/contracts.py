@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from numbers import Real
 from typing import Any, Mapping
 
 import numpy as np
@@ -141,6 +142,7 @@ _BACKEND_ARRAY_CONTRACTS = {
             "result_chunk_size",
             "result_layout",
             "result_q_grid_mode",
+            "q_max",
             "total_chi_wedge_deg",
         ),
         "runtime_compute_dtype": "float32",
@@ -343,6 +345,21 @@ def normalize_result_q_grid_mode_name(value: Any) -> str:
         "union": "union",
     }
     return aliases.get(cleaned, cleaned)
+
+
+def normalize_q_max(value: Any) -> float | None:
+    if value is None:
+        return None
+    message = "Backend 'cupy-rsoxs' q_max must be a finite nonnegative real in inverse nm."
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, Real):
+        raise BackendOptionError(message)
+    try:
+        limit = float(value)
+    except OverflowError as exc:
+        raise BackendOptionError(message) from exc
+    if not np.isfinite(limit) or limit < 0:
+        raise BackendOptionError(message)
+    return limit
 
 
 def normalize_total_chi_wedge_deg(value: Any) -> float:
@@ -610,6 +627,9 @@ def normalize_backend_options(
                 "result_layout; choose integrated, i_only, i_para_i_perp, or i_a."
             )
         normalized_options["result_q_grid_mode"] = result_q_grid_mode
+
+    if "q_max" in options:
+        normalized_options["q_max"] = normalize_q_max(options["q_max"])
 
     if "total_chi_wedge_deg" in spec["supported_backend_options"]:
         normalized_options["total_chi_wedge_deg"] = normalize_total_chi_wedge_deg(

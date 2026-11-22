@@ -1,0 +1,126 @@
+{
+  "provenance": "Independent CPU diagnostics on the published forward-geometry convention. GPU timings and process peaks are collected locally.",
+  "base_sha": "bdf69e111a0e00d0adb2241067d949648d01e552",
+  "numpy": "2.3.5",
+  "python": "3.12.14",
+  "geometry": {
+    "q_max_nm_inv": 0.8,
+    "guard_pixels_this_square_fixture": 4,
+    "logical_zyx": [
+      256,
+      1024,
+      1024
+    ],
+    "voxel_nm": 1.5,
+    "energies": 101,
+    "one_energy_287_55": {
+      "full": {
+        "valid_pixels": 398685,
+        "bins_with_dc": 797371
+      },
+      "cut": {
+        "valid_pixels": 111089,
+        "bins_with_dc": 222179
+      },
+      "guard": {
+        "valid_pixels": 115901,
+        "bins_with_dc": 231803
+      }
+    },
+    "scan": {
+      "full": {
+        "pixel_visits": 40270985,
+        "bins_with_dc": 2017475
+      },
+      "cut": {
+        "pixel_visits": 11220509,
+        "bins_with_dc": 251319
+      },
+      "guard": {
+        "pixel_visits": 11702929,
+        "bins_with_dc": 263519
+      }
+    },
+    "reduced_grid": {
+      "total": 725,
+      "kept": 297,
+      "last": 0.7974443602484645
+    },
+    "detector_return": {
+      "full_yx": [
+        1024,
+        1024
+      ],
+      "limited_yx": [
+        377,
+        377
+      ],
+      "full_mib": 404.0,
+      "limited_mib": 54.76008987426758
+    },
+    "guarded_native_fft": {
+      "kx_kept": 193,
+      "kx_total": 513,
+      "ky_kx_kept": 58291,
+      "ky_kx_total": 525312
+    }
+  },
+  "rotation_neighbors": [
+    {
+      "shape": [
+        128,
+        128
+      ],
+      "angles_deg": [
+        0,
+        15,
+        30,
+        45,
+        60,
+        75,
+        90,
+        105,
+        120,
+        135,
+        150,
+        165
+      ],
+      "finite_rays": 360,
+      "exact_dependencies_match": true,
+      "rays_lost_by_hard_cut": 360,
+      "rays_lost_by_four_pixel_guard": 0
+    },
+    {
+      "shape": [
+        77,
+        169
+      ],
+      "angles_deg": [
+        0,
+        15,
+        30,
+        45,
+        60,
+        75,
+        90,
+        105,
+        120,
+        135,
+        150,
+        165
+      ],
+      "finite_rays": 189,
+      "exact_dependencies_match": true,
+      "rays_lost_by_hard_cut": 189,
+      "rays_lost_by_four_pixel_guard": 115
+    }
+  ],
+  "factored_native_fft": {
+    "comparisons": 96,
+    "complex_values": 42840,
+    "complex_values_with_different_bits": 31539,
+    "worst_error_over_peak": 4.0261638353150163e-16,
+    "precision": "NumPy complex128",
+    "timed_gpu": false
+  }
+}

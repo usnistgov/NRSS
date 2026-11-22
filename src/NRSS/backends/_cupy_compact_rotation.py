@@ -3,7 +3,7 @@
 import numpy as np
 
 
-_ROTATION_KERNEL = None
+_ROTATION_KERNELS = {}
 
 
 _ROTATION_SOURCE = r"""
@@ -25,12 +25,23 @@ extern "C" __global__ void compact_rotate_accumulate(
     const double *transforms, const float *weights, const int *families,
     float *output, const int height, const int width, const int angles,
     const bool mask, const float nan_value
+#ifdef NRSS_PIXEL_RECTANGLE
+    , const int source_y, const int source_x, const int source_width,
+    const int output_y, const int output_x, const int output_width, const long long output_size
+#endif
 ) {
     const long long index = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+#ifdef NRSS_PIXEL_RECTANGLE
+    if (index >= output_size) {
+        return;
+    }
+    const int iy = output_y + index / output_width, ix = output_x + index % output_width;
+#else
     if (index >= (long long)height * width) {
         return;
     }
     const int iy = index / width, ix = index % width;
+#endif
     float sum = 0.0f;
     int count = 0;
     for (int angle = 0; angle < angles; ++angle) {
@@ -39,7 +50,12 @@ extern "C" __global__ void compact_rotate_accumulate(
         const float *const w = weights + 3 * angle;
         float pixel = nan_value;
         if (flags & 4) {
-            pixel = weighted_pixel(index, x, y, xy, family, w);
+#ifdef NRSS_PIXEL_RECTANGLE
+            const long long source = (long long)(iy - source_y) * source_width + ix - source_x;
+#else
+            const long long source = index;
+#endif
+            pixel = weighted_pixel(source, x, y, xy, family, w);
         } else {
             const double *const m = transforms + 6 * angle;
             const double sample_y = fma(m[1], (double)ix, m[0] * iy) + m[2];
@@ -55,7 +71,11 @@ extern "C" __global__ void compact_rotate_accumulate(
                     const double wy = dy == 0 ? 1.0 - fy : fy;
                     for (int dx = 0; dx < x_count; ++dx) {
                         const double wx = dx == 0 ? 1.0 - fx : fx;
+#ifdef NRSS_PIXEL_RECTANGLE
+                        const long long source = (long long)(y0 + dy - source_y) * source_width + x0 + dx - source_x;
+#else
                         const long long source = (long long)(y0 + dy) * width + x0 + dx;
+#endif
                         pixel += weighted_pixel(source, x, y, xy, family, w) * (float)(wy * wx);
                     }
                 }
@@ -104,15 +124,19 @@ def _rotation_parameters(runtime, morphology, cp, angle_family, shape):
     return params
 
 
-def rotate_and_accumulate(runtime, morphology, cp, proj_x, proj_y, proj_xy, angle_family):
-    global _ROTATION_KERNEL
-    if _ROTATION_KERNEL is None:
-        _ROTATION_KERNEL = cp.RawKernel(_ROTATION_SOURCE, "compact_rotate_accumulate")
-    shape = (proj_x if proj_x is not None else proj_y).shape
+def rotate_and_accumulate(runtime, morphology, cp, proj_x, proj_y, proj_xy, angle_family, demand=None):
+    cropped = demand is not None
+    kernel = _ROTATION_KERNELS.get(cropped)
+    if kernel is None:
+        options = ("-DNRSS_PIXEL_RECTANGLE",) if cropped else ()
+        kernel = cp.RawKernel(_ROTATION_SOURCE, "compact_rotate_accumulate", options=options)
+        _ROTATION_KERNELS[cropped] = kernel
+    shape = demand.logical_shape if cropped else (proj_x if proj_x is not None else proj_y).shape
     matrices, weights, families = _rotation_parameters(runtime, morphology, cp, angle_family, shape)
-    projection = cp.empty(shape, dtype=cp.float32)
+    projection = cp.empty(demand.output.shape if cropped else shape, dtype=cp.float32)
+    region_args = (*demand.source.kernel_args, *demand.output.kernel_args, np.int64(projection.size)) if cropped else ()
     threads = 128
-    _ROTATION_KERNEL(
+    kernel(
         ((projection.size + threads - 1) // threads,), (threads,),
         (
             proj_x if proj_x is not None else np.uintp(0),
@@ -120,6 +144,7 @@ def rotate_and_accumulate(runtime, morphology, cp, proj_x, proj_y, proj_xy, angl
             proj_xy if proj_xy is not None else np.uintp(0),
             matrices, weights, families, projection, np.int32(shape[0]), np.int32(shape[1]),
             np.int32(len(angle_family.angles)), np.bool_(morphology.RotMask), np.float32(np.nan),
+            *region_args,
         ),
     )
     return projection

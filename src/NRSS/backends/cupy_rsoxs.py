@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import gc
 import importlib
 import math
@@ -188,6 +188,7 @@ class _ExecutionReport:
         self.basis_builds = 0
         self.basis_cache = None
         self.energy_projector = None
+        self.q_window = None
 
     def record_fft(self, method, array):
         self.fft_calls[method, tuple(array.shape), array.dtype.name] += 1
@@ -223,7 +224,7 @@ class _ExecutionReport:
 
     def as_dict(self):
         lengths = [len(tile["energies"]) for tile in self.tiles]
-        return {
+        report = {
             "routes": list(dict.fromkeys(tile["route"] for tile in self.tiles)),
             "fallback_reasons": list(dict.fromkeys(
                 tile["fallback_reason"] for tile in self.tiles if tile["fallback_reason"] is not None
@@ -242,6 +243,9 @@ class _ExecutionReport:
             "tiles": self.tiles,
             **({"energy_projector": self.energy_projector} if self.energy_projector is not None else {}),
         }
+        if self.q_window is not None:
+            report["q_window"] = self.q_window
+        return report
 
 
 class _NullSegmentRecorder:
@@ -365,6 +369,8 @@ class _ReducedResultPlan:
     total_chi_wedge_deg: float | None = None
     device_all_chi_weights: Any | None = None
     device_sector_weights: Any | None = None
+    source_q_count: int | None = None
+    projection_demand: Any | None = None
 
 
 def _materialize_backend_array(data):
@@ -408,6 +414,7 @@ class CupyScatteringResult:
     phys_size: float
     num_zyx: tuple[int, int, int]
     padding_attrs: dict[str, Any] | None = None
+    detector_slices: tuple[slice, slice] | None = None
 
     def to_backend_array(self):
         return self.data
@@ -418,6 +425,9 @@ class CupyScatteringResult:
         d = self.phys_size
         qy = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(ny, d=d))
         qx = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(nx, d=d))
+        if self.detector_slices is not None:
+            rows, cols = self.detector_slices
+            qy, qx = qy[rows], qx[cols]
         return xr.DataArray(
             scattering_data,
             dims=["energy", "qy", "qx"],
@@ -594,6 +604,10 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         integrated_chunk_buffers = None
         reduced_chunk_buffers = None
         reduction_plan = None
+        radial_window = None
+        detector_window = None
+        projection_demand = None
+        q_max = morphology.backend_options.get("q_max")
         active_chunk_buffer_index = 0
         active_chunk_start = 0
         active_chunk_fill = 0
@@ -604,7 +618,37 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         basis_mode, basis_fallback = self._energy_basis_selection(morphology)
         virtual_shape = self._virtual_padding_shape(morphology)
         padding_attrs = self._virtual_padding_metadata(morphology, virtual_shape)
+        if q_max is not None:
+            logical_shape = self._shape_tuple(morphology, virtual_shape)
+            if result_layout == "detector":
+                from ._cupy_q_window import CartesianQWindow
+
+                qy, qx = self._detector_q_axes(morphology, logical_shape[1:])
+                detector_window = CartesianQWindow.plan(qy, qx, energies, logical_shape, q_max, cp)
+            else:
+                from ._cupy_q_window import RadialQWindow
+
+                with recorder.range("reduction"):
+                    reduction_plan = self._reduced_result_plan(
+                        morphology=morphology,
+                        projection_shape=logical_shape[1:],
+                        energies=energies,
+                        cp=cp,
+                        result_layout=result_layout,
+                        shape_override=virtual_shape,
+                        padding_attrs=padding_attrs,
+                    )
+                    radial_window = RadialQWindow.plan(reduction_plan, q_max, cp)
+                    reduction_plan = replace(reduction_plan, source_q_count=radial_window.source_q_count)
+            if basis_mode == "compact_r2c":
+                from ._cupy_q_window import ProjectionDemand
+
+                projection_demand = ProjectionDemand.plan(
+                    self, morphology, logical_shape[1:], detector_window, reduction_plan,
+                )
         virtual_options = {"shape_override": virtual_shape, "recorder": recorder} if padding_attrs else {}
+        if projection_demand is not None and projection_demand.source.shape != projection_demand.logical_shape:
+            virtual_options["pixel_region"] = projection_demand.source
         xyz_plan = None
         if virtual_shape is not None and "virtual_3d_pad_to" in morphology.backend_options:
             from ._cupy_xyz_policy import xyz_performance_plan
@@ -670,6 +714,10 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     stage = self._kernel_preload_stage(morphology)
                     if stage != "off":
                         recorder.measure("A2", lambda: self._preload_active_rawkernels(morphology, cp, stage=stage))
+            if energy_basis is None:
+                projection_demand = None
+            if projection_demand is not None and reduction_plan is not None:
+                reduction_plan = replace(reduction_plan, projection_demand=projection_demand)
             tile_request = morphology._backend_runtime_state.get(
                 XYZ_ENERGY_TILE_KEY, xyz_plan.energy_tile if xyz_plan is not None else None,
             )
@@ -678,10 +726,11 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
                 projector = make_xyz_energy_projector(
                     self, morphology, cp, energy_basis, energies, tile_request, recorder,
+                    pixel_region=None if projection_demand is None else projection_demand.source,
                 )
                 if projector is not None:
                     tiled_energies = self._iter_xyz_tile_projections(
-                        morphology, energy_basis, projector, energies, cp, ndimage, recorder,
+                        morphology, energy_basis, projector, energies, cp, ndimage, recorder, projection_demand,
                     )
             self._emit_result_streaming_summary(
                 stdout=stdout,
@@ -714,7 +763,10 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                         else:
                             projection = self._run_energy_from_basis(
                                 morphology, energy_basis, basis_mode, energy_index, energy, cp, ndimage, recorder,
+                                projection_demand,
                             )
+                    if detector_window is not None:
+                        projection = detector_window.select(projection, energy, cp, cropped=projection_demand is not None)
                     if reduction_plan is None and self._uses_reduced_result_layout(result_layout):
                         with recorder.range("reduction"):
                             reduction_plan = self._reduced_result_plan(
@@ -729,6 +781,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     if result_data is None:
                         if self._uses_reduced_result_layout(result_layout):
                             result_shape = reduction_plan.result_shape
+                            if radial_window is not None:
+                                result_shape = (*result_shape[:-1], radial_window.indices.size)
                             result_dtype = np.float64
                         else:
                             result_shape = (len(energies), *projection.shape)
@@ -753,8 +807,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                                     )
                                     if result_layout != "integrated":
                                         reduced_chunk_buffers = (
-                                            cp.empty((chunk_size, *result_shape[1:]), dtype=cp.float64),
-                                            cp.empty((chunk_size, *result_shape[1:]), dtype=cp.float64),
+                                            cp.empty((chunk_size, *reduction_plan.result_shape[1:]), dtype=cp.float64),
+                                            cp.empty((chunk_size, *reduction_plan.result_shape[1:]), dtype=cp.float64),
                                         )
                                 else:
                                     chunk_buffers = (
@@ -792,6 +846,10 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                                         del integrated_projection
                                     else:
                                         reduced_projection = integrated_projection
+                                    if radial_window is not None:
+                                        reduced_projection = radial_window.select(
+                                            reduced_projection[None, ...], energy_index, cp,
+                                        )[0]
                                 pending_copy_done = self._enqueue_host_copy(
                                     reduced_projection, result_data[energy_index], copy_stream, cp, recorder
                                 )
@@ -825,6 +883,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                                                 out=reduced_chunk_buffer[:active_chunk_fill],
                                             )
                                             chunk_to_copy = reduced_chunk_buffer[:active_chunk_fill]
+                                        if radial_window is not None:
+                                            chunk_to_copy = radial_window.select(chunk_to_copy, active_chunk_start, cp)
                                     pending_copy_done = self._enqueue_host_copy(
                                         chunk_to_copy, result_data[active_chunk_start:chunk_stop], copy_stream, cp, recorder
                                     )
@@ -840,15 +900,20 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                                     cp=cp,
                                 )[0]
                                 if result_layout == "integrated":
-                                    result_data[energy_index] = integrated_projection
+                                    reduced_projection = integrated_projection
                                 else:
-                                    result_data[energy_index] = self._reduce_integrated_chunk_for_layout(
+                                    reduced_projection = self._reduce_integrated_chunk_for_layout(
                                         integrated_projection[None, ...],
                                         reduction_plan=reduction_plan,
                                         cp=cp,
                                     )[0]
+                                if radial_window is not None:
+                                    reduced_projection = radial_window.select(
+                                        reduced_projection[None, ...], energy_index, cp,
+                                    )[0]
+                                result_data[energy_index] = reduced_projection
                             del projection
-                            del integrated_projection
+                            del integrated_projection, reduced_projection
                     elif result_residency == "host":
                         if int(chunk_size) == 1:
                             if pending_copy_done is not None:
@@ -902,6 +967,27 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             if window is not None:
                 del window
             del runtime_materials, energy_basis
+        if q_max is not None and recorder.execution is not None:
+            report = {
+                "q_max": q_max,
+                "returned_cells": result_data.size,
+                "returned_bytes": result_data.nbytes,
+            }
+            if radial_window is not None:
+                report.update(polar_source_bins=radial_window.source_q_count, full_polar_bins=reduction_plan.q.size)
+            full_cells = math.prod(logical_shape[1:])
+            report.update(
+                full_detector_cells_per_energy=full_cells,
+                projection_cells_per_energy=full_cells if projection_demand is None else projection_demand.source.size,
+                rotation_cells_per_energy=full_cells if projection_demand is None else projection_demand.output.size,
+            )
+            if projection_demand is not None:
+                report["projection_rectangle"] = {
+                    "origin_yx": projection_demand.source.origin, "shape_yx": projection_demand.source.shape,
+                }
+            recorder.execution.q_window = report
+        if radial_window is not None:
+            reduction_plan = radial_window.public_plan(reduction_plan, result_data.shape)
         result = recorder.measure(
             "F",
             lambda: self._assemble_and_retain_result(
@@ -911,6 +997,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 reduction_plan=reduction_plan,
                 shape_override=virtual_shape,
                 padding_attrs=padding_attrs,
+                detector_window=detector_window,
             ),
         )
         segment_seconds, segment_measurements, measurement = recorder.finalize()
@@ -1217,13 +1304,23 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         cp,
         out=None,
     ):
-        reduced = self._warp_polar_batched_xp(
-            projections,
-            center=reduction_plan.center,
-            radius=reduction_plan.radius,
-            radial_step_pixels=reduction_plan.radial_step_pixels,
-            xp=cp,
-        )
+        source_count = reduction_plan.source_q_count
+        if source_count != 0:
+            reduced = self._warp_polar_batched_xp(
+                projections,
+                center=reduction_plan.center,
+                radius=reduction_plan.radius if source_count is None else source_count,
+                radial_step_pixels=reduction_plan.radial_step_pixels,
+                xp=cp,
+                projection_demand=reduction_plan.projection_demand,
+            )
+        if source_count is not None and source_count < reduction_plan.q.size:
+            # Restore the original stride for common-q interpolation and chi means.
+            full = cp.empty((projections.shape[0], reduction_plan.chi.size, reduction_plan.q.size), dtype=cp.float64)
+            if source_count:
+                full[..., :source_count] = reduced
+            full[..., source_count:] = np.nan
+            reduced = full
         if reduction_plan.device_q_bounds is not None:
             energies = slice(energy_start, energy_start + reduced.shape[0])
             return self._interp_chunk_to_common_q_cupy(
@@ -1432,9 +1529,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         return out
 
     @staticmethod
-    def _warp_polar_batched_xp(values, *, center, radius, radial_step_pixels, xp):
+    def _warp_polar_batched_xp(values, *, center, radius, radial_step_pixels, xp, projection_demand=None):
         values = xp.asarray(values)
-        n_images, n_rows, n_cols = values.shape
+        n_rows, n_cols = values.shape[1:] if projection_demand is None else projection_demand.logical_shape
         n_theta = 360
         n_radius = int(np.ceil(radius))
         if n_radius <= 0:
@@ -1460,6 +1557,9 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             valid = (row_idx >= 0) & (row_idx < n_rows) & (col_idx >= 0) & (col_idx < n_cols)
             row_clip = xp.clip(row_idx, 0, n_rows - 1)
             col_clip = xp.clip(col_idx, 0, n_cols - 1)
+            if projection_demand is not None:
+                row_clip -= projection_demand.output.origin[0]
+                col_clip -= projection_demand.output.origin[1]
             sampled = values[:, row_clip, col_clip]
             return sampled * valid[None, :, :]
 
@@ -1611,6 +1711,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
     def _assemble_and_retain_result(
         self, morphology, result_data, energies, reduction_plan=None, shape_override=None, padding_attrs=None,
+        detector_window=None,
     ):
         if reduction_plan is None:
             result = CupyScatteringResult(
@@ -1618,7 +1719,10 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 energies=energies,
                 phys_size=float(morphology.PhysSize),
                 num_zyx=self._shape_tuple(morphology, shape_override),
-                padding_attrs=padding_attrs,
+                padding_attrs=(
+                    padding_attrs if detector_window is None else {**(padding_attrs or {}), **detector_window.attrs}
+                ),
+                detector_slices=None if detector_window is None else detector_window.slices,
             )
         elif reduction_plan.result_layout == "integrated":
             result = CupyIntegratedResult(
@@ -2240,7 +2344,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             return None, "energy basis requires at least two distinct energies"
         return ("compact_r2c" if mode == "auto" else mode), None
 
-    def _run_energy_from_basis(self, morphology, basis, mode, energy_index, energy, cp, ndimage, recorder):
+    def _run_energy_from_basis(self, morphology, basis, mode, energy_index, energy, cp, ndimage, recorder, demand=None):
         from ._cupy_energy_basis import project_energy, project_energy_fused
 
         if recorder.execution is not None:
@@ -2263,25 +2367,26 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
             return recorder.measure("E", finish_projection)
         project = project_energy_fused if mode == "compact_r2c" else project_energy
+        options = {} if demand is None else {"pixel_region": demand.source}
         x, y, xy = recorder.measure(
-            "D", lambda: project(self, morphology, cp, basis, energy_index, energy, angles, recorder),
+            "D", lambda: project(self, morphology, cp, basis, energy_index, energy, angles, recorder, **options),
         )
-        return self._finish_basis_projection(morphology, mode, cp, ndimage, x, y, xy, angles, recorder)
+        return self._finish_basis_projection(morphology, mode, cp, ndimage, x, y, xy, angles, recorder, demand)
 
-    def _finish_basis_projection(self, morphology, mode, cp, ndimage, x, y, xy, angles, recorder):
+    def _finish_basis_projection(self, morphology, mode, cp, ndimage, x, y, xy, angles, recorder, demand=None):
         if mode == "compact_r2c" and len(angles.angles) > 1:
             from ._cupy_compact_rotation import rotate_and_accumulate
 
             return recorder.measure(
                 "E",
-                lambda: rotate_and_accumulate(self, morphology, cp, x, y, xy, angles),
+                lambda: rotate_and_accumulate(self, morphology, cp, x, y, xy, angles, demand),
             )
         return recorder.measure(
             "E",
             lambda: self._rotate_and_accumulate_projection_coefficients(morphology, cp, ndimage, x, y, xy, angles),
         )
 
-    def _iter_xyz_tile_projections(self, morphology, basis, projector, energies, cp, ndimage, recorder):
+    def _iter_xyz_tile_projections(self, morphology, basis, projector, energies, cp, ndimage, recorder, demand=None):
         from ._cupy_energy_basis import projection_channels
 
         for start in range(0, len(energies), projector.width):
@@ -2298,7 +2403,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             for panel in panels:
                 x, y, xy = projection_channels(panel, projector.angles)
                 yield self._finish_basis_projection(
-                    morphology, "compact_r2c", cp, ndimage, x, y, xy, projector.angles, recorder,
+                    morphology, "compact_r2c", cp, ndimage, x, y, xy, projector.angles, recorder, demand,
                 )
             del panels, panel, x, y, xy
         else:
@@ -2306,7 +2411,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
         for index in range(start, len(energies)):
             yield self._run_energy_from_basis(
-                morphology, basis, "compact_r2c", index, energies[index], cp, ndimage, recorder,
+                morphology, basis, "compact_r2c", index, energies[index], cp, ndimage, recorder, demand,
             )
 
     def _run_single_energy(
@@ -5034,6 +5139,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         cp,
         detector_geometry,
         shape_override=None,
+        pixel_region=None,
     ):
         z, y, x = self._shape_tuple(morphology, shape_override=shape_override)
         cache_key = (
@@ -5045,13 +5151,18 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             float(morphology.PhysSize),
             float(energy),
         )
-        cached = morphology._backend_runtime_state.get(cache_key)
+        cached = morphology._backend_runtime_state.get(cache_key) if pixel_region is None else None
         if cached is not None:
             return cached
 
         k, radius_limit_sq = self._detector_projection_parameters(energy, detector_geometry)
         mid = detector_geometry.z_count // 2
-        valid = (detector_geometry.radius_sq <= radius_limit_sq) & detector_geometry.border_valid
+        radius_sq = detector_geometry.radius_sq
+        border = detector_geometry.border_valid
+        if pixel_region is not None:
+            radius_sq = radius_sq[pixel_region.slices]
+            border = border[pixel_region.slices]
+        valid = (radius_sq <= radius_limit_sq) & border
 
         if detector_geometry.z_count == 1:
             projection_geometry = _DetectorProjectionGeometry(
@@ -5060,13 +5171,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                 safe_z1=None,
                 frac=None,
             )
-            morphology._backend_runtime_state[cache_key] = projection_geometry
+            if pixel_region is None:
+                morphology._backend_runtime_state[cache_key] = projection_geometry
             return projection_geometry
 
         # The rationalized forward root retains small axial offsets near DC.
-        val = np.float32(k * k) - detector_geometry.radius_sq
+        val = np.float32(k * k) - radius_sq
         root = cp.sqrt(cp.maximum(val, np.float32(0.0)), dtype=cp.float32)
-        pos_z = -detector_geometry.radius_sq / (np.float32(k) + root)
+        pos_z = -radius_sq / (np.float32(k) + root)
         z_offset = pos_z / np.float32(detector_geometry.dz)
         last = detector_geometry.z_count - 1
 
@@ -5082,5 +5194,6 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             safe_z1=safe_z1,
             frac=frac,
         )
-        morphology._backend_runtime_state[cache_key] = projection_geometry
+        if pixel_region is None:
+            morphology._backend_runtime_state[cache_key] = projection_geometry
         return projection_geometry

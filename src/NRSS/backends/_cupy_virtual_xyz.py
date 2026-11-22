@@ -68,10 +68,25 @@ extern "C" __global__ void virtual_xyz_accumulate(
 """
 
 
+def full_detector_kx(runtime, cp, energies, detector, logical_shape, stencil):
+    """Find the incumbent X FFT support without materializing its endpoint union."""
+    _, ny, nx = logical_shape
+    radius_limit = max(runtime._detector_projection_parameters(energy, detector)[1] for energy in energies)
+    # Use the row nearest zero that is inside the high border. For a
+    # singleton Y, the only row is invalid and the DC stencil still applies.
+    row = max(0, min(ny // 2, ny - 2))
+    valid = detector.border_valid[row] & (detector.radius_sq[row] <= radius_limit)
+    columns = cp.concatenate((cp.flatnonzero(valid), cp.asarray(stencil % nx)))
+    x = runtime._igor_axis_orders(logical_shape, cp)[2][columns]
+    return cp.minimum(x, (-x) % nx)
+
+
 class VirtualXYZEvaluator(VirtualZEvaluator):
     """Sample a logical XYZ transform without allocating a logical 3D array."""
 
-    def __init__(self, cp, occupied_shape, logical_shape, native, reflect, dc_positions, *, factored=False):
+    def __init__(
+        self, cp, occupied_shape, logical_shape, native, reflect, dc_positions, *, factored=False, transform_kx=None,
+    ):
         nz, ny, nx = occupied_shape
         mz, my, mx = logical_shape
         super().__init__(cp, nz, logical_shape, native, reflect, dc_positions, "sum")
@@ -89,7 +104,7 @@ class VirtualXYZEvaluator(VirtualZEvaluator):
             # reflected partners and the DC neighbors. Build the X map once.
             try:
                 needed = cp.zeros(self.half_x, dtype=cp.bool_)
-                needed[native % self.half_x] = True
+                needed[native % self.half_x if transform_kx is None else transform_kx] = True
                 columns = cp.flatnonzero(needed)
                 if factored is True or columns.size * 4 <= self.half_x * 3:
                     self._x_slots = cp.cumsum(needed, dtype=cp.int32) - 1

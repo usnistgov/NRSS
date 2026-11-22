@@ -27,16 +27,27 @@ extern "C" __global__ void xyz_energy_tile(
     const float2 *values, const float2 *weights, float *output,
     const long long endpoints, const long long plane, const int nx, const int nz,
     const int count, const int channels, const float scale, const float nan_value
+#ifdef NRSS_PIXEL_RECTANGLE
+    , const int origin_y, const int origin_x, const int width, const long long logical_plane
+#endif
 ) {
     const long long column = (long long)blockIdx.x * blockDim.x + threadIdx.x;
     if (column >= plane) return;
-    const bool in_border = border[column];
-    const float r2 = radius[column];
-    const float a = qx[column % nx], b = qy[column / nx];
+#ifdef NRSS_PIXEL_RECTANGLE
+    const int iy = origin_y + column / width, ix = origin_x + column % width;
+    const long long global_column = (long long)iy * nx + ix;
+    const long long plane_stride = logical_plane;
+#else
+    const int iy = column / nx, ix = column % nx;
+    const long long global_column = column, plane_stride = plane;
+#endif
+    const bool in_border = border[global_column];
+    const float r2 = radius[global_column];
+    const float a = qx[ix], b = qy[iy];
     const int mid = nz / 2;
     const bool cross = channels == 3;
 #ifdef NRSS_TILE_SPANS
-    const long long base = offsets[column] - first_bin[column];
+    const long long base = offsets[global_column] - first_bin[global_column];
 #endif
 #ifdef NRSS_SHARE_LOADS
     long long previous_lo = -1, previous_hi = -1;
@@ -58,8 +69,8 @@ extern "C" __global__ void xyz_energy_tile(
 #ifdef NRSS_TILE_SPANS
         const long long lo = base + lower, hi = base + upper;
 #else
-        const long long lo = index_of(indices, endpoints, (long long)lower * plane + column);
-        const long long hi = index_of(indices, endpoints, (long long)upper * plane + column);
+        const long long lo = index_of(indices, endpoints, (long long)lower * plane_stride + global_column);
+        const long long hi = index_of(indices, endpoints, (long long)upper * plane_stride + global_column);
 #endif
         const float2 *const optics = weights + (long long)i * components * fields;
         float2 tensor_lo[components] = {}, tensor_hi[components] = {};
@@ -101,13 +112,17 @@ extern "C" __global__ void xyz_energy_tile(
 
 
 class EnergyTileProjector:
-    def __init__(self, cp, basis, detector, angles, parameters, width, share, scale):
+    def __init__(self, cp, basis, detector, angles, parameters, width, share, scale, pixel_region=None):
         self._cp = cp
         self._basis = basis
         self._detector = detector
         self._parameters = cp.asarray(parameters)
         self._scale = np.float32(scale)
-        self._shape = (detector.y_count, detector.x_count)
+        logical_shape = (detector.y_count, detector.x_count)
+        self._shape = logical_shape if pixel_region is None else pixel_region.shape
+        self._region_args = ()
+        if pixel_region is not None:
+            self._region_args = (*pixel_region.kernel_args, np.int64(math.prod(logical_shape)))
         self.angles = angles
         self.channels = sum((angles.needs_proj_x, angles.needs_proj_y, angles.needs_proj_xy))
         self.width = width
@@ -117,7 +132,7 @@ class EnergyTileProjector:
             self._addressing = (basis.column_spans.first, basis.column_spans.offsets)
         else:
             self._addressing = (basis.indices,)
-        key = (fields, len(basis.components), packed, share)
+        key = (fields, len(basis.components), packed, share, pixel_region is not None)
         kernel = _TILE_KERNELS.get(key)
         if kernel is None:
             options = [f"-DNRSS_TILE_FIELDS={fields}", f"-DNRSS_TILE_COMPONENTS={len(basis.components)}"]
@@ -125,6 +140,8 @@ class EnergyTileProjector:
                 options.append("-DNRSS_TILE_SPANS")
             if share:
                 options.append("-DNRSS_SHARE_LOADS")
+            if pixel_region is not None:
+                options.append("-DNRSS_PIXEL_RECTANGLE")
             kernel = cp.RawKernel(_COMPACT_TENSOR_PROJECTION_SOURCE + _TILE_SOURCE,
                                   "xyz_energy_tile", options=tuple(options))
             _TILE_KERNELS[key] = kernel
@@ -146,6 +163,7 @@ class EnergyTileProjector:
                     np.int64(basis.indices.size), np.int64(plane),
                     np.int32(detector.x_count), np.int32(detector.z_count), np.int32(count),
                     np.int32(self.channels), self._scale, np.float32(np.nan),
+                    *self._region_args,
                 ),
             )
         if recorder.execution is not None:
@@ -156,7 +174,7 @@ class EnergyTileProjector:
         return panels
 
 
-def make_xyz_energy_projector(runtime, morphology, cp, basis, energies, request, recorder):
+def make_xyz_energy_projector(runtime, morphology, cp, basis, energies, request, recorder, pixel_region=None):
     width, share = request
     if width not in (1, 2, 4, 8) or not isinstance(share, bool):
         raise ValueError("Private XYZ energy tiles require a width of 1, 2, 4, or 8 and a sharing flag.")
@@ -191,8 +209,11 @@ def make_xyz_energy_projector(runtime, morphology, cp, basis, energies, request,
             or not 0 < np.float32(detector.dz) < np.inf):
         return fallback("geometry outside the experiment")
     if recorder.execution is not None:
+        tile_bytes = panel_bytes if pixel_region is None else panel_bytes // (y * x) * pixel_region.size
         recorder.execution.energy_projector.update(
-            width=width, workspace_bytes=panel_bytes * width,
+            width=width, workspace_bytes=tile_bytes * width,
             addressing="spans" if basis.column_spans is not None else "sorted",
         )
-    return EnergyTileProjector(cp, basis, detector, angles, parameters, width, share, runtime._one_by_four_pi)
+    return EnergyTileProjector(
+        cp, basis, detector, angles, parameters, width, share, runtime._one_by_four_pi, pixel_region,
+    )

@@ -86,13 +86,14 @@ def _endpoint_kernels(cp):
     return _KERNELS
 
 
-def _accumulate(runtime, morphology, cp, energies, detector, shape, recorder, update):
+def _accumulate(runtime, morphology, cp, energies, detector, shape, recorder, update, pixel_region=None):
+    region_options = {} if pixel_region is None else {"pixel_region": pixel_region}
     for energy in sorted(set(energies)):
         try:
             projection = recorder.measure(
                 "zpad_plan_geometry",
                 lambda: runtime._detector_projection_geometry(
-                    morphology, energy, cp, detector, shape_override=shape,
+                    morphology, energy, cp, detector, shape_override=shape, **region_options,
                 ),
             )
             if projection.safe_z0 is None:
@@ -119,7 +120,7 @@ def _workspace_available(cp, size):
     return size <= (free_bytes + reusable_bytes) // 4
 
 
-def _plan_spans(runtime, morphology, cp, energies, detector, shape, stencil, fields, recorder):
+def _plan_spans(runtime, morphology, cp, energies, detector, shape, stencil, fields, recorder, pixel_region=None):
     nz, ny, nx = shape
     plane = ny * nx
     if not _workspace_available(cp, 24 * plane + 8):
@@ -128,8 +129,17 @@ def _plan_spans(runtime, morphology, cp, energies, detector, shape, stencil, fie
     first = cp.full(plane, nz, dtype=cp.int32)
     last = cp.full(plane, -1, dtype=cp.int32)
     exact_counts = cp.zeros(plane, dtype=cp.int32)
-    _accumulate(runtime, morphology, cp, energies, detector, shape, recorder,
-                lambda valid, lo, hi: update(valid, lo, hi, first, last, exact_counts))
+    if pixel_region is None:
+        update_spans = lambda valid, lo, hi: update(valid, lo, hi, first, last, exact_counts)
+    else:
+        views = tuple(values.reshape(ny, nx)[pixel_region.slices] for values in (first, last, exact_counts))
+
+        def update_spans(valid, lo, hi):
+            if nz > 1:
+                lo, hi = lo.reshape(pixel_region.shape), hi.reshape(pixel_region.shape)
+            update(valid.reshape(pixel_region.shape), lo, hi, *views)
+
+    _accumulate(runtime, morphology, cp, energies, detector, shape, recorder, update_spans, pixel_region)
 
     with recorder.range("zpad_endpoint_merge"):
         # Combine stencil entries per column before assigning on the GPU.
@@ -166,9 +176,10 @@ def _plan_spans(runtime, morphology, cp, energies, detector, shape, stencil, fie
     return indices, ColumnSpans(first, offsets), stats
 
 
-def _plan_bitmap(runtime, morphology, cp, energies, detector, shape, recorder):
+def _plan_bitmap(runtime, morphology, cp, energies, detector, shape, recorder, pixel_region=None):
     nz, ny, nx = shape
-    plane = ny * nx
+    logical_plane = ny * nx
+    plane = logical_plane if pixel_region is None else pixel_region.size
     depth = (nz + 31) // 32
     size = depth * plane * np.dtype(np.uint32).itemsize
     if size > _BITMAP_LIMIT_BYTES or not _workspace_available(cp, size + 12 * plane + 8):
@@ -176,7 +187,7 @@ def _plan_bitmap(runtime, morphology, cp, energies, detector, shape, recorder):
     _, _, update, count_bits, expand = _endpoint_kernels(cp)
     words = cp.zeros((depth, plane), dtype=cp.uint32)
     _accumulate(runtime, morphology, cp, energies, detector, shape, recorder,
-                lambda valid, lo, hi: update(valid, lo, hi, np.int64(plane), words))
+                lambda valid, lo, hi: update(valid, lo, hi, np.int64(plane), words), pixel_region)
     with recorder.range("zpad_endpoint_merge"):
         counts = cp.empty(plane, dtype=cp.int32)
         count_bits(words, np.int32(depth), np.int64(plane), counts)
@@ -184,20 +195,28 @@ def _plan_bitmap(runtime, morphology, cp, energies, detector, shape, recorder):
         total = int(offsets[-1])
         indices = cp.empty(total, dtype=cp.int64)
         expand(words, offsets, np.int32(depth), np.int64(plane), indices, size=plane)
+        if pixel_region is not None:
+            bins, columns = cp.divmod(indices, plane)
+            indices = bins * logical_plane + pixel_region.global_columns(columns, nx)
     return indices, dict(detector_endpoints=total, bitmap_bytes=size,
                          planner_arrays_bytes=words.nbytes + counts.nbytes + offsets.nbytes)
 
 
-def xyz_endpoints(runtime, morphology, cp, energies, detector, shape, stencil, fields, recorder, *, requested=None):
+def xyz_endpoints(
+    runtime, morphology, cp, energies, detector, shape, stencil, fields, recorder, *,
+    requested=None, pixel_region=None,
+):
     if requested is None:
         requested = morphology._backend_runtime_state.get(XYZ_ENDPOINT_PLAN_KEY, "legacy")
     if requested not in {"legacy", "bitmap", "spans"}:
         raise ValueError(f"Unknown private XYZ endpoint plan {requested!r}.")
     stats = {"requested": requested, "layout": "legacy"}
+    region_options = {} if pixel_region is None else {"pixel_region": pixel_region}
     if requested == "spans":
         try:
             indices, spans, details = _plan_spans(
                 runtime, morphology, cp, energies, detector, shape, stencil, fields, recorder,
+                **region_options,
             )
         except cp.cuda.memory.OutOfMemoryError:
             details = {"fallback": "span allocation failed"}
@@ -208,7 +227,7 @@ def xyz_endpoints(runtime, morphology, cp, energies, detector, shape, stencil, f
 
     if requested in {"bitmap", "spans"}:
         try:
-            indices, details = _plan_bitmap(runtime, morphology, cp, energies, detector, shape, recorder)
+            indices, details = _plan_bitmap(runtime, morphology, cp, energies, detector, shape, recorder, **region_options)
             if indices is not None:
                 with recorder.range("zpad_endpoint_merge"):
                     indices = cp.union1d(indices, cp.asarray(stencil))
@@ -220,6 +239,8 @@ def xyz_endpoints(runtime, morphology, cp, energies, detector, shape, stencil, f
 
     from ._cupy_virtual_z import sparse_endpoint_union
 
-    indices = sparse_endpoint_union(runtime, morphology, cp, energies, detector, shape, recorder)
+    indices = sparse_endpoint_union(
+        runtime, morphology, cp, energies, detector, shape, recorder, **region_options,
+    )
     with recorder.range("zpad_endpoint_merge"):
         return cp.union1d(indices, cp.asarray(stencil)), None, stats

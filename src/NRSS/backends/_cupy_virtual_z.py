@@ -36,32 +36,35 @@ extern "C" __global__ void virtual_z_sum(
 """
 
 
-def sparse_endpoint_union(runtime, morphology, cp, energies, detector, shape_override, recorder):
+def sparse_endpoint_union(runtime, morphology, cp, energies, detector, shape_override, recorder, *, pixel_region=None):
     """Collect endpoint IDs by transverse block, with storage proportional to demand."""
     plane_size = detector.y_count * detector.x_count
+    work_size = plane_size if pixel_region is None else pixel_region.size
+    region_options = {} if pixel_region is None else {"pixel_region": pixel_region}
     block_size = 262_144
-    blocks = [None] * math.ceil(plane_size / block_size)
+    blocks = [None] * math.ceil(work_size / block_size)
     for energy in dict.fromkeys(energies):
         try:
             projection = recorder.measure(
                 "zpad_plan_geometry",
                 lambda: runtime._detector_projection_geometry(
-                    morphology, energy, cp, detector, shape_override=shape_override,
+                    morphology, energy, cp, detector, shape_override=shape_override, **region_options,
                 ),
             )
             valid = projection.valid.ravel()
             lower = None if projection.safe_z0 is None else projection.safe_z0.ravel()
             upper = None if projection.safe_z1 is None else projection.safe_z1.ravel()
             with recorder.range("zpad_endpoint_merge"):
-                for block, start in enumerate(range(0, plane_size, block_size)):
+                for block, start in enumerate(range(0, work_size, block_size)):
                     stop = start + block_size
                     columns = cp.flatnonzero(valid[start:stop]) + start
+                    global_columns = columns if pixel_region is None else pixel_region.global_columns(columns, detector.x_count)
                     if lower is None:
-                        ids = columns
+                        ids = global_columns
                     else:
                         ids = cp.concatenate((
-                            lower[columns].astype(cp.int64) * plane_size + columns,
-                            upper[columns].astype(cp.int64) * plane_size + columns,
+                            lower[columns].astype(cp.int64) * plane_size + global_columns,
+                            upper[columns].astype(cp.int64) * plane_size + global_columns,
                         ))
                     if blocks[block] is not None:
                         ids = cp.concatenate((blocks[block], ids))

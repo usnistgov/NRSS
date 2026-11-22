@@ -46,6 +46,33 @@ reciprocal-plane mode, the radial coordinate is energy-independent ``q_perp``.
 Consequently, union and intersection differ only for multi-energy 3D reduced
 results.
 
+Optional q window
+-----------------
+
+Set ``backend_options={"q_max": 0.8}`` to request samples at or below
+0.8 nm⁻¹. The option accepts finite, nonnegative real values. Omitting it
+or setting it to ``None`` uses the default accessible q range for the
+selected result layout, with the original coordinates and support mask.
+
+Detector output uses the continuous forward-Ewald magnitude at each energy,
+or the transverse radius for a singleton-Z reciprocal plane. NRSS returns
+the smallest common rectangle on the original ``qy`` and ``qx`` axes and
+sets cells outside each energy's requested region to ``NaN``. A zero
+cutoff retains the original DC pixel. The attributes ``q_max``,
+``q_window_offset_yx`` and ``q_window_logical_shape_zyx`` record the
+cutoff and the crop's location on the full logical detector.
+
+Reduced layouts select samples from their existing radial grids. Shared
+grids select by ``q`` and slice the auxiliary ``q_abs`` coordinate at the
+same positions. For ``per_slice_q_abs``, NRSS retains the union of
+requested positions and masks unsupported samples separately for each energy.
+
+On the compact-tensor path, the q window also bounds the detector pixels
+needed for projection, rotation, and Fourier gathering. The planner includes
+the original interpolation neighbors. The transform grid stays at its
+configured logical size. A single off-axis E direction uses the full
+projection internally and applies the cutoff to its result.
+
 Coordinates and metadata
 ------------------------
 
