@@ -605,6 +605,51 @@ is the default and leaves all axes unweighted. <code class="docutils literal not
 Hann weights in XY; every occupied Z plane has unit axial weight. Native
 transforms, including an identity pad, retain the ordinary XYZ Hann behavior
 for <code class="docutils literal notranslate"><span class="pre">WindowingType=1</span></code>.</p>
+<p>Set <code class="docutils literal notranslate"><span class="pre">virtual_pad_material</span></code> to a material ID registered in the morphology to
+fill the added planes with that material. For example, add
+<code class="docutils literal notranslate"><span class="pre">&quot;virtual_pad_material&quot;:</span> <span class="pre">3</span></code> to the options above when material 3 is water.
+The exterior uses the selected material’s isotropic optical response at
+each energy (<code class="docutils literal notranslate"><span class="pre">S=0</span></code>). All fractions, order and orientations inside the
+supplied crop retain their input values. The option defaults to vacuum
+when omitted or set to <code class="docutils literal notranslate"><span class="pre">None</span></code>.</p>
+<p>For a material-filled extension the result also records <code class="docutils literal notranslate"><span class="pre">pad_material_id</span></code>,
+<code class="docutils literal notranslate"><span class="pre">pad_fill_order</span></code>, and the occupied and transform shapes and offsets in ZYX
+order. These attributes describe the finite box used for the transform.</p>
+</section>
+<section id="virtual-xyz-padding">
+<h2>Virtual XYZ padding<a class="headerlink" href="#virtual-xyz-padding" title="Link to this heading">#</a></h2>
+<p>Set <code class="docutils literal notranslate"><span class="pre">virtual_3d_pad_to</span></code> to an integer for a cubic logical grid or to
+<code class="docutils literal notranslate"><span class="pre">(Mz,</span> <span class="pre">My,</span> <span class="pre">Mx)</span></code> for an exact rectangular grid. The transform centers the
+supplied crop in that box and returns an <code class="docutils literal notranslate"><span class="pre">(My,</span> <span class="pre">Mx)</span></code> detector for each energy.
+For example, <code class="docutils literal notranslate"><span class="pre">virtual_3d_pad_to=(256,</span> <span class="pre">1024,</span> <span class="pre">1024)</span></code> preserves the voxel pitch
+and detector sampling of a physically occupied box of that shape.</p>
+<p>Use either <code class="docutils literal notranslate"><span class="pre">virtual_3d_pad_to</span></code> or <code class="docutils literal notranslate"><span class="pre">virtual_z_pad_to</span></code>. XYZ padding uses
+batched XY transforms of occupied planes and evaluates only the axial Fourier
+samples used by the detector. The <code class="docutils literal notranslate"><span class="pre">virtual_z_method</span></code> selector applies to
+Z-only padding. Both modes support <code class="docutils literal notranslate"><span class="pre">virtual_pad_material</span></code> and the same
+lateral-only window at the logical coordinates when <code class="docutils literal notranslate"><span class="pre">WindowingType=1</span></code>.</p>
+<p>For example, use material 2 as the exterior around a cropped morphology and
+return the native intensity and anisotropy on the padded detector’s q grid.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">morph</span> <span class="o">=</span> <span class="n">Morphology</span><span class="p">(</span>
+    <span class="nb">len</span><span class="p">(</span><span class="n">materials</span><span class="p">),</span>
+    <span class="n">materials</span><span class="o">=</span><span class="n">materials</span><span class="p">,</span>
+    <span class="n">PhysSize</span><span class="o">=</span><span class="n">voxel_pitch_nm</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;cupy-rsoxs&quot;</span><span class="p">,</span>
+    <span class="n">backend_options</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;execution_path&quot;</span><span class="p">:</span> <span class="s2">&quot;tensor_coeff&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;virtual_3d_pad_to&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="mi">1024</span><span class="p">,</span> <span class="mi">1024</span><span class="p">),</span>
+        <span class="s2">&quot;virtual_pad_material&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+        <span class="s2">&quot;result_layout&quot;</span><span class="p">:</span> <span class="s2">&quot;i_a&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+<span class="p">)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">morph</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>If material 2 has Euler orientation fields, the supplied crop uses those
+fields and the exterior uses material 2 at <code class="docutils literal notranslate"><span class="pre">S=0</span></code>. Omit
+<code class="docutils literal notranslate"><span class="pre">virtual_pad_material</span></code> to simulate a vacuum exterior. Set
+<code class="docutils literal notranslate"><span class="pre">result_layout=&quot;detector&quot;</span></code> for the complete 1024 × 1024 detector at each
+energy, or <code class="docutils literal notranslate"><span class="pre">result_layout=&quot;i_para_i_perp&quot;</span></code> for the native sector intensities.</p>
 </section>
 </section>
 
@@ -658,6 +703,7 @@ for <code class="docutils literal notranslate"><span class="pre">WindowingType=1
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#estimating-the-retained-basis">Estimating the retained basis</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#measured-cases">Measured cases</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#virtual-z-padding-for-films">Virtual z padding for films</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#virtual-xyz-padding">Virtual XYZ padding</a></li>
 </ul>
   </nav></div>
 
