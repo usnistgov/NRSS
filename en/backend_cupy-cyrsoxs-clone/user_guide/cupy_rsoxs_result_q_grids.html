@@ -488,6 +488,29 @@ reciprocal-plane mode, the radial coordinate is energy-independent <code class="
 Consequently, union and intersection differ only for multi-energy 3D reduced
 results.</p>
 </section>
+<section id="optional-q-window">
+<h2>Optional q window<a class="headerlink" href="#optional-q-window" title="Link to this heading">#</a></h2>
+<p>Set <code class="docutils literal notranslate"><span class="pre">backend_options={&quot;q_max&quot;:</span> <span class="pre">0.8}</span></code> to request samples at or below
+0.8 nm⁻¹. The option accepts finite, nonnegative real values. Omitting it
+or setting it to <code class="docutils literal notranslate"><span class="pre">None</span></code> uses the default accessible q range for the
+selected result layout, with the original coordinates and support mask.</p>
+<p>Detector output uses the continuous forward-Ewald magnitude at each energy,
+or the transverse radius for a singleton-Z reciprocal plane. NRSS returns
+the smallest common rectangle on the original <code class="docutils literal notranslate"><span class="pre">qy</span></code> and <code class="docutils literal notranslate"><span class="pre">qx</span></code> axes and
+sets cells outside each energy’s requested region to <code class="docutils literal notranslate"><span class="pre">NaN</span></code>. A zero
+cutoff retains the original DC pixel. The attributes <code class="docutils literal notranslate"><span class="pre">q_max</span></code>,
+<code class="docutils literal notranslate"><span class="pre">q_window_offset_yx</span></code> and <code class="docutils literal notranslate"><span class="pre">q_window_logical_shape_zyx</span></code> record the
+cutoff and the crop’s location on the full logical detector.</p>
+<p>Reduced layouts select samples from their existing radial grids. Shared
+grids select by <code class="docutils literal notranslate"><span class="pre">q</span></code> and slice the auxiliary <code class="docutils literal notranslate"><span class="pre">q_abs</span></code> coordinate at the
+same positions. For <code class="docutils literal notranslate"><span class="pre">per_slice_q_abs</span></code>, NRSS retains the union of
+requested positions and masks unsupported samples separately for each energy.</p>
+<p>On the compact-tensor path, the q window also bounds the detector pixels
+needed for projection, rotation, and Fourier gathering. The planner includes
+the original interpolation neighbors. The transform grid stays at its
+configured logical size. A single off-axis E direction uses the full
+projection internally and applies the cutoff to its result.</p>
+</section>
 <section id="coordinates-and-metadata">
 <h2>Coordinates and metadata<a class="headerlink" href="#coordinates-and-metadata" title="Link to this heading">#</a></h2>
 <p>The returned xarray object uses <code class="docutils literal notranslate"><span class="pre">q</span></code> as the uniform shared coordinate. For a
@@ -585,6 +608,7 @@ with <code class="docutils literal notranslate"><span class="pre">result_layout=
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#grid-modes">Grid modes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#optional-q-window">Optional q window</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#coordinates-and-metadata">Coordinates and metadata</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#q-resolution">q resolution</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#compatibility-and-validation">Compatibility and validation</a></li>
