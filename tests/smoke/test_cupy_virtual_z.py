@@ -481,7 +481,7 @@ def test_virtual_z_filled_tensor_before_and_after_dc(method, target, window, mon
     )
 
 
-def _assert_complex_tensor_matches_literal(materials, logical, window, monkeypatch, **options):
+def _assert_complex_tensor_matches_literal(materials, logical, window, monkeypatch, *, factored=False, **options):
     import cupy as cp
 
     from NRSS.backends import _cupy_energy_basis, _cupy_virtual_z
@@ -507,7 +507,17 @@ def _assert_complex_tensor_matches_literal(materials, logical, window, monkeypat
     monkeypatch.setattr(_cupy_virtual_z, "sparse_endpoint_union", lambda *_: cp.arange(math.prod(logical)))
     monkeypatch.setattr(_cupy_virtual_z.VirtualZEvaluator, "capture", capture)
     monkeypatch.setattr(_cupy_energy_basis, "build_energy_basis", build)
-    _, execution = _run(_morphology(materials, window, virtual_pad_material=1, **options))
+    morph = _morphology(materials, window, virtual_pad_material=1, **options)
+    if "virtual_3d_pad_to" in options:
+        from NRSS.backends._cupy_xyz_endpoints import XYZ_ENDPOINT_PLAN_KEY
+
+        # This oracle deliberately asks the legacy planner for every FFT bin.
+        morph._backend_runtime_state[XYZ_ENDPOINT_PLAN_KEY] = "legacy"
+    if factored:
+        from NRSS.backends._cupy_virtual_xyz import XYZ_FACTORED_XY_KEY
+
+        morph._backend_runtime_state[XYZ_FACTORED_XY_KEY] = True
+    _, execution = _run(morph)
     if "virtual_3d_pad_to" in options:
         assert execution["routes"] == ["virtual_3d_sum"]
     assert len(mixed) == 2
@@ -792,3 +802,279 @@ def test_virtual_xyz_shape_and_fill_changes_rebuild_matching_geometry():
         assert native.attrs == identity.attrs
     finally:
         run.release_runtime()
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff")
+@pytest.mark.usefixtures("nrss_path")
+@pytest.mark.parametrize(("target", "energies", "span_layout"), [
+    ((1, 8, 7), (285., 303., 285.), "spans"),
+    ((17, 19, 20), (292.55, 282.55, 287.55, 287.55), "spans"),
+    ((201, 17, 20), (1700., 120., 690., 285., 285.), "bitmap"),
+])
+def test_virtual_xyz_endpoint_plans_cover_independent_geometry(target, energies, span_layout):
+    from types import SimpleNamespace
+
+    import cupy as cp
+
+    from NRSS.backends._cupy_virtual_z import dc_indices
+    from NRSS.backends._cupy_xyz_endpoints import XYZ_ENDPOINT_PLAN_KEY, xyz_endpoints
+    from NRSS.backends.cupy_rsoxs import CupyRsoxsBackendRuntime, _NullSegmentRecorder
+
+    runtime = CupyRsoxsBackendRuntime()
+    owner = SimpleNamespace(PhysSize=1.5, _backend_runtime_state={})
+    detector = runtime._detector_geometry(owner, cp, shape_override=target)
+    z, y, x = target
+    steps = 2 * np.pi / (np.array(target) * owner.PhysSize)
+    qx = (np.arange(x) - x // 2) * steps[2]
+    qy = (np.arange(y) - y // 2) * steps[1]
+    radii = (qy[:, None] ** 2 + qx ** 2).astype(np.float32)
+    expected = set()
+    for energy in energies:
+        k = 2 * np.pi / (1239.84197 / energy)
+        depth = min(k, (z // 2) * steps[0]) if z > 1 else k
+        valid = radii <= np.float32(depth * (2 * k - depth))
+        valid[-1] = valid[:, -1] = False
+        samples = runtime._detector_projection_geometry(owner, energy, cp, detector, shape_override=target)
+        np.testing.assert_array_equal(samples.valid.get(), valid)
+        if z > 1:
+            actual_lo, actual_hi, fractions = (samples.safe_z0.get(), samples.safe_z1.get(), samples.frac.get())
+        for iy, ix in np.argwhere(valid):
+            if z == 1:
+                lo = hi = 0
+            else:
+                radius = radii[iy, ix]
+                root = np.sqrt(max(np.float32(k * k) - radius, np.float32(0)))
+                offset = max(-radius / (np.float32(k) + root) / np.float32(steps[0]), np.float32(-(z // 2)))
+                floor = np.floor(offset)
+                lo = int(floor) + z // 2
+                hi = min(lo + 1, z - 1)
+                assert actual_lo[iy, ix] == lo
+                assert actual_hi[iy, ix] == hi
+                assert fractions[iy, ix] == offset - floor
+            expected.update(((lo * y + iy) * x + ix, (hi * y + iy) * x + ix))
+        runtime._discard_detector_projection_geometry(owner, energy, shape_override=target)
+    stencil = dc_indices(target)
+    expected.update(stencil)
+    desired = cp.asarray(sorted(expected), dtype=cp.int64)
+    for plan, layout in (("legacy", "legacy"), ("bitmap", "bitmap"), ("spans", span_layout)):
+        owner._backend_runtime_state[XYZ_ENDPOINT_PLAN_KEY] = plan
+        indices, spans, report = xyz_endpoints(
+            runtime, owner, cp, energies, detector, target, stencil, 7, _NullSegmentRecorder(),
+        )
+        assert report["layout"] == layout
+        if spans is None:
+            cp.testing.assert_array_equal(indices, desired)
+        else:
+            cp.testing.assert_array_equal(indices[spans.positions(desired)], desired)
+            positions = spans.positions(cp.asarray(stencil))
+            cp.testing.assert_array_equal(indices[positions], cp.asarray(stencil))
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff")
+@pytest.mark.usefixtures("nrss_path")
+@pytest.mark.parametrize("layout", ["detector", "i_a"])
+def test_virtual_xyz_endpoint_plan_parity_with_rotated_oriented_fill(layout):
+    from NRSS.backends._cupy_xyz_endpoints import XYZ_ENDPOINT_PLAN_KEY
+    from NRSS.backends._cupy_xyz_policy import XYZ_PERFORMANCE_PROFILE_KEY
+
+    options = dict(virtual_3d_pad_to=(13, 20, 23), virtual_pad_material=1,
+                   result_layout=layout, result_residency="device", result_chunk_size=4)
+    reports = {}
+    for plan in ("legacy", "bitmap", "spans"):
+        morph = _morphology(_xyz_inclusion((1, -1)), 1, **options)
+        morph.Energies = [340., 285.]
+        morph.EAngleRotation = [0., 15., 165.]
+        morph.RotMask = 1
+        morph._backend_runtime_state[XYZ_PERFORMANCE_PROFILE_KEY] = "legacy"
+        morph._backend_runtime_state[XYZ_ENDPOINT_PLAN_KEY] = plan
+        result, report = _run(morph)
+        assert report["basis_cache"]["endpoint_plan"]["layout"] == plan
+        reports[plan] = result
+    expected = reports["legacy"]
+    for plan in ("bitmap", "spans"):
+        actual = reports[plan]
+        _assert_full_parity(expected, actual)
+        if layout == "detector":
+            np.testing.assert_array_equal(actual.values, expected.values)
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff")
+@pytest.mark.usefixtures("nrss_path")
+@pytest.mark.parametrize(("plan", "layout", "residency", "chunk", "angles", "width", "share", "fail_tile"), [
+    ("spans", "detector", "host", 1, [0., 0., 0.], 8, True, False),
+    ("spans", "detector", "device", 4, [90., 0., 90.], 4, False, False),
+    ("bitmap", "detector", "host", 4, [0., 15., 165.], 4, True, False),
+    ("spans", "i_a", "device", 1, [0., 15., 165.], 2, True, False),
+    ("spans", "i_a", "host", 4, [0., 15., 165.], 2, True, True),
+])
+def test_virtual_xyz_energy_tiles_match_scalar(
+    plan, layout, residency, chunk, angles, width, share, fail_tile, monkeypatch,
+):
+    import cupy as cp
+
+    from NRSS.backends._cupy_energy_tiles import EnergyTileProjector
+    from NRSS.backends._cupy_xyz_endpoints import XYZ_ENDPOINT_PLAN_KEY
+    from NRSS.backends.cupy_rsoxs import XYZ_ENERGY_TILE_KEY
+
+    energies = [340., 285., 340., 285., 285.]
+    options = dict(virtual_3d_pad_to=(13, 20, 23), virtual_pad_material=1,
+                   result_layout=layout, result_residency=residency, result_chunk_size=chunk)
+
+    def specimen():
+        morph = _morphology(_xyz_inclusion((1, -1)), 1, **options)
+        morph.Energies = energies
+        morph.EAngleRotation = angles
+        morph.RotMask = 1
+        morph._backend_runtime_state[XYZ_ENDPOINT_PLAN_KEY] = plan
+        return morph
+
+    expected, _ = _run(specimen())
+    if fail_tile:
+        project = EnergyTileProjector.project
+
+        def fail_second(projector, start, stop, recorder):
+            if start == 2:
+                raise cp.cuda.memory.OutOfMemoryError(1024, 0)
+            return project(projector, start, stop, recorder)
+
+        monkeypatch.setattr(EnergyTileProjector, "project", fail_second)
+
+    morph = specimen()
+    morph._backend_runtime_state[XYZ_ENERGY_TILE_KEY] = (width, share)
+    try:
+        morph._set_private_backend_timing_segments(("energy",))
+        raw = morph.run(stdout=False, stderr=False, return_xarray=False)
+        assert isinstance(raw.to_backend_array(), cp.ndarray) == (residency == "device")
+        actual = raw.to_xarray()
+        np.testing.assert_array_equal(actual.energy.values, energies)
+        _assert_full_parity(expected, actual)
+        report = morph.backend_timings["execution"]
+        assert report["routes"] == ["virtual_3d_sum"]
+        assert report["basis_builds"] == 1
+        assert report["compute_tile_size"] == min(width, len(energies))
+        expected_tail = 1 if fail_tile else len(energies) % width or width
+        assert report["final_tile_length"] == expected_tail
+        assert report["energy_projector"].get("fallback") == (
+            "tile workspace allocation failed" if fail_tile else None
+        )
+        assert [e for tile in report["tiles"] for e in tile["energies"]] == energies
+    finally:
+        morph.release_runtime()
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff")
+@pytest.mark.usefixtures("nrss_path")
+@pytest.mark.parametrize(("case", "fields", "skipped"), [
+    ("zero_at_first_energy", 8, 1),
+    ("isotropic_optics_in_oriented_material", 2, 7),
+    ("all_zero", 0, 9),
+    ("unvalidated_nonfinite_field", 9, 0),
+])
+def test_virtual_xyz_prunes_only_exact_zero_optical_basis_rows(case, fields, skipped):
+    from NRSS.backends._cupy_energy_basis import XYZ_PRUNE_ZERO_FIELDS_KEY
+    from NRSS.backends._cupy_xyz_endpoints import XYZ_ENDPOINT_PLAN_KEY
+    from NRSS.backends._cupy_xyz_policy import XYZ_PERFORMANCE_PROFILE_KEY
+    from NRSS.backends.cupy_rsoxs import XYZ_ENERGY_TILE_KEY
+
+    def specimen():
+        materials = _xyz_inclusion((1, -1))
+        if case == "zero_at_first_energy":
+            materials[1].opt_constants[285.] = [0.] * 4
+        elif case == "isotropic_optics_in_oriented_material":
+            materials[1].opt_constants = {energy: [.25, 0., .25, 0.] for energy in (285., 340.)}
+        elif case == "all_zero":
+            for material in materials.values():
+                material.opt_constants = {energy: [0.] * 4 for energy in (285., 340.)}
+        else:
+            materials[3].Vfrac[0, 0, 0] = np.nan
+        morph = _morphology(materials, 1, virtual_3d_pad_to=(13, 20, 23), virtual_pad_material=1)
+        morph.Energies = [285., 340.]
+        morph.EAngleRotation = [0., 15., 165.]
+        morph._backend_runtime_state[XYZ_ENDPOINT_PLAN_KEY] = "spans"
+        morph._backend_runtime_state[XYZ_PERFORMANCE_PROFILE_KEY] = "legacy"
+        return morph
+
+    expected, reference = _run(specimen())
+    morph = specimen()
+    morph._backend_runtime_state[XYZ_PRUNE_ZERO_FIELDS_KEY] = True
+    if case == "all_zero":
+        morph._backend_runtime_state[XYZ_ENERGY_TILE_KEY] = (2, True)
+    actual, report = _run(morph)
+    np.testing.assert_array_equal(expected.values, actual.values)
+    for coord in expected.coords:
+        np.testing.assert_array_equal(expected.coords[coord], actual.coords[coord])
+    assert reference["basis_cache"]["fields"] == fields + skipped
+    assert report["basis_cache"]["fields"] == fields
+    assert report["basis_cache"]["zero_fields_skipped"] == skipped
+    if case == "all_zero":
+        assert report["energy_projector"]["fallback"] == "no nonzero basis fields"
+        assert report["fft_count"] == 0
+        assert np.nanmax(np.abs(actual.values)) == 0
+    elif case == "zero_at_first_energy":
+        assert np.nanmax(actual.sel(energy=340.).values) > 0
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff")
+@pytest.mark.usefixtures("nrss_path")
+@pytest.mark.parametrize(("target", "window"), [((13, 18, 23), 1), ((14, 17, 24), 0)])
+def test_virtual_xyz_factored_xy_signed_tensor_matches_literal(target, window, monkeypatch):
+    from NRSS.backends._cupy_virtual_xyz import XYZ_FACTORED_XY_KEY
+
+    fields = _xyz_inclusion((1, -1))
+    with monkeypatch.context() as capture:
+        _assert_complex_tensor_matches_literal(
+            fields, target, window, capture, factored=True, virtual_3d_pad_to=target,
+        )
+    for fill in (None, 1):
+        options = dict(virtual_3d_pad_to=target, virtual_pad_material=fill)
+        expected, _ = _run(_morphology(fields, window, **options))
+        morph = _morphology(fields, window, **options)
+        morph._backend_runtime_state[XYZ_FACTORED_XY_KEY] = True
+        actual, execution = _run(morph)
+        assert execution["basis_cache"]["xy_factored_kx"] > 0
+        assert {f["method"] for f in execution["ffts"]} >= {
+            "basis_rfft_x_occupied_y", "basis_fft_y_selected_x",
+        }
+        _assert_full_parity(expected, actual)
+
+
+@pytest.mark.gpu
+@pytest.mark.path_subset("cupy_tensor_coeff")
+@pytest.mark.usefixtures("nrss_path")
+def test_virtual_xyz_retries_optional_planning_and_split_fft(monkeypatch):
+    import cupy as cp
+
+    from NRSS.backends import _cupy_xyz_endpoints
+    from NRSS.backends._cupy_virtual_xyz import XYZ_FACTORED_XY_KEY
+
+    target = (13, 18, 23)
+    options = dict(virtual_3d_pad_to=target, virtual_pad_material=1)
+    expected, _ = _run(_morphology(_xyz_inclusion((1, -1)), 1, **options))
+    fft = cp.fft.fft
+    attempts = []
+
+    def unavailable(*args, **kwargs):
+        raise cp.cuda.memory.OutOfMemoryError(1024, 0)
+
+    def constrained_fft(data, *args, **kwargs):
+        if data.ndim == 3 and kwargs.get("n") == target[1]:
+            attempts.append(data.shape[0])
+            unavailable()
+        return fft(data, *args, **kwargs)
+
+    monkeypatch.setattr(_cupy_xyz_endpoints, "_plan_bitmap", unavailable)
+    monkeypatch.setattr(cp.fft, "fft", constrained_fft)
+    morph = _morphology(_xyz_inclusion((1, -1)), 1, **options)
+    morph._backend_runtime_state[XYZ_FACTORED_XY_KEY] = True
+    actual, execution = _run(morph)
+    cache = execution["basis_cache"]
+    assert cache["endpoint_plan"]["layout"] == "legacy"
+    assert cache["endpoint_plan"]["fallback"] == "bitmap allocation failed"
+    assert cache["xy_factored_fallback"] == "factored FFT workspace allocation failed"
+    assert attempts[-1] == 1
+    _assert_full_parity(expected, actual)

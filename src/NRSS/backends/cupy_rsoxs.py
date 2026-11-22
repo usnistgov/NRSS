@@ -24,6 +24,7 @@ from .runtime import BackendRuntime
 _CUPY_KERNEL_CACHE: dict[str, Any] = {}
 _CUPY_KERNEL_BACKEND_REPORT: dict[str, str] = {}
 _CUPY_PRIVATE_TIMING_SEGMENTS_KEY = "_private_backend_timing_segments"
+XYZ_ENERGY_TILE_KEY = "_private_xyz_energy_tile"
 _CUPY_SEGMENT_MEASUREMENTS = {
     "A2": "wall_clock",
     "B": "cuda_event",
@@ -37,7 +38,15 @@ _CUPY_SEGMENT_MEASUREMENTS = {
     "tile": "cuda_event",
     "basis_build": "cuda_event",
     "zpad_plan": "cuda_event",
+    "zpad_plan_geometry": "cuda_event",
+    "zpad_endpoint_merge": "cuda_event",
+    "zpad_optical_prune": "cuda_event",
+    "zpad_projection_geometry": "cuda_event",
+    "zpad_projection_kernel": "cuda_event",
     "zpad_xy": "cuda_event",
+    "zpad_xy_x": "cuda_event",
+    "zpad_xy_pack": "cuda_event",
+    "zpad_xy_y": "cuda_event",
     "zpad_layout": "cuda_event",
     "zpad_phase": "cuda_event",
     "zpad_axial": "cuda_event",
@@ -178,6 +187,7 @@ class _ExecutionReport:
         self.tiles = []
         self.basis_builds = 0
         self.basis_cache = None
+        self.energy_projector = None
 
     def record_fft(self, method, array):
         self.fft_calls[method, tuple(array.shape), array.dtype.name] += 1
@@ -202,6 +212,14 @@ class _ExecutionReport:
             )
         if basis.xyz_xy_tile_planes is not None:
             self.basis_cache["xy_tile_planes"] = basis.xyz_xy_tile_planes
+        if basis.endpoint_plan is not None:
+            self.basis_cache["endpoint_plan"] = basis.endpoint_plan
+        if basis.zero_fields_skipped is not None:
+            self.basis_cache["zero_fields_skipped"] = basis.zero_fields_skipped
+        if basis.xyz_factored_kx is not None:
+            self.basis_cache["xy_factored_kx"] = basis.xyz_factored_kx
+        if basis.xyz_factored_fallback is not None:
+            self.basis_cache["xy_factored_fallback"] = basis.xyz_factored_fallback
 
     def as_dict(self):
         lengths = [len(tile["energies"]) for tile in self.tiles]
@@ -222,6 +240,7 @@ class _ExecutionReport:
             "compute_tile_size": max(lengths, default=0),
             "final_tile_length": lengths[-1] if lengths else 0,
             "tiles": self.tiles,
+            **({"energy_projector": self.energy_projector} if self.energy_projector is not None else {}),
         }
 
 
@@ -581,10 +600,20 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         runtime_materials = recorder.measure("A2", lambda: self._runtime_material_views(morphology, cp))
         window = None
         energy_basis = None
+        tiled_energies = None
         basis_mode, basis_fallback = self._energy_basis_selection(morphology)
         virtual_shape = self._virtual_padding_shape(morphology)
         padding_attrs = self._virtual_padding_metadata(morphology, virtual_shape)
         virtual_options = {"shape_override": virtual_shape, "recorder": recorder} if padding_attrs else {}
+        xyz_plan = None
+        if virtual_shape is not None and "virtual_3d_pad_to" in morphology.backend_options:
+            from ._cupy_xyz_policy import xyz_performance_plan
+
+            xyz_plan = xyz_performance_plan(
+                morphology._backend_runtime_state, morphology.NumZYX, virtual_shape,
+                energies, result_layout, result_residency, chunk_size,
+            )
+            virtual_options["xyz_plan"] = xyz_plan
         result_data = None
         try:
             if basis_mode is None and self._kernel_preload_stage(morphology) == "a2":
@@ -641,6 +670,19 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     stage = self._kernel_preload_stage(morphology)
                     if stage != "off":
                         recorder.measure("A2", lambda: self._preload_active_rawkernels(morphology, cp, stage=stage))
+            tile_request = morphology._backend_runtime_state.get(
+                XYZ_ENERGY_TILE_KEY, xyz_plan.energy_tile if xyz_plan is not None else None,
+            )
+            if tile_request is not None:
+                from ._cupy_energy_tiles import make_xyz_energy_projector
+
+                projector = make_xyz_energy_projector(
+                    self, morphology, cp, energy_basis, energies, tile_request, recorder,
+                )
+                if projector is not None:
+                    tiled_energies = self._iter_xyz_tile_projections(
+                        morphology, energy_basis, projector, energies, cp, ndimage, recorder,
+                    )
             self._emit_result_streaming_summary(
                 stdout=stdout,
                 result_residency=result_residency,
@@ -667,6 +709,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                                 recorder=recorder,
                                 fallback_reason=basis_fallback,
                             )
+                        elif tiled_energies is not None:
+                            projection = next(tiled_energies)
                         else:
                             projection = self._run_energy_from_basis(
                                 morphology, energy_basis, basis_mode, energy_index, energy, cp, ndimage, recorder,
@@ -840,6 +884,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             if pending_copy_done is not None:
                 recorder.measure("synchronization", pending_copy_done.synchronize)
                 pending_copy_done = None
+            if tiled_energies is not None:
+                tiled_energies.close()
             if pending_host_projection is not None:
                 del pending_host_projection
             if chunk_buffers is not None:
@@ -2218,9 +2264,11 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             return recorder.measure("E", finish_projection)
         project = project_energy_fused if mode == "compact_r2c" else project_energy
         x, y, xy = recorder.measure(
-            "D",
-            lambda: project(self, morphology, cp, basis, energy_index, energy, angles),
+            "D", lambda: project(self, morphology, cp, basis, energy_index, energy, angles, recorder),
         )
+        return self._finish_basis_projection(morphology, mode, cp, ndimage, x, y, xy, angles, recorder)
+
+    def _finish_basis_projection(self, morphology, mode, cp, ndimage, x, y, xy, angles, recorder):
         if mode == "compact_r2c" and len(angles.angles) > 1:
             from ._cupy_compact_rotation import rotate_and_accumulate
 
@@ -2232,6 +2280,34 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             "E",
             lambda: self._rotate_and_accumulate_projection_coefficients(morphology, cp, ndimage, x, y, xy, angles),
         )
+
+    def _iter_xyz_tile_projections(self, morphology, basis, projector, energies, cp, ndimage, recorder):
+        from ._cupy_energy_basis import projection_channels
+
+        for start in range(0, len(energies), projector.width):
+            stop = min(start + projector.width, len(energies))
+            try:
+                with recorder.range("tile"):
+                    panels = recorder.measure("D", lambda: projector.project(start, stop, recorder))
+            except cp.cuda.memory.OutOfMemoryError:
+                if recorder.execution is not None:
+                    recorder.execution.energy_projector["fallback"] = "tile workspace allocation failed"
+                break
+            if recorder.execution is not None:
+                recorder.execution.record_tile("virtual_3d_sum", energies[start:stop])
+            for panel in panels:
+                x, y, xy = projection_channels(panel, projector.angles)
+                yield self._finish_basis_projection(
+                    morphology, "compact_r2c", cp, ndimage, x, y, xy, projector.angles, recorder,
+                )
+            del panels, panel, x, y, xy
+        else:
+            return
+
+        for index in range(start, len(energies)):
+            yield self._run_energy_from_basis(
+                morphology, basis, "compact_r2c", index, energies[index], cp, ndimage, recorder,
+            )
 
     def _run_single_energy(
         self, morphology, runtime_materials, energy, cp, ndimage, window, recorder, fallback_reason=None,
@@ -4943,6 +5019,14 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         morphology._backend_runtime_state[cache_key] = detector_geometry
         return detector_geometry
 
+    @staticmethod
+    def _detector_projection_parameters(energy, detector_geometry):
+        k = 2.0 * math.pi / (1239.84197 / float(energy))
+        mid = detector_geometry.z_count // 2
+        depth = min(k, mid * detector_geometry.dz) if mid else k
+        # The forward Ewald branch is limited by the first axial bin.
+        return k, np.float32(depth * (2.0 * k - depth))
+
     def _detector_projection_geometry(
         self,
         morphology,
@@ -4965,12 +5049,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         if cached is not None:
             return cached
 
-        k = 2.0 * math.pi / (1239.84197 / float(energy))
+        k, radius_limit_sq = self._detector_projection_parameters(energy, detector_geometry)
         mid = detector_geometry.z_count // 2
-        depth = min(k, mid * detector_geometry.dz) if mid else k
-        # On the forward branch, q_perp² = depth * (2k - depth).
-        # Limit depth by both the Ewald sphere and the first sampled z bin.
-        radius_limit_sq = np.float32(depth * (2.0 * k - depth))
         valid = (detector_geometry.radius_sq <= radius_limit_sq) & detector_geometry.border_valid
 
         if detector_geometry.z_count == 1:

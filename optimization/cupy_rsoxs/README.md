@@ -8,6 +8,7 @@ Start current-workflow performance work with the [ticket board](speed_tickets/RE
 | Baseline commands and timing rules | [Measurement protocol](speed_tickets/MEASUREMENTS.md) |
 | Current campaign evidence | [Decisions and results](speed_tickets/RESULTS.md) |
 | Full validation before a push | [S07](speed_tickets/S07-promotion.md) |
+| Virtual XYZ padded scans and high-resolution FFTs | [ZP10–ZP15 tickets](zpad_tickets/ZP10-15-START.md) and [results](zpad_tickets/ZP10-15-RESULTS.md) |
 | Maintained behavior and supported options | [Backend specification](backend_spec.md) and [accepted state](accepted_state.md) |
 | Test suite and path definitions | [Validation and status](validation_and_status.md) |
 | Expert approximation behavior | [Fast approximations](fast_approximations.md) |

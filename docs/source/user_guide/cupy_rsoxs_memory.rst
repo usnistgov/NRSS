@@ -185,6 +185,15 @@ samples used by the detector. The ``virtual_z_method`` selector applies to
 Z-only padding. Both modes support ``virtual_pad_material`` and the same
 lateral-only window at the logical coordinates when ``WindowingType=1``.
 
+The compact tensor backend chooses the endpoint lookup and projection tile
+for the requested energies, detector size, and result layout. It omits a
+Fourier basis row when its optical coefficient is exactly zero at every
+requested energy and active tensor component. For a small crop in a large
+logical grid, the backend can split the lateral transform and carry only the
+required X columns into the Y transform. These choices preserve the physical
+q coordinates and the requested energy order. The complete returned
+detector still occupies ``My * Mx`` FP32 values per energy.
+
 For example, use material 2 as the exterior around a cropped morphology and
 return the native intensity and anisotropy on the padded detector's q grid.
 

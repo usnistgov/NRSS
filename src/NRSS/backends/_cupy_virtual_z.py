@@ -36,35 +36,40 @@ extern "C" __global__ void virtual_z_sum(
 """
 
 
-def sparse_endpoint_union(runtime, morphology, cp, energies, detector, shape_override):
+def sparse_endpoint_union(runtime, morphology, cp, energies, detector, shape_override, recorder):
     """Collect endpoint IDs by transverse block, with storage proportional to demand."""
     plane_size = detector.y_count * detector.x_count
     block_size = 262_144
     blocks = [None] * math.ceil(plane_size / block_size)
     for energy in dict.fromkeys(energies):
         try:
-            projection = runtime._detector_projection_geometry(
-                morphology, energy, cp, detector, shape_override=shape_override,
+            projection = recorder.measure(
+                "zpad_plan_geometry",
+                lambda: runtime._detector_projection_geometry(
+                    morphology, energy, cp, detector, shape_override=shape_override,
+                ),
             )
             valid = projection.valid.ravel()
             lower = None if projection.safe_z0 is None else projection.safe_z0.ravel()
             upper = None if projection.safe_z1 is None else projection.safe_z1.ravel()
-            for block, start in enumerate(range(0, plane_size, block_size)):
-                stop = start + block_size
-                columns = cp.flatnonzero(valid[start:stop]) + start
-                if lower is None:
-                    ids = columns
-                else:
-                    ids = cp.concatenate((
-                        lower[columns].astype(cp.int64) * plane_size + columns,
-                        upper[columns].astype(cp.int64) * plane_size + columns,
-                    ))
-                if blocks[block] is not None:
-                    ids = cp.concatenate((blocks[block], ids))
-                blocks[block] = cp.unique(ids)
+            with recorder.range("zpad_endpoint_merge"):
+                for block, start in enumerate(range(0, plane_size, block_size)):
+                    stop = start + block_size
+                    columns = cp.flatnonzero(valid[start:stop]) + start
+                    if lower is None:
+                        ids = columns
+                    else:
+                        ids = cp.concatenate((
+                            lower[columns].astype(cp.int64) * plane_size + columns,
+                            upper[columns].astype(cp.int64) * plane_size + columns,
+                        ))
+                    if blocks[block] is not None:
+                        ids = cp.concatenate((blocks[block], ids))
+                    blocks[block] = cp.unique(ids)
         finally:
             runtime._discard_detector_projection_geometry(morphology, energy, shape_override=shape_override)
-    return cp.sort(cp.concatenate(blocks))
+    with recorder.range("zpad_endpoint_merge"):
+        return cp.sort(cp.concatenate(blocks))
 
 
 def dc_indices(shape):

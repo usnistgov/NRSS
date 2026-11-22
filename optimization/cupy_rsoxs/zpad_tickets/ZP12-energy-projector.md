@@ -1,0 +1,20 @@
+# ZP12 · Reuse the complex Fourier loads inside an energy tile
+
+**Priority 2.** Measure whether sharing basis reads changes the marginal time per added energy. The existing S03 experiment selected the fused *scalar* projector. Its small native 101-energy width-1 and width-8 candidates took 0.4909 and 0.4939 s. Merely putting eight scalar projections in a tile has already been tested. This ticket's treatment is a different memory-access pattern, qualified on the *padded* basis. [S03 record](../speed_tickets/RESULTS.md)
+
+| Arm | Required comparison |
+|---|---|
+| A | Qualified scalar projector and original global search |
+| B | Same scalar projector using the best lookup/geometry plan from ZP11 |
+| C | As B with a tiled launch and identical per-energy loads. Width 1 matches B. This measures launch amortization alone |
+| D | Same addresses and widths, but retain a Fourier sample across energies that need it. This measures incremental sharing |
+
+For one detector column and an energy tile in ascending order, get both required Z positions per energy. Reuse a field's complex sample across the matching pair or the one shared endpoint when bins move by one. Apply the independent complex coefficient vector for *each* energy, its own k, qz, support, interpolation fraction and dipole projector. Project the two complex endpoint tensors separately, form x/y/xy intensity coefficients and blend endpoint powers. Integrate or rotate each output exactly as in the current public path. For initially chosen narrow scans, benchmark widths 2, 4 and 8, plus width 1. With a tail of 101 energies, include a non-full final tile. Avoid materializing a `(energy, fields, components, all_endpoints)` array.
+
+Prototype a per-column register/shared-memory version or a warp spanning columns for coalesced basis access. Instrument actual field-vector loads, achieved DRAM bytes, L2 hit rate where available, register pressure/spills, occupancy and projector time. Use counters in diagnostic runs only. The geometric ceiling on *requested* sample reuse at width 8 is 7.03× for the dense scan and 1.05× for the wide control. Actual DRAM traffic and wall time depend on caching and execution. A simple two-position rolling cache per column is an inexpensive first candidate. Consider sparse optical contraction (e.g. pure diagonal material contributions) only as a separately timed ablation. For anisotropic rows preserve coherent cross terms and numerical order to the tested accuracy.
+
+Keep compute tile width independent of `result_chunk_size`. Measure chunk 1 and 4, host/device detectors and native reduced output. Stage each completed panel/tile into its correct public output slot with the proper stream event, preserve progress semantics and honor partial transfers, exceptions and release. Test non-monotone input with inverse permutation including energy-dependent optics. Preserve the existing public policy for repeated energies and test it against the parent. Use each energy’s own optical weights at shared bin pairs.
+
+**Acceptance.** Compare A/B/C/D at 1, 20, 101 energies, single and 12 directions, both narrow and wide energy schedules. Require full candidate-versus-parent panel parity for 101 energies, absolute intensities and the ZP15 reduced checks. Report 20→101 marginal ms per energy, number of public FFT/basis builds and actual energy-tile widths. Advance D only where it beats the best scalar *end to end* beyond same-checkout drift or brings measured value for a specified supported layout. If transfer, planning or occupancy hides a kernel win, quantify the residual and keep the faster measured default.
+
+The included [NumPy mixing check](../../../tests/validation/dev/cupy_rsoxs_virtual_3dpad/check_shared_endpoint_mixing.py) exercised seven permuted energies with complex, energy-dependent tensor weights, a real-field DC repair, and all three polarization channels. With width 4 it reduced toy field-vector reads from 4,048 to 2,064 and reproduced every output value exactly. It is a downstream algebra check. GPU timing and hardware load counts remain part of this ticket.

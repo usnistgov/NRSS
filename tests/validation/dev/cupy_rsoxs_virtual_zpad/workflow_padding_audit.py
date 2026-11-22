@@ -69,6 +69,18 @@ def _arm(run, source, route, target, fill, layout, *, literal):
         input_policy="strict", ownership_policy="borrow",
     )
     morph.Energies = list(source.Energies)
+    if not literal and route == "virtual_3d_sum" and os.environ.get("NRSS_PADDING_SPEED_AUDIT_LOG"):
+        from NRSS.backends._cupy_virtual_xyz import XYZ_FACTORED_XY_KEY
+        from NRSS.backends._cupy_xyz_endpoints import XYZ_ENDPOINT_PLAN_KEY
+        from NRSS.backends.cupy_rsoxs import XYZ_ENERGY_TILE_KEY
+
+        # Stress the optimized routes on small and irregular morphologies in
+        # addition to the automatic selections in the ordinary panel.
+        morph._backend_runtime_state[XYZ_FACTORED_XY_KEY] = True
+        morph._backend_runtime_state[XYZ_ENERGY_TILE_KEY] = (8, True)
+        morph._backend_runtime_state[XYZ_ENDPOINT_PLAN_KEY] = (
+            "spans" if len(set(morph.Energies)) > 1 else "bitmap"
+        )
     if literal and hann:
         xy_hann_reference(morph)
     try:
@@ -93,7 +105,7 @@ def _arm(run, source, route, target, fill, layout, *, literal):
             assert data.attrs["window_z"] == "none"
             if fill is not None:
                 assert data.attrs["pad_material_id"] == fill
-        return data, execution["fft_count"]
+        return data, execution
     finally:
         morph.release_runtime()
 
@@ -148,10 +160,16 @@ def install(log_path):
 
 
 def _compare_arms(run, owner, route, target, fill, layout, case):
-    reference, literal_ffts = _arm(run, owner, route, target, fill, layout, literal=True)
-    virtual, virtual_ffts = _arm(run, owner, route, target, fill, layout, literal=False)
+    reference, literal_execution = _arm(run, owner, route, target, fill, layout, literal=True)
+    virtual, virtual_execution = _arm(run, owner, route, target, fill, layout, literal=False)
     metrics = compare(reference, virtual)
-    case.update(metrics=metrics, fft_calls={"literal": literal_ffts, "virtual": virtual_ffts})
+    case.update(
+        metrics=metrics,
+        fft_calls={"literal": literal_execution["fft_count"], "virtual": virtual_execution["fft_count"]},
+        basis_cache=virtual_execution["basis_cache"],
+        energy_projector=virtual_execution.get("energy_projector"),
+        compute_tile_size=virtual_execution["compute_tile_size"],
+    )
     if any(max(m["relative_l2"], m["max_difference_over_peak"]) > TOLERANCE
            for m in metrics.values()):
         raise AssertionError(f"{route} differs from the literal box: {metrics}")

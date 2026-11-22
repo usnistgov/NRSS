@@ -95,12 +95,33 @@ def worker(size, fill_id, action, repeats, folder, args):
         raise RuntimeError(f"Worker imported a different checkout: {NRSS.__file__}")
     fraction = sphere_fraction()
     morph = make_morph(fraction,size,fill_id,args.arm,args.z_method)
+    profile = getattr(args, "performance_profile", "legacy")
+    if (checkout / "src/NRSS/backends/_cupy_xyz_policy.py").is_file():
+        from NRSS.backends._cupy_xyz_policy import XYZ_PERFORMANCE_PROFILE_KEY
+
+        morph._backend_runtime_state[XYZ_PERFORMANCE_PROFILE_KEY] = profile
+    elif profile != "legacy":
+        raise ValueError(f"{checkout} does not support the {profile} XYZ profile.")
+    if args.endpoint_plan != "legacy":
+        from NRSS.backends._cupy_xyz_endpoints import XYZ_ENDPOINT_PLAN_KEY
+
+        morph._backend_runtime_state[XYZ_ENDPOINT_PLAN_KEY] = args.endpoint_plan
+    if getattr(args, "prune_zero_fields", False):
+        from NRSS.backends._cupy_energy_basis import XYZ_PRUNE_ZERO_FIELDS_KEY
+
+        morph._backend_runtime_state[XYZ_PRUNE_ZERO_FIELDS_KEY] = True
+    if getattr(args, "factored_xy", False):
+        from NRSS.backends._cupy_virtual_xyz import XYZ_FACTORED_XY_KEY
+
+        morph._backend_runtime_state[XYZ_FACTORED_XY_KEY] = True
     device = cp.cuda.Device()
     start_info = cp.cuda.runtime.getDeviceProperties(device.id)
     result = {"M":size, "fill_id":fill_id, "arm":args.arm, "action":action, "worker_pid":os.getpid(),
               "sphere_sha256":fingerprint(fraction), "git":subprocess.check_output(
                   ["git","rev-parse","HEAD"],cwd=checkout,text=True).strip(),
               "dirty":bool(subprocess.check_output(["git","status","--porcelain"],cwd=checkout)),
+              "endpoint_plan":args.endpoint_plan,
+              "performance_profile":profile,
               "gpu_name":start_info["name"].decode(), "visible_device":os.environ.get("CUDA_VISIBLE_DEVICES"),
               "gpu_memory_bytes":int(start_info["totalGlobalMem"]), "cuda_driver":cp.cuda.runtime.driverGetVersion(),
               "cupy":cp.__version__, "nrss":str(NRSS.__file__),
@@ -205,13 +226,18 @@ def run_campaign(args):
             for action in ("timing","memory","accuracy"):
                 cmd = [sys.executable,str(THIS),"--worker",action,"--sizes",str(size),"--fill",args.fill,
                        "--repeats",str(args.repeats),"--out",str(rundir),"--arm",args.arm,
-                       "--nrss-root",str(args.nrss_root.resolve()),"--z-method",args.z_method]
+                       "--nrss-root",str(args.nrss_root.resolve()),"--z-method",args.z_method,
+                       "--endpoint-plan",args.endpoint_plan,"--performance-profile",args.performance_profile]
                 if action == "accuracy" and args.verify_full_voxel:
                     cmd.append("--verify-full-voxel")
                 if action == "accuracy" and args.save_panel:
                     cmd.append("--save-panel")
                 if action == "accuracy" and args.stages:
                     cmd.append("--stages")
+                if args.prune_zero_fields:
+                    cmd.append("--prune-zero-fields")
+                if args.factored_xy:
+                    cmd.append("--factored-xy")
                 observer = observe_memory(rundir,"nvml",gpu,.010) if action=="memory" else nullcontext()
                 with observer as memory, (rundir/(action+".log")).open("w") as log:
                     subprocess.run(cmd,cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
@@ -255,6 +281,13 @@ def main():
     parser.add_argument("--z-method",choices=("sum","residues"),default="sum",help="Method for the film arm")
     parser.add_argument("--save-panel",action="store_true",help="Save the complete host panel in the accuracy pass")
     parser.add_argument("--stages",action="store_true",help="Record the speed-harness stage timers in the diagnostic pass")
+    parser.add_argument("--endpoint-plan", choices=("legacy", "bitmap", "spans"), default="legacy")
+    parser.add_argument("--performance-profile", choices=("legacy", "energy", "resolution", "auto"),
+                        default="legacy")
+    parser.add_argument("--prune-zero-fields", action="store_true",
+                        help="Screen exact-zero optical basis pruning on the XYZ route")
+    parser.add_argument("--factored-xy", action="store_true",
+                        help="Screen split X/Y FFTs on required RFFT columns")
     parser.add_argument("--gpu",help="Physical GPU index or UUID")
     parser.add_argument("--verify-full-voxel", action="store_true",
                         help="Compare all pixels with the independent CPU transform in the accuracy worker")

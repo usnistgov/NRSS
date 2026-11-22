@@ -1191,13 +1191,22 @@ def _run_case_once(
 
         run_result: dict[str, Any] = {"resolved_backend_options": dict(morphology.backend_options)}
         padding = getattr(backend_result, "padding_attrs", None) or getattr(backend_result, "attrs", {})
+        if "virtual_3d_pad_to" in (case.backend_options or {}):
+            run_result["source_shape_zyx"] = list(morphology.NumZYX)
+        if padding.get("pad_mode") == "xyz":
+            run_result["xyz_padding"] = {
+                k: padding[k] for k in ("occupied_shape_zyx", "transform_shape_zyx", "pad_offsets_zyx",
+                                        "pad_fill", "pad_material_id", "window_xy", "window_z") if k in padding
+            }
         occupied_z = prepared_inputs["occupied_z"]
-        transform_z = padding.get("transform_z", int(morphology.NumZYX[0]))
+        transform_z = (padding["transform_shape_zyx"][0] if padding.get("pad_mode") == "xyz"
+                       else padding.get("transform_z", int(morphology.NumZYX[0])))
         run_result["z_padding"] = {
             "occupied_z": occupied_z,
             "transform_z": transform_z,
             "offset": (transform_z - occupied_z) // 2,
-            "route": padding.get("virtual_z_method", "explicit" if case.explicit_pad_z else "native"),
+            "route": ("xyz" if padding.get("pad_mode") == "xyz"
+                      else padding.get("virtual_z_method", "explicit" if case.explicit_pad_z else "native")),
             "detector_grid_convention": padding.get(
                 "detector_grid_convention",
                 getattr(sys.modules[type(backend_result).__module__], "_DETECTOR_GRID_CONVENTION", None),

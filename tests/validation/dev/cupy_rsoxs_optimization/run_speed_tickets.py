@@ -41,6 +41,9 @@ STAGES = [
     "A1", "A2", "B", "C", "D", "E", "F", "C+D", "B+C+D", "energy", "tile", "basis_build",
     "reduction", "d2h", "synchronization",
     "zpad_plan", "zpad_xy", "zpad_layout", "zpad_phase", "zpad_axial", "zpad_gather", "zpad_fill",
+    "zpad_plan_geometry", "zpad_endpoint_merge", "zpad_projection_geometry", "zpad_projection_kernel",
+    "zpad_optical_prune",
+    "zpad_xy_x", "zpad_xy_pack", "zpad_xy_y",
 ]
 
 
@@ -88,6 +91,9 @@ def parse_args():
     parser.add_argument("--transform-z", type=int, help="Probe detector geometry for a distinct transform depth")
     parser.add_argument("--baseline-z-padding", type=_parse_z_padding, metavar="METHOD:M")
     parser.add_argument("--candidate-z-padding", type=_parse_z_padding, metavar="METHOD:M")
+    parser.add_argument("--xyz-pad-to", type=int, nargs=3, metavar=("Z","Y","X"),
+                        help="Apply the same virtual XYZ target to both benchmark arms")
+    parser.add_argument("--xyz-pad-material", type=int, help="Numbered exterior material in both XYZ arms")
     parser.add_argument("--gpu", help="One GPU index or UUID, defaults to inherited selection or 0")
     parser.add_argument("--repeats", type=int, default=3)
     mode = parser.add_mutually_exclusive_group()
@@ -130,6 +136,14 @@ def parse_args():
         args.aa and (args.candidate_options or args.candidate_path or args.candidate_z_padding)
     ):
         parser.error("candidate options must be a JSON object and A/A uses identical paths and options")
+    if args.xyz_pad_material is not None and (not args.xyz_pad_to or args.xyz_pad_material < 1):
+        parser.error("--xyz-pad-material requires --xyz-pad-to and a positive material ID")
+    if args.xyz_pad_to:
+        pad_keys = {"virtual_3d_pad_to", "virtual_z_pad_to", "virtual_z_method", "virtual_pad_material"}
+        if min(args.xyz_pad_to) < 1 or args.baseline_z_padding or args.candidate_z_padding:
+            parser.error("Use positive XYZ lengths and one padding geometry per arm")
+        if pad_keys.intersection(args.candidate_options):
+            parser.error("Set common XYZ geometry and material with the shared flags")
     if set(args.candidate_options) & {"execution_path", "result_layout", "result_chunk_size",
                                      "result_residency", "z_collapse_mode", "mixed_precision_mode",
                                      "result_q_grid_mode", "total_chi_wedge_deg"}:
@@ -163,6 +177,10 @@ def case_payload(args, label, candidate):
         options["execution_path"] = path
     if candidate:
         options.update(args.candidate_options)
+    if args.xyz_pad_to:
+        options["virtual_3d_pad_to"] = list(args.xyz_pad_to)
+        if args.xyz_pad_material is not None:
+            options["virtual_pad_material"] = args.xyz_pad_material
     padding = args.candidate_z_padding if candidate and not args.aa else args.baseline_z_padding
     explicit_pad_z = None
     if padding is not None:
@@ -277,6 +295,15 @@ def run_worker(root, spec, folder, env, args):
     if result.get("energies_ev") != spec["energies_ev"] or result.get("eangle_rotation") != spec["eangle_rotation"]:
         raise RuntimeError(f"{label}: energy or angle selection changed ({result_file})")
     target = spec["explicit_pad_z"] or spec["backend_options"].get("virtual_z_pad_to")
+    xyz_target = spec["backend_options"].get("virtual_3d_pad_to")
+    if xyz_target is not None:
+        expected = [xyz_target]*3 if isinstance(xyz_target, int) else list(xyz_target)
+        if result.get("source_shape_zyx") != expected:
+            actual = result.get("xyz_padding", {})
+            if actual.get("transform_shape_zyx") != expected:
+                raise RuntimeError(f"{label}: XYZ worker returned a different geometry ({result_file})")
+            if actual.get("pad_material_id") != spec["backend_options"].get("virtual_pad_material"):
+                raise RuntimeError(f"{label}: XYZ worker returned a different fill material ({result_file})")
     if target is not None and result.get("z_padding", {}).get("transform_z") != target:
         raise RuntimeError(f"{label}: expected executed transform depth {target} ({result_file})")
     shape = result.get("panel_shape", [])
