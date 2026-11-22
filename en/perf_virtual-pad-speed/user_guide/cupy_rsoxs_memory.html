@@ -628,6 +628,14 @@ batched XY transforms of occupied planes and evaluates only the axial Fourier
 samples used by the detector. The <code class="docutils literal notranslate"><span class="pre">virtual_z_method</span></code> selector applies to
 Z-only padding. Both modes support <code class="docutils literal notranslate"><span class="pre">virtual_pad_material</span></code> and the same
 lateral-only window at the logical coordinates when <code class="docutils literal notranslate"><span class="pre">WindowingType=1</span></code>.</p>
+<p>The compact tensor backend chooses the endpoint lookup and projection tile
+for the requested energies, detector size, and result layout. It omits a
+Fourier basis row when its optical coefficient is exactly zero at every
+requested energy and active tensor component. For a small crop in a large
+logical grid, the backend can split the lateral transform and carry only the
+required X columns into the Y transform. These choices preserve the physical
+q coordinates and the requested energy order. The complete returned
+detector still occupies <code class="docutils literal notranslate"><span class="pre">My</span> <span class="pre">*</span> <span class="pre">Mx</span></code> FP32 values per energy.</p>
 <p>For example, use material 2 as the exterior around a cropped morphology and
 return the native intensity and anisotropy on the padded detector’s q grid.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">morph</span> <span class="o">=</span> <span class="n">Morphology</span><span class="p">(</span>
