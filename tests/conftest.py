@@ -18,13 +18,12 @@ from NRSS.backends import (
     resolve_backend_name,
 )
 from tests.path_matrix import (
-    PEER_PATHS,
+    DEFAULT_PATH_IDS,
     SPEED_VARIANTS,
     SPEED_VARIANT_ENV,
     ComputationPath,
     default_path_for_backend,
     get_computation_path,
-    peer_paths_for_backend,
 )
 
 
@@ -85,11 +84,11 @@ def _explicit_path_request(config) -> ComputationPath | None:
     return path
 
 
-def _determine_default_backend() -> tuple[str | None, bool]:
+def _determine_default_backend() -> str | None:
     try:
-        return resolve_backend_name(None), False
+        return resolve_backend_name("cupy-rsoxs")
     except BackendUnavailableError:
-        return None, False
+        return None
 
 
 def _resolve_path_matrix_selection(config) -> tuple[ComputationPath | None, str | None, str | None]:
@@ -111,8 +110,7 @@ def _resolve_path_matrix_selection(config) -> tuple[ComputationPath | None, str 
     if explicit_backend is not None:
         return None, explicit_backend, "explicit_backend"
 
-    default_backend, _ = _determine_default_backend()
-    return None, default_backend, "default"
+    return None, _determine_default_backend(), "default"
 
 
 def _matrix_paths_for_config(config) -> tuple[ComputationPath, ...]:
@@ -123,8 +121,8 @@ def _matrix_paths_for_config(config) -> tuple[ComputationPath, ...]:
     if explicit_path is not None:
         return (explicit_path,)
     if selection_mode == "explicit_backend" and selected_backend is not None:
-        return peer_paths_for_backend(selected_backend)
-    return tuple(get_computation_path(path.id) for path in PEER_PATHS)
+        return (default_path_for_backend(selected_backend),)
+    return tuple(get_computation_path(path_id) for path_id in DEFAULT_PATH_IDS)
 
 
 def _paths_from_subset_marker(marker) -> tuple[ComputationPath, ...]:
@@ -188,10 +186,8 @@ def pytest_generate_tests(metafunc):
         paths = _paths_from_subset_marker(subset_marker)
         if not paths:
             raise pytest.UsageError("pytest.mark.path_subset requires at least one path id.")
-        explicit_path = getattr(metafunc.config, "_nrss_explicit_path", None)
-        if explicit_path is not None:
-            paths = tuple(path for path in paths if path.id == explicit_path.id)
-        _parametrize_nrss_path(metafunc, paths)
+        selected = {path.id for path in _matrix_paths_for_config(metafunc.config)}
+        _parametrize_nrss_path(metafunc, tuple(path for path in paths if path.id in selected))
         return
 
     if matrix_marker is not None:
@@ -249,14 +245,13 @@ def pytest_report_header(config):
             f"{explicit_path.id} (backend={explicit_path.backend}, backend_options={explicit_path.backend_options})"
         )
     elif selection_mode == "explicit_backend":
-        compatible = ", ".join(path.id for path in peer_paths_for_backend(selected_backend))
+        compatible = ", ".join(path.id for path in _matrix_paths_for_config(config))
         lines.append(
             "NRSS path selection: "
-            f"compatible peer paths for backend {selected_backend} -> {compatible}"
+            f"default paths for backend {selected_backend} -> {compatible}"
         )
     else:
-        peer_ids = ", ".join(path.id for path in PEER_PATHS)
-        lines.append(f"NRSS path selection: all peer paths by default -> {peer_ids}")
+        lines.append(f"NRSS path selection: default paths -> {', '.join(DEFAULT_PATH_IDS)}")
     return "\n".join(lines)
 
 

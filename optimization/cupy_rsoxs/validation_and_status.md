@@ -19,10 +19,14 @@ If you need benchmark commands or optimization acceptance gates, use
 
 ## Maintained Validation Surface
 
-- The maintained validation surface now runs as a peer-path matrix across:
-  - `legacy_cyrsoxs`
-  - `cupy_tensor_coeff`
-  - `cupy_direct_polarization`
+- The default validation matrix runs `cupy_tensor_coeff`.
+- CyRSoXS is a deprecated, unsupported NRSS backend retained for historical
+  comparisons. Select `--nrss-path legacy_cyrsoxs` in pytest or the local
+  report driver for an optional compatibility check. Routine CuPy validation
+  uses the vendored reference data.
+- The tensor smoke lane includes a small CoreShell comparison with direct
+  polarization. Select `--nrss-path cupy_direct_polarization` in pytest or
+  the local report driver to run the full direct lane.
 - Maintained validation cases:
   - analytical sphere form factor
   - sphere contrast scaling
@@ -33,9 +37,7 @@ If you need benchmark commands or optimization acceptance gates, use
   - 3D Bragg lattice
   - CoreShell
   - MWCNT
-- Current maintained physics status:
-  - `14` tests per path
-  - no maintained CuPy skips on the principal physics matrix
+- The default compact tensor lane collects 25 physics cases.
 
 ## Smoke And Routing Status
 

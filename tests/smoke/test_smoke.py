@@ -410,6 +410,7 @@ def test_cupy_optimization_harness_isotropic_comparison_retains_cuda_prewarm_met
 
 
 @pytest.mark.backend_agnostic_contract
+@pytest.mark.cyrsoxs_only
 def test_cyrsoxs_timing_harness_parser_accepts_cuda_prewarm_mode():
     """Ensure the dev cyrsoxs timing harness accepts the CUDA prewarm option surface."""
     from tests.validation.dev.cyrsoxs_timing.run_cyrsoxs_timing_matrix import build_parser
@@ -419,6 +420,7 @@ def test_cyrsoxs_timing_harness_parser_accepts_cuda_prewarm_mode():
 
 
 @pytest.mark.backend_agnostic_contract
+@pytest.mark.cyrsoxs_only
 def test_cyrsoxs_timing_harness_default_case_uses_host_borrow_contract():
     """Ensure the default cyrsoxs timing case mirrors the host-style cupy dev contract."""
     from tests.validation.dev.cyrsoxs_timing.run_cyrsoxs_timing_matrix import _timing_cases
@@ -447,6 +449,7 @@ def test_cyrsoxs_timing_harness_default_case_uses_host_borrow_contract():
 
 
 @pytest.mark.backend_agnostic_contract
+@pytest.mark.cyrsoxs_only
 def test_cyrsoxs_timing_harness_isotropic_comparison_retains_cuda_prewarm_metadata():
     """Ensure paired cyrsoxs isotropic comparison summaries preserve the prewarm metadata."""
     from tests.validation.dev.cyrsoxs_timing.run_cyrsoxs_timing_matrix import (
@@ -2064,6 +2067,7 @@ def test_cupy_host_resident_strict_rejects_cupy_authoritative_inputs():
 
 @pytest.mark.backend_specific
 @pytest.mark.cpu
+@pytest.mark.cyrsoxs_only
 def test_cyrsoxs_backend_rejects_non_default_dtype_option():
     """Ensure the legacy cyrsoxs backend rejects unsupported dtype options up front."""
     with pytest.raises(BackendOptionError, match="does not support dtype"):

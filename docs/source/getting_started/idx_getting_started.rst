@@ -7,7 +7,7 @@ Getting Started
 Hardware Requirements
 _____________________
 .. warning::
-    CyRSoXS requires an NVIDIA GPU.
+    The maintained CuPy simulation backend requires a compatible NVIDIA GPU.
 
 Installation on Linux
 _____________________
@@ -17,10 +17,6 @@ _____________________
     installation ``version >=3.6`` should work, you will just need to point CMake to your 
     specific installation. git, conda, and pip are also used, and it is assumed you have 
     working installations of all three.
-
-**CyRSoXS v1.1.5.0** is now Conda installable and no longer requires building from 
-source. If you need to compile from source (to enable double-precision, for example) 
-the instructions are provided below.
 
 Conda Installation
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -39,8 +35,7 @@ Use the ``environment.yml`` file to create a new virtual environment, and activa
     conda env create -f environment.yml
     conda activate nrss
 
-CyRSoXS and the maintained CuPy runtime are listed as dependencies in
-``environment.yml``, and will automatically be installed.
+The environment installs the maintained CuPy runtime.
 
 Now we can pip install NRSS, which will install the remaining Python package
 dependencies for the maintained runtime:
@@ -49,7 +44,17 @@ dependencies for the maintained runtime:
 
     pip install .
 
-The conda-forge distribution of CyRSoXS includes the executable and Python Shared Library File. 
+Legacy CyRSoXS compatibility
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+CyRSoXS is a deprecated, unsupported NRSS backend retained for historical
+comparisons. Install the optional Conda package for a legacy workflow.
+
+.. code-block:: bash
+
+    conda install -n nrss -c conda-forge cyrsoxs
+
+The conda-forge distribution of CyRSoXS includes the executable and Python shared library.
 You can use the CyRSoXS executable from the shell:
 
 .. code-block:: bash

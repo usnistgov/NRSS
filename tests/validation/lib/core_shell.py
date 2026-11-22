@@ -231,17 +231,24 @@ def _shell_orientation_angles(
     return theta, psi
 
 
-def _build_core_shell_fields(scenario: CoreShellScenario) -> dict[str, np.ndarray]:
-    coords = np.genfromtxt(DATA_DIR / "LoG_coord.csv", delimiter=",", skip_header=1)
+def _build_core_shell_fields(
+    scenario: CoreShellScenario,
+    *,
+    shape: tuple[int, int, int] = SHAPE,
+    centers_xy: np.ndarray | None = None,
+) -> dict[str, np.ndarray]:
+    coords = centers_xy
+    if coords is None:
+        coords = np.genfromtxt(DATA_DIR / "LoG_coord.csv", delimiter=",", skip_header=1)
     if coords.ndim != 2 or coords.shape[1] < 2:
         raise AssertionError("Unexpected CoreShell coordinate table shape.")
 
-    nz, ny, nx = SHAPE
-    a_b = np.zeros(SHAPE, dtype=bool)
-    b_b = np.zeros(SHAPE, dtype=bool)
-    radial_x = np.zeros(SHAPE, dtype=np.float32)
-    radial_y = np.zeros(SHAPE, dtype=np.float32)
-    radial_z = np.zeros(SHAPE, dtype=np.float32)
+    nz, ny, nx = shape
+    a_b = np.zeros(shape, dtype=bool)
+    b_b = np.zeros(shape, dtype=bool)
+    radial_x = np.zeros(shape, dtype=np.float32)
+    radial_y = np.zeros(shape, dtype=np.float32)
+    radial_z = np.zeros(shape, dtype=np.float32)
 
     shell_radius = CORE_RADIUS_VOX + SHELL_THICKNESS_VOX
     z0, z1 = _local_bounds(CENTER_Z_VOX, shell_radius, nz)
@@ -322,7 +329,7 @@ def _build_core_shell_fields(scenario: CoreShellScenario) -> dict[str, np.ndarra
         orientation_mode=scenario.shell_orientation_mode,
     )
 
-    zeros = np.zeros(SHAPE, dtype=np.float32)
+    zeros = np.zeros(shape, dtype=np.float32)
     return {
         "mat1_vfrac": vf_a,
         "mat1_s": zeros.copy(),
@@ -371,6 +378,8 @@ def build_core_shell_morphology(
     ownership_policy: str | None = None,
     field_namespace: str = "numpy",
     array_dtype: np.dtype | type[np.floating] = np.float32,
+    shape: tuple[int, int, int] = SHAPE,
+    centers_xy: np.ndarray | None = None,
 ) -> Morphology:
     if isinstance(scenario, str):
         if scenario != "baseline":
@@ -380,7 +389,7 @@ def build_core_shell_morphology(
     constants = _load_optical_constants()
     energies = list(map(float, constants[1].energies))
     fields = _convert_fields_namespace(
-        _build_core_shell_fields(scenario=scenario),
+        _build_core_shell_fields(scenario, shape=shape, centers_xy=centers_xy),
         field_namespace=field_namespace,
         array_dtype=array_dtype,
     )

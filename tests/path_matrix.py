@@ -54,6 +54,7 @@ PEER_PATHS: tuple[ComputationPath, ...] = (
 )
 
 PATHS_BY_ID = {path.id: path for path in PEER_PATHS}
+DEFAULT_PATH_IDS = ("cupy_tensor_coeff",)
 SPEED_VARIANT_ENV = "NRSS_TEST_SPEED_VARIANT"
 SPEED_VARIANTS = ("compact_c2c", "compact_r2c")
 

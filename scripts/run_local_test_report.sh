@@ -15,7 +15,8 @@ Options:
   --cyrsoxs-pybind-dir PATH Prepend PATH to PYTHONPATH inside each conda-run step.
   --nrss-backend NAME       Export NRSS_BACKEND=NAME inside each test step.
   --nrss-path ID            Export NRSS_PATH=ID inside each test step. When omitted,
-                            the default suite runs all three maintained peer paths.
+                            run the compact tensor path. Select legacy_cyrsoxs
+                            or cupy_direct_polarization for either optional lane.
   --cmd "COMMAND"           Add a test command to run in conda env.
                             Can be passed multiple times. Custom commands run after the
                             default suite unless --skip-defaults is set.
@@ -33,15 +34,11 @@ Environment overrides:
   NRSS_TEST_ENV                 Same as --env.
 
 Behavior:
-  By default, the standard local report runs eight steps:
+  By default, the standard local report runs four steps:
     1. Environment Snapshot
     2. Smoke Tests (CPU Fast)
-    3. legacy_cyrsoxs GPU Smoke
-    4. legacy_cyrsoxs Physics Validation
-    5. cupy_tensor_coeff GPU Smoke
-    6. cupy_tensor_coeff Physics Validation
-    7. cupy_direct_polarization GPU Smoke
-    8. cupy_direct_polarization Physics Validation
+    3. cupy_tensor_coeff GPU Smoke
+    4. cupy_tensor_coeff Physics Validation
   Physics Validation Tests also harvest any generated graphical-abstract PNGs
   into per-path subdirectories under the per-run report directory.
   Any explicit --cmd commands are appended afterward.
@@ -54,7 +51,8 @@ Examples:
   scripts/run_local_test_report.sh -e nrss-dev \\
     --cyrsoxs-cli-dir /path/to/cyrsoxs/build \\
     --cyrsoxs-pybind-dir /path/to/cyrsoxs/build-pybind
-  scripts/run_local_test_report.sh --nrss-backend cyrsoxs
+  scripts/run_local_test_report.sh --nrss-path legacy_cyrsoxs
+  scripts/run_local_test_report.sh --nrss-path cupy_direct_polarization
   NRSS_TEST_CYRSOXS_CLI_DIR=/path/to/cyrsoxs/build \\
     NRSS_TEST_CYRSOXS_PYBIND_DIR=/path/to/cyrsoxs/build-pybind \\
     scripts/run_local_test_report.sh -e nrss-dev
@@ -314,7 +312,9 @@ write_metadata() {
     echo "nrss_backend=$NRSS_BACKEND_NAME"
     echo "nrss_path=$NRSS_PATH_NAME"
     echo "nrss_resolution_tsv=$NRSS_RESOLUTION_TSV"
-    echo "cyrsoxs_resolution_tsv=$CYRSOXS_RESOLUTION_TSV"
+    if [[ -s "$CYRSOXS_RESOLUTION_TSV" ]]; then
+      echo "cyrsoxs_resolution_tsv=$CYRSOXS_RESOLUTION_TSV"
+    fi
     echo "validation_reference_manifest_tsv=$VALIDATION_REFERENCE_MANIFEST_TSV"
     echo "graphical_abstracts_dir=$GRAPHICAL_ABSTRACTS_DIR"
     echo "graphical_abstracts_zip=$GRAPHICAL_ABSTRACTS_ZIP"
@@ -599,7 +599,7 @@ generate_summary() {
     echo "- CyRSoXS CLI override: ${CYRSOXS_CLI_DIR:-"(env default)"}"
     echo "- CyRSoXS pybind override: ${CYRSOXS_PYBIND_DIR:-"(env default)"}"
     echo "- NRSS backend: ${NRSS_BACKEND_NAME:-"(default resolution)"}"
-    echo "- NRSS path: ${NRSS_PATH_NAME:-"(default peer-path fanout)"}"
+    echo "- NRSS path: ${DEFAULT_RUN_PATHS[*]}"
     echo "- Steps passed: $pass_count/$total"
     echo "- Steps failed: $fail_count/$total"
     echo ""
@@ -610,7 +610,9 @@ generate_summary() {
     echo "### Log Files"
     awk -F'\t' '{printf "- %s. %s: `%s`\n", $1, $2, $5}' "$STEPS_TSV"
     echo "- NRSS resolution: \`$NRSS_RESOLUTION_TSV\`"
-    echo "- CyRSoXS resolution: \`$CYRSOXS_RESOLUTION_TSV\`"
+    if [[ -s "$CYRSOXS_RESOLUTION_TSV" ]]; then
+      echo "- CyRSoXS resolution: \`$CYRSOXS_RESOLUTION_TSV\`"
+    fi
     echo "- Validation reference manifest: \`$VALIDATION_REFERENCE_MANIFEST_TSV\`"
   } > "$SUMMARY_MD"
 
@@ -873,20 +875,10 @@ declare -a DEFAULT_RUN_PATHS=()
 
 if [[ -n "$NRSS_PATH_NAME" ]]; then
   DEFAULT_RUN_PATHS=("$NRSS_PATH_NAME")
-elif [[ -n "$NRSS_BACKEND_NAME" ]]; then
-  case "$NRSS_BACKEND_NAME" in
-    cyrsoxs)
-      DEFAULT_RUN_PATHS=("legacy_cyrsoxs")
-      ;;
-    cupy-rsoxs)
-      DEFAULT_RUN_PATHS=("cupy_tensor_coeff" "cupy_direct_polarization")
-      ;;
-    *)
-      DEFAULT_RUN_PATHS=("${PEER_PATH_IDS[@]}")
-      ;;
-  esac
+elif [[ "$NRSS_BACKEND_NAME" == "cyrsoxs" ]]; then
+  DEFAULT_RUN_PATHS=("legacy_cyrsoxs")
 else
-  DEFAULT_RUN_PATHS=("${PEER_PATH_IDS[@]}")
+  DEFAULT_RUN_PATHS=("cupy_tensor_coeff")
 fi
 
 discover_visible_gpu_ids
@@ -895,14 +887,20 @@ if [[ ${#DEFAULT_RUN_PATHS[@]} -eq 3 && ${#VISIBLE_GPU_IDS[@]} -ge 3 ]]; then
   PARALLEL_LANE_MODE="parallel"
 fi
 
-write_metadata
 capture_nrss_resolution
-capture_cyrsoxs_resolution
+if [[ " ${DEFAULT_RUN_PATHS[*]} " == *" legacy_cyrsoxs "* ]]; then
+  capture_cyrsoxs_resolution
+fi
+write_metadata
 build_validation_reference_manifest
 build_smoke_catalog
 build_physics_catalog
 
-ENV_SNAPSHOT_CMD=$'python - <<\'PY\'\nimport importlib\nimport platform\nimport sys\n\nmodules = [\n    "NRSS", "pytest", "numpy", "scipy", "pandas", "h5py", "xarray", "cupy", "CyRSoXS"\n]\n\nprint("python:", sys.version.replace("\\n", " "))\nprint("platform:", platform.platform())\nfor name in modules:\n    try:\n        mod = importlib.import_module(name)\n        ver = getattr(mod, "__version__", "unknown")\n        print(f"{name}: {ver}")\n    except Exception as exc:\n        print(f"{name}: NOT_AVAILABLE ({exc.__class__.__name__})")\nPY'
+ENV_SNAPSHOT_CMD=$'python - <<\'PY\'\nimport importlib\nimport platform\nimport sys\n\nmodules = ["NRSS", "pytest", "numpy", "scipy", "pandas", "h5py", "xarray", "cupy"]\n'
+if [[ " ${DEFAULT_RUN_PATHS[*]} " == *" legacy_cyrsoxs "* ]]; then
+  ENV_SNAPSHOT_CMD+=$'modules.append("CyRSoXS")\n'
+fi
+ENV_SNAPSHOT_CMD+=$'\nprint("python:", sys.version.replace("\\n", " "))\nprint("platform:", platform.platform())\nfor name in modules:\n    try:\n        mod = importlib.import_module(name)\n        ver = getattr(mod, "__version__", "unknown")\n        print(f"{name}: {ver}")\n    except Exception as exc:\n        print(f"{name}: NOT_AVAILABLE ({exc.__class__.__name__})")\nPY'
 
 if [[ $SKIP_DEFAULTS -eq 0 ]]; then
   run_conda_step "Environment Snapshot" "$ENV_SNAPSHOT_CMD" "$STEP" || ANY_FAIL=1
