@@ -40,7 +40,7 @@ PATHS = ("tensor_coeff", "direct_polarization", "default")
 STAGES = [
     "A1", "A2", "B", "C", "D", "E", "F", "C+D", "B+C+D", "energy", "tile", "basis_build",
     "reduction", "d2h", "synchronization",
-    "zpad_plan", "zpad_xy", "zpad_layout", "zpad_phase", "zpad_axial", "zpad_gather",
+    "zpad_plan", "zpad_xy", "zpad_layout", "zpad_phase", "zpad_axial", "zpad_gather", "zpad_fill",
 ]
 
 

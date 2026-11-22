@@ -1104,8 +1104,9 @@ def _detector_demand(morphology, energies, transform_z):
 
     runtime = morphology._backend_runtime
     override = runtime._segment_c_shape_override(morphology)
-    if hasattr(runtime, "_virtual_z_shape"):
-        override = runtime._virtual_z_shape(morphology) or override
+    virtual_shape = getattr(runtime, "_virtual_padding_shape", getattr(runtime, "_virtual_z_shape", None))
+    if virtual_shape is not None:
+        override = virtual_shape(morphology) or override
     if transform_z is not None:
         override = (transform_z, *morphology.NumZYX[1:])
     transform_shape = runtime._shape_tuple(morphology, shape_override=override)

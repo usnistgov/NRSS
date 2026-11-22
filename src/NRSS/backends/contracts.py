@@ -9,6 +9,25 @@ class BackendOptionError(ValueError):
     """Raised when backend options are invalid for the selected backend."""
 
 
+def normalize_virtual_pad_material(value):
+    if value is None:
+        return None
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)) or value < 1:
+        raise BackendOptionError("virtual_pad_material must be None or an integer material ID.")
+    return int(value)
+
+
+def normalize_virtual_3d_pad_shape(value):
+    if isinstance(value, (int, np.integer)):
+        value = (value,) * 3
+    if not isinstance(value, (list, tuple)) or len(value) != 3 or any(
+        isinstance(count, (bool, np.bool_)) or not isinstance(count, (int, np.integer)) or count < 1
+        for count in value
+    ):
+        raise BackendOptionError("virtual_3d_pad_to must be a positive integer or three positive integers in ZYX order.")
+    return tuple(int(count) for count in value)
+
+
 class ResidentModeError(ValueError):
     """Raised when resident_mode is invalid for the selected backend."""
 
@@ -108,7 +127,9 @@ _BACKEND_ARRAY_CONTRACTS = {
             "execution_path",
             "energy_basis_mode",
             "virtual_z_pad_to",
+            "virtual_3d_pad_to",
             "virtual_z_method",
+            "virtual_pad_material",
             "mixed_precision_mode",
             "z_collapse_mode",
             "kernel_preload_stage",
@@ -424,11 +445,22 @@ def normalize_backend_options(
         if isinstance(depth, (bool, np.bool_)) or not isinstance(depth, (int, np.integer)) or depth < 1:
             raise BackendOptionError("virtual_z_pad_to must be a positive integer.")
         normalized_options["virtual_z_pad_to"] = int(depth)
+    if "virtual_3d_pad_to" in options:
+        if "virtual_z_pad_to" in options:
+            raise BackendOptionError("virtual_z_pad_to and virtual_3d_pad_to are mutually exclusive.")
+        if "virtual_z_method" in options:
+            raise BackendOptionError("virtual_z_method cannot be used with virtual_3d_pad_to.")
+        normalized_options["virtual_3d_pad_to"] = normalize_virtual_3d_pad_shape(options["virtual_3d_pad_to"])
     if "virtual_z_method" in options:
         method = options["virtual_z_method"]
         if "virtual_z_pad_to" not in options or method not in ("sum", "residues"):
             raise BackendOptionError("virtual_z_method requires virtual_z_pad_to and must be 'sum' or 'residues'.")
         normalized_options["virtual_z_method"] = method
+    if "virtual_pad_material" in options:
+        material_id = normalize_virtual_pad_material(options["virtual_pad_material"])
+        if material_id is not None and not ({"virtual_z_pad_to", "virtual_3d_pad_to"} & options.keys()):
+            raise BackendOptionError("virtual_pad_material requires virtual_z_pad_to or virtual_3d_pad_to.")
+        normalized_options["virtual_pad_material"] = material_id
     if "mixed_precision_mode" in spec["supported_backend_options"]:
         mixed_precision_mode = normalize_mixed_precision_mode_name(
             options.get("mixed_precision_mode", spec["default_mixed_precision_mode"])

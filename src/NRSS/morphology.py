@@ -531,6 +531,7 @@ class Morphology:
                     warnings.warn('numMaterial is greater than number of Material objects passed in. Creating empty Material')
                     self.materials[i] = Material(materialID=i)
 
+        self._backend_runtime.validate_bound_materials(self)
         self._bind_material_owners()
         self._normalize_material_contracts()
         self.normalize_materials_for_backend(report_attr='construction_backend_coercion_report')

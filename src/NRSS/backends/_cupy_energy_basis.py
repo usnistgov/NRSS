@@ -150,7 +150,10 @@ class EnergyBasis:
     components: tuple[int, ...]
     shape_override: tuple[int, int, int] | None = None
     virtual_method: str | None = None
+    virtual_mode: str | None = None
     virtual_residues: int = 0
+    xyz_xy_tile_planes: int | None = None
+    virtual_energy_masks: int = 0
 
     @property
     def nbytes(self):
@@ -241,6 +244,8 @@ def build_energy_basis(
     shape = tuple(morphology.NumZYX)
     real_transform = mode != "compact_c2c"
     virtual = None
+    virtual_mode = None
+    logical_window = window
     if shape_override is None:
         indices = _detector_endpoint_union(runtime, morphology, cp, energies, detector)
         native, reflect = _native_indices(runtime, cp, shape, indices, real_transform)
@@ -252,10 +257,23 @@ def build_energy_basis(
             stencil = cp.asarray(dc_indices(shape_override))
             indices = cp.union1d(indices, stencil)
             native, reflect = _native_indices(runtime, cp, shape_override, indices, real_transform)
-            virtual = VirtualZEvaluator(
-                cp, shape[0], shape_override, native, reflect, cp.searchsorted(indices, stencil),
-                morphology.backend_options.get("virtual_z_method", "sum"),
-            )
+            dc_positions = cp.searchsorted(indices, stencil)
+            options = morphology.backend_options
+            if "virtual_3d_pad_to" in options:
+                from ._cupy_virtual_xyz import VirtualXYZEvaluator
+
+                virtual_mode = "3d"
+                virtual = VirtualXYZEvaluator(cp, shape, shape_override, native, reflect, dc_positions)
+                if window is not None:
+                    wy, wx = window
+                    y, x = virtual.offset_y, virtual.offset_x
+                    window = (wy[:, y:y + shape[1], :], wx[:, :, x:x + shape[2]])
+            else:
+                virtual_mode = "z"
+                virtual = VirtualZEvaluator(
+                    cp, shape[0], shape_override, native, reflect, dc_positions,
+                    options.get("virtual_z_method", "sum"),
+                )
     angle_family = runtime._angle_family_plan(morphology)
     direct = mode == "direct_r2c"
     if direct:
@@ -298,7 +316,16 @@ def build_energy_basis(
             samples = cp.where(reflect, samples.conj(), samples)
         values[row] = samples
 
-    def capture_scalar(row, field):
+    fill_material = morphology.backend_options.get("virtual_pad_material") if virtual is not None else None
+
+    def capture_scalar(row, field, *, fill_box=False):
+        if fill_box:
+            with recorder.range("zpad_fill"):
+                cp.subtract(field, np.float32(1.0), out=buffer)
+                if fused_window:
+                    window_scalar(buffer, *window, buffer)
+            virtual.capture(cp, buffer, values[row], recorder, fill_box=True, window=logical_window)
+            return
         if fused_window:
             window_scalar(field, *window, buffer)
         else:
@@ -312,7 +339,7 @@ def build_energy_basis(
         if weights is not None:
             diagonal = diagonal * weights
         coefficients[:, diagonal_rows, row] = diagonal[:, 0]
-        capture_scalar(row, material.Vfrac)
+        capture_scalar(row, material.Vfrac, fill_box=material.materialID == fill_material)
         row += 1
         if material.is_full_isotropic:
             continue
@@ -343,7 +370,11 @@ def build_energy_basis(
         del phi, axes
     return EnergyBasis(
         indices, values, cp.asarray(coefficients), components, shape_override,
-        virtual.method if virtual is not None else None, len(virtual.residues) if virtual is not None else 0,
+        virtual_method=virtual.method if virtual is not None else None,
+        virtual_mode=virtual_mode,
+        virtual_residues=len(virtual.residues) if virtual is not None else 0,
+        xyz_xy_tile_planes=virtual.tile_depth if virtual_mode == "3d" else None,
+        virtual_energy_masks=len(set(energies)) if virtual is not None else 0,
     )
 
 

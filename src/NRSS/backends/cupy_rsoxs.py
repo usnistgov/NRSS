@@ -17,6 +17,7 @@ import numpy as np
 import xarray as xr
 
 from .arrays import assess_array_for_backend_runtime, coerce_array_for_backend, inspect_array
+from .contracts import normalize_virtual_3d_pad_shape, normalize_virtual_pad_material
 from .registry import BackendUnavailableError
 from .runtime import BackendRuntime
 
@@ -41,6 +42,7 @@ _CUPY_SEGMENT_MEASUREMENTS = {
     "zpad_phase": "cuda_event",
     "zpad_axial": "cuda_event",
     "zpad_gather": "cuda_event",
+    "zpad_fill": "cuda_event",
     "reduction": "cuda_event",
     "d2h": "cuda_event",
     "synchronization": "wall_clock",
@@ -195,7 +197,11 @@ class _ExecutionReport:
                 transform_shape=basis.shape_override,
                 axial_evaluator=basis.virtual_method,
                 residues=basis.virtual_residues,
+                mask_builds=basis.virtual_energy_masks,
+                endpoint_index_dtype=basis.indices.dtype.name,
             )
+        if basis.xyz_xy_tile_planes is not None:
+            self.basis_cache["xy_tile_planes"] = basis.xyz_xy_tile_planes
 
     def as_dict(self):
         lengths = [len(tile["energies"]) for tile in self.tiles]
@@ -520,6 +526,11 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
     _one_by_four_pi = np.float32(1.0 / (4.0 * math.pi))
 
+    def validate_bound_materials(self, morphology) -> None:
+        options = morphology.backend_options
+        if options.get("virtual_pad_material") is not None or "virtual_3d_pad_to" in options:
+            self._virtual_padding_shape(morphology)
+
     def prepare(self, morphology) -> None:
         self._validate_supported_config(morphology)
         morphology._backend_runtime_state.setdefault("prepared", True)
@@ -571,8 +582,8 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         window = None
         energy_basis = None
         basis_mode, basis_fallback = self._energy_basis_selection(morphology)
-        virtual_shape = self._virtual_z_shape(morphology)
-        padding_attrs = self._virtual_z_metadata(morphology, virtual_shape)
+        virtual_shape = self._virtual_padding_shape(morphology)
+        padding_attrs = self._virtual_padding_metadata(morphology, virtual_shape)
         virtual_options = {"shape_override": virtual_shape, "recorder": recorder} if padding_attrs else {}
         result_data = None
         try:
@@ -604,9 +615,11 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
                     )
                 except cp.cuda.memory.OutOfMemoryError as exc:
                     if virtual_shape is not None:
-                        raise RuntimeError(
-                            f"Virtual z padding to {virtual_shape[0]} planes exceeded available GPU memory."
-                        ) from exc
+                        if basis_mode == "compact_r2c" and "virtual_3d_pad_to" in morphology.backend_options:
+                            message = f"Virtual XYZ padding to {virtual_shape} exceeded available GPU memory."
+                        else:
+                            message = f"Virtual z padding to {virtual_shape[0]} planes exceeded available GPU memory."
+                        raise RuntimeError(message) from exc
                     if morphology._energy_basis_mode != "auto":
                         raise
                     basis_fallback = "energy basis allocation exceeded available GPU memory"
@@ -1094,8 +1107,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
 
     @staticmethod
     def _detector_q_axes(morphology, projection_shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
-        del projection_shape
-        ny, nx = (int(morphology.NumZYX[1]), int(morphology.NumZYX[2]))
+        ny, nx = projection_shape
         d = float(morphology.PhysSize)
         qy = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(ny, d=d))
         qx = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(nx, d=d))
@@ -1877,7 +1889,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             raise ValueError("Morphology.PhysSize must be set before running cupy-rsoxs.")
         if morphology.NumZYX is None:
             raise ValueError("Morphology.NumZYX must be set before running cupy-rsoxs.")
-        self._virtual_z_shape(morphology)
+        self._virtual_padding_shape(morphology)
 
         start_angle, increment_angle, end_angle = map(float, morphology.EAngleRotation)
         if increment_angle == 0.0 and start_angle != end_angle:
@@ -1890,35 +1902,72 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
             return tuple(int(v) for v in shape_override)
         return tuple(int(v) for v in morphology.NumZYX)
 
-    def _virtual_z_shape(self, morphology):
-        target = morphology.backend_options.get("virtual_z_pad_to")
-        if target is None:
+    def _virtual_padding_shape(self, morphology):
+        options = morphology.backend_options
+        target_z = options.get("virtual_z_pad_to")
+        target_xyz = options.get("virtual_3d_pad_to")
+        if target_xyz is not None:
+            if target_z is not None or "virtual_z_method" in options:
+                raise ValueError("virtual_3d_pad_to cannot be combined with virtual_z_pad_to or virtual_z_method.")
+            target_xyz = normalize_virtual_3d_pad_shape(target_xyz)
+        material_id = normalize_virtual_pad_material(options.get("virtual_pad_material"))
+        if material_id is not None:
+            if target_z is None and target_xyz is None:
+                raise ValueError("virtual_pad_material requires virtual_z_pad_to or virtual_3d_pad_to.")
+            if material_id not in morphology.materials:
+                raise ValueError(f"virtual_pad_material {material_id} is not a registered material ID.")
+            if morphology.NumZYX is not None:
+                optics = morphology.materials[material_id].opt_constants or {}
+                energies = morphology.Energies
+                for energy in energies if energies is not None else ():
+                    values = np.asarray(optics.get(energy))
+                    if values.shape != (4,) or values.dtype.kind not in "fiu" or not np.isfinite(values).all():
+                        raise ValueError(
+                            f"virtual_pad_material {material_id} needs four finite optical constants at {energy} eV."
+                        )
+        if (target_z is None and target_xyz is None) or morphology.NumZYX is None:
             return None
-        occupied, ny, nx = self._shape_tuple(morphology)
-        if target < occupied:
-            raise ValueError("virtual_z_pad_to must be at least the occupied morphology depth.")
+        occupied = self._shape_tuple(morphology)
+        target = target_xyz if target_xyz is not None else (target_z, *occupied[1:])
+        if any(m < n for n, m in zip(occupied, target)):
+            if target_xyz is None:
+                raise ValueError("virtual_z_pad_to must be at least the occupied morphology depth.")
+            raise ValueError("virtual_3d_pad_to must contain the occupied morphology on every ZYX axis.")
         if target == occupied:
             return None
-        if self._energy_basis_selection(morphology)[0] != "compact_r2c" or min(ny, nx) < 2:
-            raise ValueError("Virtual z padding requires full-depth float32 compact tensor and two non-singleton XY axes.")
-        if morphology.backend_options.get("virtual_z_method") == "residues" and target % occupied:
+        if self._energy_basis_selection(morphology)[0] != "compact_r2c" or min(target[1:]) < 2:
+            raise ValueError("Virtual padding requires full-depth float32 compact tensor and two non-singleton XY axes.")
+        if options.get("virtual_z_method") == "residues" and target[0] % occupied[0]:
             raise ValueError("The residues method requires virtual_z_pad_to to be a multiple of the occupied depth.")
-        return (target, ny, nx)
+        return target
 
     @staticmethod
-    def _virtual_z_metadata(morphology, shape_override):
+    def _virtual_padding_metadata(morphology, shape_override):
         if shape_override is None:
             return None
-        occupied = int(morphology.NumZYX[0])
-        target = shape_override[0]
-        return {
-            "occupied_z": occupied,
-            "transform_z": target,
-            "z_offset": (target - occupied) // 2,
-            "virtual_z_method": morphology.backend_options.get("virtual_z_method", "sum"),
+        options = morphology.backend_options
+        occupied = tuple(map(int, morphology.NumZYX))
+        offsets = tuple((m - n) // 2 for n, m in zip(occupied, shape_override))
+        metadata = {
             "window_xy": "hann" if morphology.WindowingType == 1 else "none",
             "window_z": "none",
         }
+        xyz = "virtual_3d_pad_to" in options
+        if not xyz:
+            metadata.update(
+                occupied_z=occupied[0], transform_z=shape_override[0], z_offset=offsets[0],
+                virtual_z_method=options.get("virtual_z_method", "sum"),
+            )
+        material_id = options.get("virtual_pad_material")
+        if xyz or material_id is not None:
+            metadata.update(
+                pad_mode="xyz" if xyz else "z", occupied_shape_zyx=occupied,
+                transform_shape_zyx=shape_override, pad_offsets_zyx=offsets,
+                pad_fill="vacuum" if material_id is None else "material",
+            )
+        if material_id is not None:
+            metadata.update(pad_material_id=int(material_id), pad_fill_order="S=0")
+        return metadata
 
     def _z_collapse_mode(self, morphology) -> str | None:
         return morphology.z_collapse_mode
@@ -2149,7 +2198,7 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         from ._cupy_energy_basis import project_energy, project_energy_fused
 
         if recorder.execution is not None:
-            route = mode if basis.virtual_method is None else f"virtual_z_{basis.virtual_method}"
+            route = mode if basis.virtual_method is None else f"virtual_{basis.virtual_mode}_{basis.virtual_method}"
             recorder.execution.record_tile(route, (energy,))
         angles = self._angle_family_plan(morphology)
         if mode == "direct_r2c":
@@ -2375,17 +2424,18 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         morphology._backend_runtime_state[cache_key] = plan
         return plan
 
-    def _rotation_transforms(self, morphology, cp):
+    def _rotation_transforms(self, morphology, cp, projection_shape=None):
+        shape = tuple(morphology.NumZYX[1:]) if projection_shape is None else tuple(projection_shape)
         cache_key = (
             "angle_rotation_transforms",
-            tuple(int(v) for v in morphology.NumZYX),
+            shape,
             tuple(round(angle, 12) for angle in self._angles_radians(morphology)),
         )
         transforms = morphology._backend_runtime_state.get(cache_key)
         if transforms is not None:
             return transforms
 
-        _, height, width = map(int, morphology.NumZYX)
+        height, width = shape
         transforms = tuple(
             tuple(
                 cp.asarray(part, dtype=cp.float64)
@@ -3194,9 +3244,10 @@ class CupyRsoxsBackendRuntime(BackendRuntime):
         valid_counts = None
         use_rot_mask = bool(morphology.RotMask)
         num_angles = len(angle_family_plan.angles)
+        projection_shape = (proj_x if proj_x is not None else proj_y).shape
         for angle_plan, (matrix_yx, offset_yx) in zip(
             angle_family_plan.angles,
-            self._rotation_transforms(morphology, cp),
+            self._rotation_transforms(morphology, cp, projection_shape),
         ):
             if angle_plan.family == "x":
                 projection = proj_x

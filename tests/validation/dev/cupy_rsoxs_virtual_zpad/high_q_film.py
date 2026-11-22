@@ -15,7 +15,7 @@ from NRSS.morphology import Material, Morphology
 from optimization.cupy_rsoxs.fft_registration import bragg_high_q as registered
 from tests.validation.dev.cupy_rsoxs_virtual_zpad.lattice_probe import axial_q, exact_xyz, weight
 from tests.validation.lib import bragg
-from tests.validation.lib.virtual_z_padding import explicit_vacuum_materials, xy_hann_reference
+from tests.validation.lib.virtual_z_padding import explicit_padded_materials, xy_hann_reference
 
 
 ENERGIES = (285., 570.)
@@ -164,7 +164,7 @@ def prepare_reference(field, case, kind, hann, basis):
     return targets, patches, qy, qx, mask, direct, anchor, allowed_anchor
 
 
-def detector(field, depth, arm, hann):
+def detector(field, depth, arm, hann, *, target_xy=None):
     import cupy as cp
 
     energies = list(ENERGIES)
@@ -175,11 +175,15 @@ def detector(field, depth, arm, hann):
         )
         for index, values, beta in ((1, field, 2.e-4), (2, 1 - field, 0.))
     }
+    target = (depth, *(field.shape[1:] if target_xy is None else target_xy))
     options = {"execution_path": "tensor_coeff"}
     if arm == "explicit":
-        materials = explicit_vacuum_materials(materials, depth)
+        materials = explicit_padded_materials(materials, target)
     elif arm == "virtual":
-        options["virtual_z_pad_to"] = depth
+        if target_xy is None:
+            options["virtual_z_pad_to"] = depth
+        else:
+            options["virtual_3d_pad_to"] = target
     config = dict(Morphology.config_default, Energies=energies, EAngleRotation=[0., 0., 0.],
                   WindowingType=int(hann and arm == "virtual"), RotMask=0)
     morph = Morphology(
@@ -197,13 +201,18 @@ def detector(field, depth, arm, hann):
         assert result.attrs["detector_grid_convention"] == "fft_bins_v1"
         assert result.attrs["z_dim"] == depth
         routes = morph.backend_timings["execution"]["routes"]
-        assert routes == (["virtual_z_sum"] if arm == "virtual" else ["compact_r2c"])
+        route = "virtual_z_sum" if target_xy is None else "virtual_3d_sum"
+        assert routes == ([route] if arm == "virtual" else ["compact_r2c"])
         if arm == "virtual":
-            assert result.attrs["occupied_z"] == field.shape[0]
+            if target_xy is None:
+                assert result.attrs["occupied_z"] == field.shape[0]
+            else:
+                assert result.attrs["occupied_shape_zyx"] == field.shape
+                assert result.attrs["transform_shape_zyx"] == target
             assert result.attrs["window_xy"] == ("hann" if hann else "none")
             assert result.attrs["window_z"] == "none"
         return result, {"wall_seconds_with_diagnostics": elapsed, "routes": routes,
-                        "shape_zyx": [depth, *field.shape[1:]], "window_xy": "hann" if hann else "none",
+                        "shape_zyx": target, "window_xy": "hann" if hann else "none",
                         "window_z": "none", "offset": (depth - field.shape[0]) // 2}
     finally:
         morph.release_runtime()

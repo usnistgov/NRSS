@@ -15,6 +15,9 @@ class BackendRuntime(ABC):
 
     name: str
 
+    def validate_bound_materials(self, morphology: "Morphology") -> None:
+        """Validate options that refer to materials or their bound fields."""
+
     @abstractmethod
     def prepare(self, morphology: "Morphology") -> None:
         """Prepare backend-owned runtime objects for the morphology."""

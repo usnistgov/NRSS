@@ -1,4 +1,4 @@
-"""Evaluate a centered vacuum extension only at requested detector endpoints."""
+"""Evaluate a centered axial extension at the requested detector endpoints."""
 
 import math
 
@@ -80,7 +80,9 @@ class VirtualZEvaluator:
         self.method = method
         self.occupied_z = occupied_z
         self.transform_z = transform_z
-        self.columns = ny * (nx // 2 + 1)
+        self.plane_size = ny * nx
+        self.half_x = nx // 2 + 1
+        self.columns = ny * self.half_x
         self.offset = (transform_z - occupied_z) // 2
         self.native = native
         self.reflect = reflect
@@ -96,7 +98,16 @@ class VirtualZEvaluator:
                 gather = (native[positions] % self.columns) * occupied_z + modes[positions] // pad_factor
                 self.residues.append((residue, positions, gather))
 
-    def capture(self, cp, field, out, recorder):
+    def capture(self, cp, field, out, recorder, *, fill_box=False, window=None, repair_dc=True):
+        self._capture_occupied(cp, field, out, recorder)
+        if fill_box and (window is not None or not repair_dc):
+            with recorder.range("zpad_fill"):
+                self._add_uniform_box(cp, out, window, recorder)
+        if repair_dc:
+            with recorder.range("zpad_gather"):
+                out[self.dc_positions[:1]] = cp.mean(out[self.dc_positions[1:]].real)
+
+    def _capture_occupied(self, cp, field, out, recorder):
         xy = recorder.measure("zpad_xy", lambda: cp.fft.rfft2(field, axes=(-2, -1)))
         if recorder.execution is not None:
             recorder.execution.record_fft("basis_rfft2_xy", field)
@@ -113,8 +124,28 @@ class VirtualZEvaluator:
                 )
         else:
             self._capture_residues(cp, xy, out, recorder)
-        with recorder.range("zpad_gather"):
-            out[self.dc_positions[:1]] = cp.mean(out[self.dc_positions[1:]].real)
+
+    def _add_uniform_box(self, cp, out, window, recorder):
+        """Add the logical box to a transformed, windowed crop contrast row."""
+        if window is None:
+            out[self.dc_positions[:1]] += np.float32(self.transform_z * self.plane_size)
+            return
+
+        # Unit axial weight puts the full-box spectrum entirely on q_z = 0.
+        # Gather in native RFFT order and reflect the real geometry before
+        # applying complex, energy-dependent optical weights.
+        wy, wx = window
+        y_fft = cp.fft.fft(wy.ravel())
+        x_fft = cp.fft.rfft(wx.ravel())
+        if recorder.execution is not None:
+            recorder.execution.record_fft("zpad_fill_fft_y", wy.ravel())
+            recorder.execution.record_fft("zpad_fill_rfft_x", wx.ravel())
+        positions = cp.flatnonzero(self.native < self.columns)
+        columns = self.native[positions]
+        spectrum = y_fft[columns // self.half_x] * x_fft[columns % self.half_x]
+        out[positions] += np.float32(self.transform_z) * cp.where(
+            self.reflect[positions], spectrum.conj(), spectrum,
+        )
 
     def _capture_residues(self, cp, xy, out, recorder):
         from cupyx.scipy import fft
