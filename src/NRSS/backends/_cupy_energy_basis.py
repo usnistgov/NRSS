@@ -6,6 +6,8 @@ from typing import Any
 
 import numpy as np
 
+from ..fourier import _PreparedCapture, _r2c_addresses
+
 
 _TENSOR_AXES = ((0, 0), (0, 1), (0, 2), (1, 1), (1, 2))  # xx, xy, xz, yy, yz
 XYZ_PRUNE_ZERO_FIELDS_KEY = "_private_xyz_prune_zero_fields"
@@ -237,32 +239,7 @@ def _native_indices(runtime, cp, shape, indices, real_transform):
     if not real_transform:
         return (z * ny + y) * nx + x, None
 
-    # The omitted half is Hermitian in all three dimensions for real fields.
-    reflect = x > nx // 2
-    z = cp.where(reflect, (-z) % nz, z)
-    y = cp.where(reflect, (-y) % ny, y)
-    x = cp.where(reflect, (-x) % nx, x)
-    return (z * ny + y) * (nx // 2 + 1) + x, reflect
-
-
-def _transform_basis(runtime, cp, field, plan, shape, execution):
-    if plan is not None:
-        plan.fft(field, field, cp.cuda.cufft.CUFFT_FORWARD)
-        if execution is not None:
-            execution.record_fft("basis_cufft_inplace_c2c", field)
-        runtime._replace_dc_component(field)
-        return field
-
-    transformed = cp.fft.rfftn(field)
-    if execution is not None:
-        execution.record_fft("basis_rfftn_r2c", field)
-    nz, ny, _ = shape
-    neighbors = [transformed[0, 0, 1], transformed[0, 1, 0],
-                 transformed[0, 0, 1].conj(), transformed[0, ny - 1, 0]]
-    if nz > 1:
-        neighbors += [transformed[1, 0, 0], transformed[nz - 1, 0, 0]]
-    transformed[0, 0, 0] = sum(neighbors).real / np.float32(len(neighbors))
-    return transformed
+    return _r2c_addresses(cp, shape, z, y, x)
 
 
 def _windowed_basis_kernels(cp):
@@ -447,18 +424,19 @@ def build_energy_basis(
     fused_window = mode == "compact_r2c" and window is not None
     if fused_window:
         window_scalar, window_tensor = _windowed_basis_kernels(cp)
+    sampler = _PreparedCapture(cp, native, reflect, virtual) if real_transform or virtual is not None else None
 
     def capture(row):
         if window is not None and not fused_window:
             cp.multiply(buffer, window, out=buffer)
-        if virtual is not None:
-            virtual.capture(cp, buffer, values[row], recorder)
+        if sampler is not None:
+            sampler.capture_into(buffer, values[row], recorder=recorder, execution=execution)
             return
-        transformed = _transform_basis(runtime, cp, buffer, plan, shape, execution)
-        samples = transformed.ravel()[native]
-        if reflect is not None:
-            samples = cp.where(reflect, samples.conj(), samples)
-        values[row] = samples
+        plan.fft(buffer, buffer, cp.cuda.cufft.CUFFT_FORWARD)
+        if execution is not None:
+            execution.record_fft("basis_cufft_inplace_c2c", buffer)
+        runtime._replace_dc_component(buffer)
+        values[row] = buffer.ravel()[native]
 
     fill_material = morphology.backend_options.get("virtual_pad_material") if virtual is not None else None
 
@@ -468,7 +446,7 @@ def build_energy_basis(
                 cp.subtract(field, np.float32(1.0), out=buffer)
                 if fused_window:
                     window_scalar(buffer, *window, buffer)
-            virtual.capture(cp, buffer, values[row], recorder, fill_box=True, window=logical_window)
+            sampler.capture_into(buffer, values[row], recorder=recorder, fill_box=True, window=logical_window)
             return
         if fused_window:
             window_scalar(field, *window, buffer)

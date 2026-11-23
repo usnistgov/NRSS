@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Mapping
 from typing import Any
 
@@ -12,10 +13,13 @@ from .contracts import (
 )
 
 
-try:
-    import cupy as cp
-except ImportError:  # pragma: no cover - exercised only when CuPy is absent
-    cp = None
+@lru_cache(maxsize=1)
+def _cupy_module():
+    try:
+        import cupy
+    except ImportError:  # pragma: no cover - exercised only when CuPy is absent
+        return None
+    return cupy
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,7 @@ def inspect_array(arr: Any) -> dict[str, Any]:
             "c_contiguous": bool(arr.flags.c_contiguous),
         }
 
+    cp = _cupy_module()
     if cp is not None and isinstance(arr, cp.ndarray):
         return {
             "recognized": True,
@@ -81,6 +86,7 @@ def get_namespace_module(namespace: str):
     if namespace == "numpy":
         return np
     if namespace == "cupy":
+        cp = _cupy_module()
         if cp is None:  # pragma: no cover - exercised only when CuPy is absent
             raise RuntimeError("CuPy is not importable.")
         return cp
@@ -183,7 +189,7 @@ def _assess_array_against_contract(
             ),
         )
 
-    if target_namespace == "cupy" and cp is None:
+    if target_namespace == "cupy" and _cupy_module() is None:
         return ArrayPlan(
             material_id=material_id,
             field_name=field_name,
@@ -247,13 +253,12 @@ def coerce_array_for_backend(arr: Any, plan: ArrayPlan):
             out = np.asarray(arr, dtype=np_dtype)
             return np.ascontiguousarray(out)
         if plan.original_namespace == "cupy":
-            host = cp.asnumpy(arr)
+            host = get_namespace_module("cupy").asnumpy(arr)
             host = np.asarray(host, dtype=np_dtype)
             return np.ascontiguousarray(host)
 
     if plan.target_namespace == "cupy":
-        if cp is None:  # pragma: no cover - gated by plan.supported
-            raise RuntimeError("CuPy is not importable.")
+        cp = get_namespace_module("cupy")
         cp_dtype = cp.dtype(plan.target_dtype)
         if plan.original_namespace == "numpy":
             np_dtype = np.dtype(plan.target_dtype)

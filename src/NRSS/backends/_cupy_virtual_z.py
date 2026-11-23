@@ -6,6 +6,7 @@ import numpy as np
 
 
 _SUM_KERNEL = None
+_DC_MODES = ((0, 0, 0), (0, 0, 1), (0, 1, 0), (0, 0, -1), (0, -1, 0), (1, 0, 0), (-1, 0, 0))
 _SUM_SOURCE = r"""
 extern "C" __global__ void virtual_z_sum(
     const float2* xy, const long long* native, const bool* reflect,
@@ -77,8 +78,7 @@ def sparse_endpoint_union(runtime, morphology, cp, energies, detector, shape_ove
 
 def dc_indices(shape):
     """Return Igor IDs for the zero bin and its six native axial/lateral neighbors."""
-    neighbors = ((0, 0, 1), (0, 1, 0), (0, 0, -1), (0, -1, 0), (1, 0, 0), (-1, 0, 0))
-    coordinates = (np.asarray(shape) // 2 - np.asarray(((0, 0, 0), *neighbors))) % shape
+    coordinates = (np.asarray(shape) // 2 - np.asarray(_DC_MODES)) % shape
     return np.ravel_multi_index(coordinates.T, shape)
 
 

@@ -7,8 +7,6 @@ Software Reference
     cyrsoxs.rst
     NRSS.writer
     NRSS.checkH5
+    NRSS.fourier
     NRSS.morphology
     NRSS.reader
-
-
-    
