@@ -7,6 +7,8 @@ Implement one production change on `refactor/prepared-fourier-sampler`. Give an 
 | [FS01 · Extract the sampler](FS01-prepared-sampler.md) | A physics-independent public function to prepare a sampler, a reusable capture operation, focused tests, and a short API reference. The existing compact path calls the shared implementation. |
 | [FS02 · Qualify the branch](FS02-qualification.md) | Bitwise parent/candidate parity, matched execution and memory evidence, and paired timing decisions on the three CoreShell sizes and the frozen 101-energy lipid scan. |
 
+[FS02 validation results and repair evidence](RESULTS.md)
+
 ## Start in an isolated worktree
 
 The reviewed branch head on November 23, 2026 was `0727a5948af63ba35e9bcf12722aabd424ebd5d2` (the opt-in CuPy `q_max` commit). Start in a local NRSS clone. Set `ZIP` to the downloaded archive's absolute path. The following Bash commands create two sibling worktrees and apply the tickets only to the candidate. Set `ZIP` before running the block.
