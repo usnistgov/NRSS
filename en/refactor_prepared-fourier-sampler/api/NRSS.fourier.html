@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>NRSS.reader &#8212; NRSS 0.1.0 documentation</title>
+    <title>NRSS.fourier &#8212; NRSS 0.1.0 documentation</title>
   
   
   
@@ -44,12 +44,12 @@
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../_static/design-tabs.js?v=f930bc37"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'api/NRSS.reader';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/NRSS.fourier';</script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Development and Contributing:" href="../development/idx_development.html" />
-    <link rel="prev" title="NRSS.morphology" href="NRSS.morphology.html" />
+    <link rel="next" title="NRSS.morphology" href="NRSS.morphology.html" />
+    <link rel="prev" title="NRSS.checkH5" href="NRSS.checkH5.html" />
   
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
@@ -385,8 +385,9 @@
 <li class="toctree-l1"><a class="reference internal" href="cyrsoxs.html">CyRSoXS Simulation Components</a></li>
 <li class="toctree-l1"><a class="reference internal" href="NRSS.writer.html">NRSS.writer</a></li>
 <li class="toctree-l1"><a class="reference internal" href="NRSS.checkH5.html">NRSS.checkH5</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">NRSS.fourier</a></li>
 <li class="toctree-l1"><a class="reference internal" href="NRSS.morphology.html">NRSS.morphology</a></li>
-<li class="toctree-l1 current active"><a class="current reference internal" href="#">NRSS.reader</a></li>
+<li class="toctree-l1"><a class="reference internal" href="NRSS.reader.html">NRSS.reader</a></li>
 </ul>
 </div>
 </nav></div>
@@ -430,7 +431,7 @@
     
     <li class="breadcrumb-item"><a href="idx_api.html" class="nav-link">Software Reference</a></li>
     
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">NRSS.reader</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">NRSS.fourier</span></li>
   </ul>
 </nav>
 </div>
@@ -447,17 +448,68 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="module-NRSS.reader">
-<span id="nrss-reader"></span><h1>NRSS.reader<a class="headerlink" href="#module-NRSS.reader" title="Link to this heading">#</a></h1>
-<dl class="py function">
-<dt class="sig sig-object py" id="NRSS.reader.read_config">
-<span class="sig-prename descclassname"><span class="pre">NRSS.reader.</span></span><span class="sig-name descname"><span class="pre">read_config</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">config_file</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.reader.read_config" title="Link to this definition">#</a></dt>
-<dd></dd></dl>
+  <section id="nrss-fourier">
+<h1>NRSS.fourier<a class="headerlink" href="#nrss-fourier" title="Link to this heading">#</a></h1>
+<p>Prepare a reusable sampler for integer Fourier modes of a real scalar field.
+Both field axes and mode triples are in ZYX order. Each axis of length
+<code class="docutils literal notranslate"><span class="pre">N</span></code> accepts signed modes from <code class="docutils literal notranslate"><span class="pre">-floor(N/2)</span></code> through <code class="docutils literal notranslate"><span class="pre">ceil(N/2)-1</span></code>.
+The sampler keeps the order and multiplicity of the requested modes.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">cupy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">cp</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">NRSS.fourier</span><span class="w"> </span><span class="kn">import</span> <span class="n">prepare_sampler</span>
 
+<span class="n">field</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">ones</span><span class="p">((</span><span class="mi">32</span><span class="p">,</span> <span class="mi">40</span><span class="p">,</span> <span class="mi">48</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">cp</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+<span class="n">modes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">3</span><span class="p">,</span> <span class="mi">5</span><span class="p">),</span> <span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="o">-</span><span class="mi">5</span><span class="p">)])</span>
+<span class="n">plan</span> <span class="o">=</span> <span class="n">prepare_sampler</span><span class="p">(</span>
+    <span class="n">shape_zyx</span><span class="o">=</span><span class="n">field</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">logical_shape_zyx</span><span class="o">=</span><span class="p">(</span><span class="mi">64</span><span class="p">,</span> <span class="mi">80</span><span class="p">,</span> <span class="mi">96</span><span class="p">),</span> <span class="n">modes_zyx</span><span class="o">=</span><span class="n">modes</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">amplitudes</span> <span class="o">=</span> <span class="n">cp</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">modes</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">cp</span><span class="o">.</span><span class="n">complex64</span><span class="p">)</span>
+<span class="n">plan</span><span class="o">.</span><span class="n">capture_into</span><span class="p">(</span><span class="n">field</span><span class="p">,</span> <span class="n">out</span><span class="o">=</span><span class="n">amplitudes</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Omit <code class="docutils literal notranslate"><span class="pre">logical_shape_zyx</span></code> for a transform on the field’s own grid. For
+virtual padding the field starts at <code class="docutils literal notranslate"><span class="pre">(logical_shape_zyx</span> <span class="pre">-</span> <span class="pre">shape_zyx)</span> <span class="pre">//</span> <span class="pre">2</span></code>
+on each axis, with zero exterior. The forward transform uses the negative
+exponential, with unit voxel weights and no normalization. The default
+<code class="docutils literal notranslate"><span class="pre">dc=&quot;raw&quot;</span></code> returns the sum of the field at zero mode. <code class="docutils literal notranslate"><span class="pre">dc=&quot;nrss&quot;</span></code>
+replaces the zero mode with the incumbent axial-neighbor mean. On a native
+grid this repair requires at least two samples on each lateral axis.</p>
+<p>Preparation accepts host integer modes or a CuPy integer array on the
+current device. Each capture takes a C-contiguous CuPy <code class="docutils literal notranslate"><span class="pre">float32</span></code> field
+and a separate C-contiguous <code class="docutils literal notranslate"><span class="pre">complex64</span></code> output vector of length
+<code class="docutils literal notranslate"><span class="pre">len(modes)</span></code>. The plan and both arrays use the device and stream that
+were current at preparation. The method enqueues work, preserves the input
+field, and returns <code class="docutils literal notranslate"><span class="pre">None</span></code>. Reuse the plan with a new field and the same
+output vector. If using the output from another stream, synchronize or
+establish the dependency with an event. A virtual <code class="docutils literal notranslate"><span class="pre">dc=&quot;nrss&quot;</span></code> request
+that includes zero uses prepared workspace for the private stencil.</p>
+<p>For complex fields, capture the real and imaginary parts separately and
+combine the two results as <code class="docutils literal notranslate"><span class="pre">F(real)</span> <span class="pre">+</span> <span class="pre">1j</span> <span class="pre">*</span> <span class="pre">F(imag)</span></code>.</p>
 <dl class="py function">
-<dt class="sig sig-object py" id="NRSS.reader.read_material">
-<span class="sig-prename descclassname"><span class="pre">NRSS.reader.</span></span><span class="sig-name descname"><span class="pre">read_material</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.reader.read_material" title="Link to this definition">#</a></dt>
-<dd></dd></dl>
+<dt class="sig sig-object py" id="NRSS.fourier.prepare_sampler">
+<span class="sig-prename descclassname"><span class="pre">NRSS.fourier.</span></span><span class="sig-name descname"><span class="pre">prepare_sampler</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">shape_zyx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">modes_zyx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">logical_shape_zyx</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dc</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'raw'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#NRSS.fourier.PreparedSampler" title="NRSS.fourier.PreparedSampler"><span class="pre">PreparedSampler</span></a></span></span><a class="headerlink" href="#NRSS.fourier.prepare_sampler" title="Link to this definition">#</a></dt>
+<dd><p>Prepare a sampler on the current CuPy device and stream.</p>
+<p>Signed integer modes use the interval [-floor(N/2), ceil(N/2)-1]
+per axis. Order and repeated modes are retained. The real field is
+placed at (logical_shape - shape) // 2 in a zero-filled logical grid.
+The forward transform uses the negative exponential without normalization.
+With dc=”raw” the zero bin is the sum of the field. With dc=”nrss”
+it is replaced by the incumbent axial-neighbor mean.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="NRSS.fourier.PreparedSampler">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">NRSS.fourier.</span></span><span class="sig-name descname"><span class="pre">PreparedSampler</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">_capture</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">_PreparedCapture</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_shape</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_count</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_stream</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_thread</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_recorder</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_dc_requests</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">_scratch</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#NRSS.fourier.PreparedSampler" title="Link to this definition">#</a></dt>
+<dd><p>A Fourier sampler tied to its input shape, device and creating stream.</p>
+<p>Create one with <a class="reference internal" href="#NRSS.fourier.prepare_sampler" title="NRSS.fourier.prepare_sampler"><code class="xref py py-func docutils literal notranslate"><span class="pre">prepare_sampler()</span></code></a>. Reuse it with independent fields
+and output buffers on the creating stream.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="NRSS.fourier.PreparedSampler.capture_into">
+<span class="sig-name descname"><span class="pre">capture_into</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">field</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">out</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#NRSS.fourier.PreparedSampler.capture_into" title="Link to this definition">#</a></dt>
+<dd><p>Enqueue the capture into a caller-owned complex64 vector and return None.</p>
+</dd></dl>
+
+</dd></dl>
 
 </section>
 
@@ -472,20 +524,20 @@
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="NRSS.morphology.html"
+       href="NRSS.checkH5.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">NRSS.morphology</p>
+        <p class="prev-next-title">NRSS.checkH5</p>
       </div>
     </a>
     <a class="right-next"
-       href="../development/idx_development.html"
+       href="NRSS.morphology.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">Development and Contributing:</p>
+        <p class="prev-next-title">NRSS.morphology</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -508,15 +560,18 @@
   </div>
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.reader.read_config"><code class="docutils literal notranslate"><span class="pre">read_config()</span></code></a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.reader.read_material"><code class="docutils literal notranslate"><span class="pre">read_material()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.fourier.prepare_sampler"><code class="docutils literal notranslate"><span class="pre">prepare_sampler()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.fourier.PreparedSampler"><code class="docutils literal notranslate"><span class="pre">PreparedSampler</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#NRSS.fourier.PreparedSampler.capture_into"><code class="docutils literal notranslate"><span class="pre">PreparedSampler.capture_into()</span></code></a></li>
+</ul>
+</li>
 </ul>
   </nav></div>
 
   <div class="sidebar-secondary-item">
 
   <div class="tocsection sourcelink">
-    <a href="../_sources/api/NRSS.reader.rst.txt">
+    <a href="../_sources/api/NRSS.fourier.rst.txt">
       <i class="fa-solid fa-file-lines"></i> Show Source
     </a>
   </div>
