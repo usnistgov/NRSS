@@ -55,7 +55,8 @@ class _PreparedCapture:
         if self.repair_dc:
             _repair_native_dc(transformed, field.shape)
         samples = transformed.ravel()[self.native]
-        out[...] = cp.where(self.reflect, samples.conj(), samples)
+        samples = cp.where(self.reflect, samples.conj(), samples)
+        out[...] = samples
 
 
 @dataclass(frozen=True)

@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from ..fourier import _PreparedCapture, _r2c_addresses
+from ..fourier import _PreparedCapture
 
 
 _TENSOR_AXES = ((0, 0), (0, 1), (0, 2), (1, 1), (1, 2))  # xx, xy, xz, yy, yz
@@ -239,7 +239,12 @@ def _native_indices(runtime, cp, shape, indices, real_transform):
     if not real_transform:
         return (z * ny + y) * nx + x, None
 
-    return _r2c_addresses(cp, shape, z, y, x)
+    # The omitted half is Hermitian in all three dimensions for real fields.
+    reflect = x > nx // 2
+    z = cp.where(reflect, (-z) % nz, z)
+    y = cp.where(reflect, (-y) % ny, y)
+    x = cp.where(reflect, (-x) % nx, x)
+    return (z * ny + y) * (nx // 2 + 1) + x, reflect
 
 
 def _windowed_basis_kernels(cp):
