@@ -138,3 +138,123 @@ index 2581075..bc52b60 100644
 </details>
 
 GitHub's `backend/cupy-cyrsoxs-clone` tip still matched the tested parent when the gate closed.
+
+## FS02 rerun with the address-lifetime repair
+
+**Gate verdict is hold for regression.** All measurements below compare parent A, `0727a5948af63ba35e9bcf12722aabd424ebd5d2`, with repaired candidate B, `c9f365f25f28c0345d448b3b7e8cc18a1a060d92`. The repair recovered the tested code from `49f7030`.
+
+| Provenance | Measured value |
+| --- | --- |
+| RTX A6000 on Wheatley | `GPU-eb667c32-8f18-ce03-5cbf-06950f83ab8e` |
+| Stack | NVIDIA driver 580.178.04, CUDA runtime 12.9, cuFFT 11.4.1, CuPy 14.0.1, Python 3.14.3 |
+| Quadro RTX 8000 for both maintained report arms | `GPU-64d8bd41-ecf8-78bd-2e99-7453ca185e75` |
+| Parent NRSS source fingerprint | `88addb777f5fa23b2e7ac77dd97154a38cbe29d9b5ee49986bdde183e93220d2` |
+| Repaired NRSS source fingerprint | `b12dade8811d9014f1296aca42bfa39b7c80fc841039cae2ee6d99d86c15d1e7` |
+| ZP09 frozen lipid manifest SHA-256 | `c0ec325de1874d03d17d7e631a7cff38926db937998b75b70ce4335b2782f00f` |
+
+Each A6000 comparison uses CPU affinity `1,3,5,7,9,11` with NUMA node 1 preferred. The initial batch has eight A/A and eight alternating A/B pairs per timing case. Each initially inconclusive case received eight additional pairs per pairing at the fixed ±2% margin. The combined decisions use only fresh measurements of A and the repaired B. I/A uses the frozen 52³ lipid crop, 101 energies and chunk 101 in both arms. The detector scans use the same crop at chunks 1 and 4. [Workloads and timing protocol](FS02-qualification.md)
+
+Raw evidence is retained under `/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB`. The two matrices and each row's worker directories, input identities, timings, observed peaks, and execution signatures are indexed by the qualification file. [Raw evidence directory](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB) · [Machine-readable qualification](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/qualification.json)
+
+### Numerical and regression evidence
+
+All ten A/A and A/B comparisons matched bit for bit, including 586,373,022 values and coordinates checked in A/B. Full execution reports also matched, including path selection, fallbacks, FFT definitions, basis storage, projector tiles and q-window demand. The public Fourier oracle passed 16 captures over four geometries. Nine internal comparisons checked 53,772 complex basis coefficients and their complete public results. Twelve registered panels and both NRSS-native sphere curves matched bit for bit. The installed repaired wheel performed the sample capture with `nrss_sals` absent. [Public Fourier oracle](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/sampler-oracle.log) · [Internal checks](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/legacy/summary.json) · [Registered comparisons](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/registration/summary.json) · [Installed wheel](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/package-gpu.log)
+
+Both revisions passed 154 focused tests. In each maintained lane, all existing outcomes and validation reference hashes matched, including the three inherited PyHyperScattering failures. [Maintained report comparison](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/report-parity.json)
+
+| Lane | Parent | Repaired candidate |
+| --- | --- | --- |
+| CPU smoke (Default compact tensor) | [146 passed, 7 skipped](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/report-parent/20261123T191527Z/summary.md) | [147 passed, 7 skipped](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/report-candidate/20261123T192153Z/summary.md) |
+| GPU smoke (Default compact tensor) | [1 failed, 124 passed, 10 skipped](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/report-parent/20261123T191527Z/summary.md) | [1 failed, 129 passed, 10 skipped](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/report-candidate/20261123T192153Z/summary.md) |
+| physics (Default compact tensor) | [23 passed, 2 failed](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/report-parent/20261123T191527Z/summary.md) | [23 passed, 2 failed](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/report-candidate/20261123T192153Z/summary.md) |
+| GPU smoke (Optional direct polarization) | [1 failed, 31 passed, 103 skipped](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/report-direct-parent/20261123T192717Z/summary.md) | [1 failed, 36 passed, 103 skipped](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/report-direct-candidate/20261123T194833Z/summary.md) |
+| physics (Optional direct polarization) | [19 passed, 2 failed, 4 skipped](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/report-direct-parent/20261123T192717Z/summary.md) | [19 passed, 2 failed, 4 skipped](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/report-direct-candidate/20261123T194833Z/summary.md) |
+
+### First and warm timing decisions
+
+Timing values are medians in milliseconds. Paired changes and intervals use B/A, so positive values indicate slower candidate timings. The first and warm results use separate decisions. Each interval has at least 90% coverage. `Pairs` gives the number of fresh pairs for each of A/A and A/B.
+
+| Case | Pairs | Warm A / B (ms) | Paired change and A/B interval | A/A interval | Decision |
+| --- | ---: | ---: | --- | --- | --- |
+| core-small-one | 8 | 55.55 / 56.07 | +0.69% [-0.20%, +1.51%] | [-0.56%, +0.82%] | neutral |
+| core-medium-one | 16 | 333.44 / 332.81 | -0.17% [-0.42%, +0.48%] | [-0.23%, +0.13%] | neutral |
+| core-large-one | 16 | 1218.17 / 1225.26 | +0.48% [+0.34%, +0.55%] | [-0.10%, +0.25%] | slower |
+| core-small | 16 | 177.50 / 177.25 | -0.15% [-0.37%, +0.21%] | [-0.42%, +0.50%] | neutral |
+| core-medium | 8 | 495.15 / 494.42 | -0.12% [-0.30%, +0.28%] | [-0.29%, +0.04%] | neutral |
+| core-large | 16 | 1462.16 / 1464.85 | +0.08% [-0.23%, +0.69%] | [+0.01%, +0.41%] | A/A inconclusive |
+| detector-1 | 8 | 81.74 / 81.66 | +0.03% [-0.59%, +0.45%] | [-0.27%, +1.34%] | neutral |
+| detector-4 | 8 | 80.32 / 79.91 | -0.73% [-1.15%, +1.18%] | [-0.00%, +0.91%] | neutral |
+| ia-full | 16 | 100.51 / 100.15 | -0.31% [-0.65%, -0.10%] | [-0.21%, +0.42%] | faster |
+| ia-qmax | 16 | 77.67 / 77.73 | -0.28% [-0.45%, +0.01%] | [-0.68%, +0.43%] | neutral |
+
+| Case | Pairs | First A / B (ms) | Paired change and A/B interval | A/A interval | Decision |
+| --- | ---: | ---: | --- | --- | --- |
+| core-small-one | 8 | 198.51 / 201.37 | +1.40% [-1.36%, +1.83%] | [-1.31%, +1.96%] | neutral |
+| core-medium-one | 16 | 478.48 / 482.36 | +0.68% [-0.13%, +1.54%] | [-0.62%, +0.46%] | neutral |
+| core-large-one | 16 | 1302.00 / 1310.73 | +0.45% [-0.28%, +1.15%] | [-0.95%, +0.52%] | neutral |
+| core-small | 16 | 400.66 / 401.52 | +0.47% [-0.86%, +1.09%] | [-0.39%, +0.29%] | neutral |
+| core-medium | 8 | 950.60 / 955.39 | +0.18% [-0.32%, +1.79%] | [-0.22%, +0.60%] | neutral |
+| core-large | 16 | 2150.81 / 2141.18 | +0.03% [-0.61%, +0.47%] | [-0.02%, +0.54%] | neutral |
+| detector-1 | 8 | 593.63 / 593.54 | +0.14% [-0.67%, +1.45%] | [-1.60%, +1.19%] | neutral |
+| detector-4 | 8 | 583.75 / 587.24 | +0.81% [-0.98%, +1.51%] | [-1.98%, +0.95%] | neutral |
+| ia-full | 16 | 443.64 / 443.79 | +0.54% [-0.21%, +0.79%] | [-0.62%, +1.49%] | neutral |
+| ia-qmax | 16 | 437.81 / 437.31 | -0.43% [-1.50%, +0.47%] | [-0.76%, +0.40%] | neutral |
+
+| Inconclusive case | Call | A/A AB-order median per batch | A/A BA-order median per batch | A/A early / late median per batch |
+| --- | --- | --- | --- | --- |
+| core-large | warm | +0.18%, +0.04% | +0.01%, +0.52% | +0.16% / +0.06%, +0.82% / +0.09% |
+
+The order and half-batch medians report observed control variation. The phase-entry GPU snapshots showed an idle A6000. The paired intervals above govern the verdicts.
+
+Full lipid I/A warm timing was -0.34% in the targeted batch with interval [-0.79%, -0.06%]. The final estimate was -0.31% with interval [-0.65%, -0.10%] and decision `faster`. [Targeted full I/A readout](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/ia-full-first-read.json)
+
+Full lipid I/A first-call timing was +0.58% in the targeted batch with interval [-0.28%, +1.33%]. The final estimate was +0.54% with interval [-0.21%, +0.79%] and decision `neutral`. [Targeted full I/A readout](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/ia-full-first-read.json)
+
+### Peak memory, execution counts and per-case verdict
+
+Memory values are absolute per-process peaks in MiB, from fresh workers with 5 ms NVML observation. Each GPU peak is associated with the worker PID. The cases with a peak increase outside their initial A/A spread were measured again. A reproduced increase exceeds the full range of observed A/A peaks in both A/B runs.
+
+| Case | Actual route | Basis / FFTs | Peak VRAM A / B (MiB) | Peak RSS A / B (MiB) | Bit mismatches | Verdict |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| core-small-one | compact_r2c | 1 / 7 | 628.00 / 628.00 | 981.93 / 980.64 | 0 | neutral |
+| core-medium-one | compact_r2c | 1 / 7 | 2,836.00 / 2,836.00 | 4,936.71 / 4,935.17 | 0 | neutral |
+| core-large-one | compact_r2c | 1 / 7 | 9,780.00 / 9,780.00 | 15,713.15 / 15,712.89 | 0 | hold (timing) |
+| core-small | compact_r2c | 1 / 9 | 636.00 / 636.00 | 981.95 / 981.41 | 0 | neutral |
+| core-medium | compact_r2c | 1 / 9 | 2,836.00 / 2,836.00 | 4,936.92 / 4,936.08 | 0 | neutral |
+| core-large | compact_r2c | 1 / 9 | 9,780.00 / 9,780.00 | 15,712.95 / 15,713.09 | 0 | inconclusive |
+| detector-1 | virtual_3d_sum | 1 / 56 | 644.00 / 644.00 | 1,535.90 / 1,536.99 | 0 | neutral |
+| detector-4 | virtual_3d_sum | 1 / 56 | 644.00 / 644.00 | 1,536.97 / 1,535.34 | 0 | neutral |
+| ia-full | virtual_3d_sum | 1 / 56 | 3,370.00 / 3,370.00 | 716.48 / 718.00 | 0 | faster with matching execution |
+| ia-qmax | virtual_3d_sum | 1 / 56 | 1,826.00 / 1,826.00 | 714.55 / 713.90 | 0 | neutral |
+
+| Case | Repeat peak VRAM A / B (MiB) | Repeat peak RSS A / B (MiB) |
+| --- | ---: | ---: |
+| detector-1 | 644.00 / 644.00 | 1,537.58 / 1,536.55 |
+| ia-full | 3,370.00 / 3,370.00 | 717.73 / 718.70 |
+
+All ten A/B VRAM peaks matched the parent exactly. The full lipid I/A peak was 3,370 MiB.
+
+Full lipid I/A host RSS deltas were +1.52 and +0.97 MiB across the two paired runs. The pooled A/A RSS range spanned 1.68 MiB.
+
+### Separate profiles of measured slowdown or VRAM signals
+
+Profiles use three fresh A/A and A/B pairs on the same A6000. Instrumentation records CUDA event elapsed time, host elapsed time and allocator snapshots across address preparation, gather/write, FFT, projection and I/A stages. These samples are kept outside the timing decisions.
+
+#### `core-large-one`
+
+| Call | Stage | GPU A / B (ms) | Host A / B (ms) | Peak live pool A / B (MiB) |
+| --- | --- | ---: | ---: | ---: |
+| first | material_staging | 1011.248 / 1011.475 | 1011.242 / 1011.495 | 6048.000 / 6048.000 |
+| first | address_preparation | 7.818 / 7.219 | 9.908 / 9.314 | 6076.405 / 6076.405 |
+| first | fft_rfftn | 98.232 / 97.198 | 23.390 / 22.198 | 8690.279 / 8690.279 |
+| first | native_gather_write | 2.588 / 2.543 | 2.820 / 2.748 | 8694.429 / 8694.429 |
+| first | projection | 0.682 / 0.683 | 68.340 / 68.425 | 917.485 / 917.485 |
+| warm | material_staging | 1080.083 / 1079.058 | 1080.025 / 1078.999 | 6048.000 / 6048.000 |
+| warm | address_preparation | 0.239 / 0.238 | 0.779 / 0.782 | 6076.405 / 6076.405 |
+| warm | fft_rfftn | 86.631 / 86.671 | 13.234 / 13.194 | 8690.279 / 8690.279 |
+| warm | native_gather_write | 0.459 / 0.458 | 0.751 / 0.724 | 8694.429 / 8694.429 |
+| warm | projection | 0.627 / 0.627 | 0.535 / 0.516 | 917.485 / 917.485 |
+
+Stage deltas varied in sign or fell within A/A variation across the profile pairs.
+
+[Profile samples and allocation snapshots](/homes/deand/dev/NRSS_speed/.worktrees/NRSS-sampler-candidate/test-reports/prepared-sampler-repair.PZnpyB/profiles/core-large-one/summary.json)
